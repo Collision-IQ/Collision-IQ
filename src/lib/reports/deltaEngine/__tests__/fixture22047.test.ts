@@ -136,8 +136,49 @@ describe("MUST be MISSED on competing", () => {
 });
 
 describe("reverse pass", () => {
-  it("competing-only lines reported, incl. HV deactivate 2.8M and $100 alignment sublet", () => {
-    expect(competingOnly.length).toBeGreaterThanOrEqual(10);
+  /**
+   * RE-ADJUDICATED: this guard used to assert `length >= 10`, and it passed on
+   * the strength of rows that were never scope. Seven of the fourteen it
+   * counted were CCC's numbered header block — "ForSupplementsUseCCC",
+   * "CallCCC800.637.8511", "AppraiserViaEmailorPhone", a usaa.com payment-status
+   * URL — all parsed as line items because CCC numbers them like line items.
+   * Dropping the preamble leaves 7, so the threshold went red while the finding
+   * quality went up. A count calibrated against boilerplate is not a guard, so
+   * it is replaced by the identities the reverse pass actually has to report.
+   *
+   * The old title also claimed a "$100 alignment sublet" among these. It never
+   * was: USAA's "Subl 4WheelAlignment" pairs with the shop's "Rpr Perform
+   * vehicle alignment", which is the correct outcome, and the length assertion
+   * never checked for it.
+   */
+  const rawOf = (line: number) =>
+    String(competingOnly.find((row) => row.line === line)?.rawDesc ?? "");
+
+  it("reports the high-voltage deactivate/activate the shop never wrote (2.8 hr)", () => {
+    expect(rawOf(11)).toMatch(/[Hh]igh\s*voltage\s*system/);
+    expect(competingOnly.find((row) => row.line === 11)?.labor).toBeCloseTo(2.8, 2);
+  });
+
+  it("reports the carrier-only miscellaneous operations", () => {
+    for (const [line, pattern] of [
+      [79, /Add\s*for\s*Clear\s*Coat/i],
+      [82, /Corrosion\s*Protection/i],
+      [83, /Cover\s*Car/i],
+      [88, /Flex\s*Additive/i],
+      [101, /Denib\s*and\s*Polish/i],
+    ] as const) {
+      expect(rawOf(line as number)).toMatch(pattern as RegExp);
+    }
+  });
+
+  it("reports no header-block boilerplate as competing-only", () => {
+    for (const row of competingOnly) {
+      expect(String(row.rawDesc)).not.toMatch(
+        /SupplementsUseCCC|EstimateShare|CallCCC|NonCCCUsers|AppraiserVia|usaa\.com|https?:/i
+      );
+      // Every genuine line sits under a section header; boilerplate does not.
+      expect(row.sectionLabel ?? "").not.toBe("");
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import DELTA_RULES from "./data/deltaRules.json";
 import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
+import { redactAndRasterizePdf } from "@/lib/privacy/rasterRedactPdf";
 import { canonicalOperationKey } from "./operationAliases";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
@@ -15,7 +16,7 @@ import {
   PDFName,
   type PDFRef,
 } from "pdf-lib/cjs/core";
-import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import { redactDownloadContent, redactInsurersForExport } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationDensityAuthority, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
 import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
@@ -83,6 +84,7 @@ import {
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
   assessComparisonExtraction,
+  assessHoursCoverage,
   type EstimateDeltaKind,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
@@ -112,7 +114,11 @@ function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): strin
   }
   return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
-import { pairAndCompare } from "./deltaEngine/deltaPair";
+import { pairAndCompare, isDeduction } from "./deltaEngine/deltaPair";
+import {
+  deriveExtractionConfidence,
+  sectionSupportsAbsenceClaims,
+} from "./extractionConfidence";
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
@@ -443,7 +449,16 @@ function engineResultToLineItemDeltas(params: {
   const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
   for (const row of engine.competingOnly) {
     if (subjectKeys.has(row.key)) potentialDuplicateLowerRows.push(row);
-    else lowerOnlyRows.push(row);
+    // P0-3 SYMMETRY. pairAndCompare already refuses to call a negative subject
+    // row "missing on the competing estimate" (deltaPair isDeduction), but
+    // nothing applied the mirror rule to the competing side, so the typed lane
+    // listed the carrier's own credits as scope this estimate lacked: RO
+    // 22059's "Overlap Major Adj. Panel" at -0.4 refinish hours read as a line
+    // the shop should add, when adding it SUBTRACTS from the shop's total.
+    // The text lane has always dropped these; this is the engine lane catching
+    // up, not a new policy. Duplicates are still collected above — a credit
+    // billed twice is as real a signal as an operation billed twice.
+    else if (!isDeduction(row)) lowerOnlyRows.push(row);
   }
 
   return {
@@ -1216,6 +1231,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   uploadedFileNames?: string[];
   sourceText?: string | null;
   comparisonEstimateTexts?: ComparisonEstimateText[];
+  /** Export boundary: render the source pages to images with identifiers
+   *  painted out. Defaults to ON — pass false only for in-system diagnostics
+   *  where the full record is wanted and nothing leaves. */
+  redactSourcePages?: boolean;
   /**
    * Original PDF bytes of comparison estimates. When present, the delta value
    * layer parses the competing document from its measured word layer (same
@@ -1263,7 +1282,35 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
   const warnings: string[] = [];
   const sourcePdfBytes = params.sourcePdfBytes.slice();
-  const pdfDoc = await PDFDocument.load(sourcePdfBytes);
+  // EXPORT BOUNDARY — the annotated estimate reproduces the customer's own
+  // estimate pages, so the identifiers live in the page content and no text
+  // rule reaches them. Each page is rendered to pixels with the identifiers
+  // painted out, and the image replaces the page: the text layer is destroyed
+  // by construction, so there is nothing left to extract. A drawn rectangle
+  // would leave the glyphs selectable underneath — a document that looks
+  // protected and is not is worse than one that is visibly unprotected.
+  //
+  // Anchors are extracted from the ORIGINAL bytes below, because placement
+  // depends on the text layer this step removes. Page dimensions are
+  // preserved, so every annotation coordinate still lands.
+  let annotationBaseBytes: Uint8Array = sourcePdfBytes;
+  let sourcePagesRedacted = false;
+  let redactedRegionCount = 0;
+  if (params.redactSourcePages !== false) {
+    try {
+      const redacted = await redactAndRasterizePdf(sourcePdfBytes);
+      annotationBaseBytes = new Uint8Array(redacted.bytes);
+      sourcePagesRedacted = true;
+      redactedRegionCount = redacted.redactedRegionCount;
+    } catch (error) {
+      // Never ship an un-redacted export silently. If redaction cannot run the
+      // report still builds, but it says so in the reader's own warnings.
+      warnings.push(
+        `Source-page redaction did not run (${error instanceof Error ? error.message : "unknown error"}). This annotated estimate reproduces the original estimate pages and still carries the identifiers printed on them; do not share it outside the system.`
+      );
+    }
+  }
+  const pdfDoc = await PDFDocument.load(annotationBaseBytes);
   const originalPageCount = pdfDoc.getPageCount();
   if (originalPageCount === 0) {
     throw new Error(`Annotated ${reportIdentity.reportShortTitle} export requires an original estimate PDF with source pages.`);
@@ -2110,11 +2157,27 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           competingRows.map((row) => ({ lineNumber: row.line })),
           { subjectRowCount: anchors.filter((anchor) => anchor.anchorType === "estimate_line").length }
         );
+        // A SECOND, independent coverage signal. The line-span test above asks
+        // whether the numbering was read; it counts a row as covered even when
+        // that row's hours were lost, so partial extraction — 22 of 64 priced
+        // lines off a scanned estimate — can clear it while the rest of the
+        // carrier's work silently becomes absence claims. Comparing parsed
+        // hours to the document's own printed labor categories catches that.
+        // Correctly-read documents in this corpus measure 84-95%.
+        const hoursCoverage = assessHoursCoverage(
+          competingRows.map((row) => ({ labor: row.labor, paint: row.paint })),
+          comparisonText?.text ?? ""
+        );
         if (valueLayerExtraction.gate) {
           warnings.push(
             valueLayerExtraction.gateReason === "source_not_read"
               ? `The comparison estimate yielded ${valueLayerExtraction.parsedRows} readable line item(s) — it was not read. Delta value marks suppressed; no line is described as absent from a document that could not be parsed.`
               : `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
+          );
+        }
+        if (hoursCoverage.gate) {
+          warnings.push(
+            `Comparison estimate labor coverage is ${Math.round(hoursCoverage.coverage * 100)}% — ${hoursCoverage.parsedHours} of the ${hoursCoverage.printedHours} hours its own totals block prints were parsed. Absence findings are suppressed: a line this pass could not read is not a line the carrier omitted.`
           );
         }
         if (competingLabel === null) {
@@ -2132,7 +2195,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             pages: [...pageGeometries.values()],
             competingRows,
             competingTotals,
-            competingLabel,
+            // EXPORT BOUNDARY — the annotation text is drawn ON the exported
+            // page, so naming the carrier there puts insurance information
+            // straight back into a redacted document. The role is what the
+            // reader needs ("the comparison estimate"); the identity is not.
+            competingLabel: sourcePagesRedacted ? "the comparison estimate" : competingLabel,
             measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
           });
           const costInk = rgb(0.72, 0.12, 0.1);
@@ -2364,10 +2431,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // carries a VIN, a claim number or a carrier name must not look protected
   // just because the generated reports around it are.
   try {
-    const exposure = scanExportForPii(params.sourceText ?? "");
+    appendToolUsageTrace(trace, {
+      tool: "source_page_redaction",
+      ran: sourcePagesRedacted,
+      candidatesFound: originalPageCount,
+      candidatesAccepted: sourcePagesRedacted ? originalPageCount : 0,
+      candidatesRejected: sourcePagesRedacted ? 0 : originalPageCount,
+      droppedReasons: sourcePagesRedacted ? [] : ["source pages were not rasterized"],
+    });
+    // Only meaningful when redaction did NOT run — when it did, the text layer
+    // no longer exists, so there is nothing for a text scan to find.
+    const exposure = sourcePagesRedacted ? [] : scanExportForPii(params.sourceText ?? "");
     if (exposure.length > 0) {
       warnings.push(
-        `${describePiiExposure("The annotated estimate", exposure)}. It reproduces the original estimate pages, which cannot be redacted by text rules — the page content itself must be redacted before this file is shared outside the system.`
+        `${describePiiExposure("The annotated estimate", exposure)}. It reproduces the original estimate pages; do not share it outside the system.`
       );
     }
   } catch {
@@ -3846,9 +3923,65 @@ function matchStructuredLineItemDeltas(
     higherRowCount: dedupedHigherRows.length,
     lowerRowCount: lowerRows.length,
   });
+  /**
+   * DOCUMENT CONFIDENCE ON THE FINDINGS LANE.
+   *
+   * The hours-coverage gate above guards the VALUE-MARK layer, and that layer
+   * only runs when the comparison document supplied a word layer. A scanned
+   * estimate supplies OCR text and no word layer, so it skipped the gate
+   * entirely and the findings lane ran unguarded — exactly the document class
+   * the gate was built for.
+   *
+   * Measured on RO 22059 with the counterpart truncated to 34% of its rows:
+   * 216 absence phrases in the artifact against 98 for the fully-read control.
+   * The 66% of carrier lines this pass could not read had each become "the
+   * carrier did not write this."
+   *
+   * So confidence is derived here too, from the same observables, and the
+   * per-section gate is handed to the matcher.
+   */
+  const lowerSpanCoverage = assessComparisonExtraction(
+    lowerRows.map((row) => ({ lineNumber: row.lineNumber }))
+  );
+  const lowerHoursCoverage = assessHoursCoverage(
+    lowerRows.map((row) => ({ labor: row.labor, paint: row.paint })),
+    comparison.map((item) => item.text).join("\n")
+  );
+  const lowerSectionRowCounts = new Map<string, number>();
+  for (const row of lowerRows) {
+    const key = (row.section ?? "").trim().toUpperCase();
+    lowerSectionRowCounts.set(key, (lowerSectionRowCounts.get(key) ?? 0) + 1);
+  }
+  const higherSections = new Set(
+    dedupedHigherRows.map((row) => (row.section ?? "").trim().toUpperCase())
+  );
+  const lowerConfidence = deriveExtractionConfidence({
+    lineSpanCoverage: lowerSpanCoverage.coverage,
+    hoursCoverage: lowerHoursCoverage.coverage,
+    textLayerReliable: !(context.comparisonEstimateWords ?? []).some(
+      (entry) => entry.textLayerReliable === false
+    ),
+    ocrDerived: lowerIsOcr,
+    totalsBlockFound: lowerHoursCoverage.totalsBlockFound,
+    sectionsWithZeroCounterpartRows: [...higherSections].filter(
+      (section) => (lowerSectionRowCounts.get(section) ?? 0) === 0
+    ).length,
+    totalSections: higherSections.size,
+  });
+  const absenceAllowedForSection = (section: string | null): boolean =>
+    sectionSupportsAbsenceClaims({
+      counterpartRowsInSection:
+        lowerSectionRowCounts.get((section ?? "").trim().toUpperCase()) ?? 0,
+      documentConfidence: lowerConfidence,
+    });
   /** P0-1 contradiction notices, surfaced on the pack so a withdrawn claim is
    * visible rather than silently absent. */
   const contradictionNotes: string[] = [];
+  if (lowerConfidence.band !== "high") {
+    contradictionNotes.push(
+      `Comparison estimate ${lowerConfidence.explanation}. Absence findings for sections the counterpart produced no rows for are marked unverified: a line this pass could not read is not a line the carrier omitted.`
+    );
+  }
   const match: {
     deltas: EstimateLineItemDelta[];
     matchedPairCount: number;
@@ -3864,6 +3997,7 @@ function matchStructuredLineItemDeltas(
         potentialDuplicateLowerRows: engineRowsToDeltaRows(engineMatch.potentialDuplicateLowerRows, null),
       }
     : matchEstimateLineItems({
+        absenceAllowedForSection,
         lowerRows,
         higherRows: dedupedHigherRows,
         lowerIsOcr: lowerIsOcr || lowerParseSuspect,
@@ -4292,7 +4426,13 @@ function emitStructuredLineItemDeltaFindings(
   // halves would hide a real price difference behind a matching failure.
   if (deltaMatch.contradictionNotes.length > 0 && findings.length > 0) {
     const last = findings[findings.length - 1];
-    last.limitations = [...(last.limitations ?? []), ...deltaMatch.contradictionNotes].slice(0, 12);
+    // These notes lead, and the finding's own limitations are what the cap
+    // trims. Appending put them last, where a finding that already carried 12
+    // limitations dropped every one of them — which is how the extraction
+    // confidence note went missing from a truncated-counterpart run whose
+    // findings were correctly marked unverified. A withdrawn contradiction and
+    // a low-confidence read are the two notices that must never be the ones cut.
+    last.limitations = [...deltaMatch.contradictionNotes, ...(last.limitations ?? [])].slice(0, 12);
   }
 
   return findings;
@@ -4549,7 +4689,12 @@ function emitTotalsDeltaFindings(
         context,
         anchor,
         findingType: "carrier-note-mismatch",
-        title: `Carrier-attribution defect: line note names ${mismatch.carrier} on a ${mismatch.dominantCarrier} file`,
+        // EXPORT BOUNDARY — this finding is ABOUT two carrier names, so
+        // redacting both would leave "[REDACTED_INSURER] on a
+        // [REDACTED_INSURER] file" and destroy the intelligence. State the
+        // defect instead: the reader has the line in front of them, and the
+        // fact that the note belongs to a different insurer is the finding.
+        title: "Carrier-attribution defect: this line's note names a different insurer than the file's",
         category: "other",
         label: "CARRIER MISMATCH",
         estimateGapType: "needs_proof",
@@ -9249,6 +9394,14 @@ function buildCalloutLines(
       .filter((line) => /are the same operation written differently|closely resembles/i.test(line))
       .slice(0, 3)
       .map((line) => `Reconcile directly: ${sanitize(line)}`),
+    // How well the comparison document was READ. This card renders only the
+    // limitations it recognises, so a note with no branch here is dropped
+    // silently — which is how a truncated-counterpart run shipped findings
+    // correctly marked unverified while the page never said why.
+    ...finding.limitations
+      .filter((line) => /extraction confidence/i.test(line))
+      .slice(0, 1)
+      .map((line) => `Read quality: ${sanitize(line)}`),
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
   ];
 }
@@ -9446,9 +9599,17 @@ function normalizeSourceBoundaryText(value: string) {
     .replace(/\b(OEM|P-page|DEG|legal)documentation\b/gi, "$1 support");
 }
 
+/**
+ * EXPORT BOUNDARY for drawn prose.
+ *
+ * Insurance information reaches an exported page through more routes than a
+ * finding's text: a FILENAME carries it ("USAA EOR 22047.pdf" in a diagnostic
+ * line), and so does any support ref or warning built from one. Sweeping here,
+ * where every wrapped line is drawn, closes the class rather than the instance.
+ */
 function drawWrappedLines(
   page: PDFPage,
-  lines: string[],
+  rawLines: string[],
   options: {
     x: number;
     y: number;
@@ -9460,6 +9621,7 @@ function drawWrappedLines(
     maxLines: number;
   }
 ) {
+  const lines = rawLines.map((line) => redactInsurersForExport(line));
   let y = options.y;
   let drawn = 0;
   for (const line of lines) {

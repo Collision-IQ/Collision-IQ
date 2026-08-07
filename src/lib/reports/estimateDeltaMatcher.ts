@@ -18,6 +18,7 @@ import { canonicalOperationKey } from "./operationAliases";
 import {
   canonTotalsCategory,
   continuesIdentifier,
+  isContactInformationRow,
   isManufacturerPrefixedIdentifier,
   looksLikePartNumber,
   totalsCategoriesFuzzyMatch,
@@ -172,6 +173,20 @@ export function extractPartSource(rowText: string): string[] {
  * is machine-read from an image-only PDF, an unmatched line cannot be a
  * *confirmed* omission — OCR may have dropped or garbled it.
  */
+/**
+ * A section of the counterpart that produced NO parsed rows cannot support the
+ * claim that the counterpart omitted the work — but only when the document as
+ * a whole read poorly. RO 22182's carrier EOR has 11 of 17 sections with zero
+ * counterpart rows at 93% hours coverage: it is simply a smaller document, and
+ * quarantining on emptiness alone would delete 65 legitimate findings. The
+ * caller decides, via absenceAllowedForSection, using derived confidence.
+ */
+export const SECTION_UNREAD_STATUS_LABELS = [
+  "COUNTERPART_SECTION_UNREAD",
+  "ABSENCE_NOT_ESTABLISHED",
+  "VERIFY_AGAINST_SOURCE",
+] as const;
+
 export const OCR_UNCERTAIN_STATUS_LABELS = [
   "OCR_UNCERTAIN",
   "LOWER_ESTIMATE_OCR_LIMITATION",
@@ -393,11 +408,12 @@ const DESCRIPTION_STOPWORDS = new Set([
 /**
  * True for non-estimate content that must never become a row OR an annotation
  * anchor: rate/totals table lines, page footers with timestamps, carwise/legal
- * boilerplate, and column-header lines.
+ * boilerplate, contact blocks, and column-header lines.
  */
 export function isNonEstimateContentRow(rawText: string): boolean {
   const text = (rawText ?? "").replace(/\s+/g, " ").trim();
   if (!text) return true;
+  if (isContactInformationRow(text)) return true;
   return (
     // Single abbreviation-legend fragments ("RPR=REPAIR", "Blnd=Blend.",
     // "R&I=Remove"): fragmented extractions split the legend footer into
@@ -1556,7 +1572,41 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
     seenLineNumbers.add(row.lineNumber);
     return true;
   });
-  return boundRowsByPrintedSubtotals(deduped, parseCccSubtotalsRule(text));
+  return boundRowsByPrintedSubtotals(dropPreambleRows(deduped), parseCccSubtotalsRule(text));
+}
+
+/**
+ * The CCC preamble block is numbered like line items, and it is not scope.
+ *
+ * "For Supplements Use CCC", "Estimate Share - Questions", "Non CCC Users
+ * Contact" open a carrier estimate above the first operation, numbered in the
+ * same sequence as real work, and the column parser prices them ($10 each) —
+ * so they were reported as lines this estimate omitted.
+ *
+ * TWO MEASUREMENTS SHAPED THIS RULE, and both rejected a broader one:
+ *
+ *   "Priced, no operation, no time" matches 73 rows across the corpus and MOST
+ *   ARE REAL — "BetaSeal Express Urethane" $37, "Hazardous Waste" $5,
+ *   "Additional paint and material" $928.30. Those are precisely the materials
+ *   omissions this report exists to find. Applied globally it would delete
+ *   them, so it is confined to the preamble, where the corpus has no real row
+ *   of that shape.
+ *
+ *   "Everything above the first operation-coded row" would take RO 22059's
+ *   L9 "Rpl information labels" — a genuine replace whose op code the
+ *   vocabulary spells "Repl". Requiring the absence of labor AND paint time
+ *   keeps it: boilerplate bills no hours.
+ *
+ * Six of the eight corpus documents have no preamble rows at all; this removes
+ * 8 rows across the two that do, all of them boilerplate.
+ */
+function dropPreambleRows(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
+  const firstOperation = rows.findIndex((row) => row.opCode !== null);
+  if (firstOperation <= 0) return rows;
+  return rows.filter(
+    (row, index) =>
+      index >= firstOperation || (row.labor ?? 0) !== 0 || (row.paint ?? 0) !== 0
+  );
 }
 
 /** Build a delta row from already-extracted source PDF row text + metadata. */
@@ -1900,6 +1950,14 @@ export function matchEstimateLineItems(params: {
    * Softens "absent" language because OCR may have dropped or garbled lines.
    */
   lowerIsOcr?: boolean;
+  /**
+   * Section-level gate (point 2). Return false when the counterpart's matching
+   * section produced no rows AND the document did not read well enough for that
+   * emptiness to be informative — the absence claim is then downgraded to a
+   * verify item instead of blocking the whole comparison. Absent, every section
+   * is permitted, which is the pre-existing behaviour.
+   */
+  absenceAllowedForSection?: (section: string | null) => boolean;
   /**
    * Raw lower-estimate text (e.g. the full OCR dump). Used to seed category
    * presence when OCR flattens the table so row parsing yields few rows — the
@@ -2248,6 +2306,12 @@ export function matchEstimateLineItems(params: {
         ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
       });
     } else {
+      // SECTION-LEVEL GATE. An absence claim about a section the counterpart
+      // never yielded is not evidence of omission; it is evidence of a
+      // section this pass could not read.
+      const sectionReadable = params.absenceAllowedForSection
+        ? params.absenceAllowedForSection(higherRow.section ?? null)
+        : true;
       missingOperationCount += 1;
       deltas.push({
         kind: "missing_operation",
@@ -2259,6 +2323,9 @@ export function matchEstimateLineItems(params: {
         priceDelta: higherRow.price,
         summary: buildMissingSummary(higherRow, lowerIsOcr),
         annotate: true,
+        ...(sectionReadable
+          ? {}
+          : { ocrUncertain: true, statusLabels: [...SECTION_UNREAD_STATUS_LABELS] }),
         // OCR confidence: even a genuinely-added line (part# absent) stays a
         // verify item against an OCR-derived lower estimate.
         ...(lowerIsOcr
@@ -3040,6 +3107,91 @@ export type ComparisonExtractionAssessment = {
  * operations on the subject have no counterpart, so the question is whether the
  * subject has many operations while the comparison yielded almost none.
  */
+/**
+ * Extraction coverage measured in HOURS against the document's own printed
+ * labor categories — the signal line-count coverage cannot see.
+ *
+ * assessComparisonExtraction below asks whether the line-number SPAN was read.
+ * A row that parsed with its hours lost still counts as covered there, and OCR
+ * that recovers 22 of 64 priced lines on a scanned estimate can clear it while
+ * 42 real carrier lines become confident absence claims. Comparing the sum of
+ * parsed hours to the printed totals block catches that, and every estimate
+ * family prints the totals needed.
+ *
+ * IMPORTANT — this works at the TOTAL level, not per category. A CCC row's
+ * labor column is hours regardless of labor TYPE (the type is a letter suffix
+ * on the row), so parsed rows cannot be split into Body / Paint / Mechanical to
+ * match the printed categories. Measured on the corpus, parsed labor + parsed
+ * paint against the printed sum of all labor categories lands at 91%, 98% and
+ * 111% on documents that are correctly read — coherent enough to gate a gross
+ * shortfall, not precise enough to police a single category.
+ */
+export function assessHoursCoverage(
+  rows: Array<{ labor: number | null; paint: number | null }>,
+  documentText: string
+): {
+  parsedHours: number;
+  printedHours: number;
+  coverage: number;
+  gate: boolean;
+  /**
+   * Did the document print a totals block at all?
+   *
+   * A BLIND SPOT BOTH COVERAGE MEASURES SHARE. Truncate an estimate at the
+   * tail — the shape a partial OCR pass produces — and neither test can see
+   * it: the surviving rows are a contiguous 1..49 run, so the line-span test
+   * reads 94%, and the totals block went missing with the tail, so this
+   * function has no denominator and returns 1.0. RO 22059 truncated to 34% of
+   * its rows measured 94% and 100% covered while producing 216 absence
+   * phrases against the full document's 98.
+   *
+   * Absence of the block is therefore reported separately rather than folded
+   * into `coverage`. It must NOT raise `gate`: an estimate whose totals print
+   * no labor at all is a legitimate parts-only document, and every one of the
+   * eight corpus estimates prints the block, so its absence means the read is
+   * incomplete — a different claim from "coverage is low".
+   */
+  totalsBlockFound: boolean;
+} {
+  const parsedHours = rows.reduce((total, row) => total + (row.labor ?? 0) + (row.paint ?? 0), 0);
+  // Every "<Category> Labor N hrs" line in the totals block, whatever the
+  // category is called — no per-provider list.
+  const totalsIndex = documentText.lastIndexOf("ESTIMATE TOTALS");
+  const block = totalsIndex >= 0 ? documentText.slice(totalsIndex) : documentText;
+  // Materials billed at an hourly rate are NOT labor performed. "Paint
+  // Supplies 29.7 hrs @ $60.00/hr" is a consumables charge computed from the
+  // paint hours, and counting it inflates the denominator: RO 22059's 96.2
+  // real labor hours read as 125.9, dropping a correctly-parsed document to
+  // 73% coverage and putting it within a few points of the gate.
+  const printedHours = block
+    .split(/\r?\n/)
+    .filter((line) => !/supplies|materials/i.test(line))
+    .flatMap((line) => [...line.matchAll(/([\d.]+)\s*hrs/g)])
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value))
+    .reduce((total, value) => total + value, 0);
+  const coverage = printedHours > 0 ? parsedHours / printedHours : 1;
+  // A gross shortfall only. Correctly-read documents measure 0.9-1.1, so 0.5
+  // leaves wide margin; the floor keeps short or unpriced estimates out.
+  const gate = printedHours >= 10 && coverage < 0.5;
+  return {
+    parsedHours: Math.round(parsedHours * 10) / 10,
+    printedHours: Math.round(printedHours * 10) / 10,
+    coverage: Math.round(coverage * 100) / 100,
+    gate,
+    // ANY totals evidence, not just the CCC header. A document can close with
+    // "Net Cost of Repairs", "Grand Total", or a totals summary instead of an
+    // "ESTIMATE TOTALS" table, and testing only for the header called a
+    // complete 3-row comparison truncated. The question this answers is "did
+    // the read reach the document's end", not "which producer wrote it".
+    totalsBlockFound:
+      totalsIndex >= 0 ||
+      /(net cost of repair|grand total|total cost of repair|totals summary|workfile total)/i.test(
+        documentText
+      ),
+  };
+}
+
 export function assessComparisonExtraction(
   rows: Array<{ lineNumber: number | null }>,
   context?: {
@@ -3051,9 +3203,17 @@ export function assessComparisonExtraction(
     .map((row) => row.lineNumber)
     .filter((line): line is number => line !== null && Number.isFinite(line));
   const parsedRows = lineNumbers.length;
-  const impliedRows = parsedRows
-    ? Math.max(...lineNumbers) - Math.min(...lineNumbers) + 1
-    : 0;
+  // ROBUST SPAN. A single outlier destroys a min/max span, and estimates supply
+  // one: the vehicle's model year. RO 22059's SOR parses 116 rows across lines
+  // 3-141, but "2022" from "2022 TESL Model S Plaid" is read as a line number,
+  // making the implied span 2020 and the coverage 6% instead of 83% — low
+  // enough to trip the gate on a well-parsed document. Percentile bounds ignore
+  // the tails; min/max is kept for the short documents where they are the same.
+  const sorted = [...lineNumbers].sort((a, b) => a - b);
+  const at = (ratio: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(ratio * (sorted.length - 1))))];
+  const low = sorted.length >= 20 ? at(0.02) : sorted[0];
+  const high = sorted.length >= 20 ? at(0.98) : sorted[sorted.length - 1];
+  const impliedRows = parsedRows ? Math.max(1, high - low + 1) : 0;
   const coverage = impliedRows > 0 ? parsedRows / impliedRows : 1;
 
   // Limb 1 — partial read: enough rows to measure a span, and the span is full

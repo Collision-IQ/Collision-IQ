@@ -642,6 +642,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createWorkAuthorizationPdf();
     await assert.rejects(
       () => buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         sourcePdfName: "Work Auth 21638.pdf",
         sourceText: [
@@ -732,6 +735,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       assert.ok(anchor, `expected fixture anchor for ${testCase.name}`);
       try {
         const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
           sourcePdfBytes,
           sourcePdfName: "SOR2.pdf",
           sourceText: "",
@@ -779,6 +785,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const anchor = anchors.find((item) => item.pageNumber === 4 && String(item.lineNumber) === "55" && /A\/M molding/i.test(item.rowText));
     assert.ok(anchor, "expected page 4 line 55 A/M molding anchor");
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "SOR2.pdf",
       sourceText: "",
@@ -911,6 +920,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("annotated estimate matches anchors, adds only legend pages, and labels proof buckets", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [baseFinding()],
       request: { includeLegend: true, includeSummaryPage: false, annotationMode: "both" },
@@ -951,6 +963,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("carrier annotated export keeps original estimate page and places visible callout on that page", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [baseFinding()],
       request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
@@ -1026,6 +1041,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     }));
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings,
       request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
@@ -1125,6 +1143,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.ok(model.citationDensityDiagnostics.acceptedDeltaFindings > 4);
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-multi-delta",
       sourcePdfName: "Carrier Multi Delta Estimate.pdf",
@@ -1164,6 +1185,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createSourcePdf();
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1183,6 +1207,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
 
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1206,6 +1233,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createSourcePdf();
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1228,6 +1258,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createSourcePdf();
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1252,6 +1285,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createTwoPageSourcePdf();
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1276,6 +1312,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createTwoPageSourcePdf();
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         findings: [
           baseFinding({
@@ -1300,6 +1339,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await createBlankSourcePdf(1);
     await assert.rejects(
       buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
         sourcePdfBytes,
         sourceText: "Line 12 ADAS calibration 1.5 hrs $250.00",
         findings: [baseFinding()],
@@ -1312,6 +1354,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("generic and corrupted finding labels are suppressed before visible annotation metadata", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({ id: "generic-repair", operationLabel: "Repair Operation" }),
@@ -1347,6 +1392,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("visual page behavior uses original PDF as base with optional legend only", async () => {
     const sourcePdfBytes = await createTwoPageSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [baseFinding()],
       request: { includeLegend: true, includeSummaryPage: false, annotationMode: "both" },
@@ -1366,6 +1414,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("fragmented estimate rows produce on-page annotations", async () => {
     const sourcePdfBytes = await createKiaLikeEstimatePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -1410,6 +1461,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("note text produces an on-page referenced-not-produced annotation", async () => {
     const sourcePdfBytes = await createKiaLikeEstimatePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -1449,6 +1503,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("section heading fallback places missing lower-estimate item on original page", async () => {
     const sourcePdfBytes = await createKiaLikeEstimatePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -1488,6 +1545,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("mutated finding text maps back to original estimate text", async () => {
     const sourcePdfBytes = await createKiaLikeEstimatePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -1583,6 +1643,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(anchors.some((anchor) => /Repair Operation|Proc Report/i.test(anchor.rowText)), false);
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -1656,6 +1719,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("SOR-1 selected estimate generates row-backed AM/LKQ vs OEM part-source findings", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "sor-1-21975",
       sourcePdfName: "SOR-1 21975.pdf",
@@ -1729,6 +1795,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     page.drawText("2018 Quality replacement parts may include AM LKQ CAPA parts subject to insurer policy disclaimer", { x: 48, y: 676, size: 8, font });
     const sourcePdfBytes = await doc.save();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "relevance-source",
       sourcePdfName: "SOR relevance.pdf",
@@ -1761,6 +1830,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "defect-b-21896",
       sourcePdfName: "Shop 21896.pdf",
@@ -1796,6 +1868,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "shop-only-1",
       sourcePdfName: "Shop 21896.pdf",
@@ -1815,6 +1890,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("OEM Citation Density generator creates source-page repair-standard findings without verified OEM overclaim", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "oem-carrier-21975",
       sourcePdfName: "SOR-1 21975.pdf",
@@ -1851,6 +1929,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("OEM Citation Density marks findings authority-trace incomplete when retrieval is unavailable", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "oem-carrier-no-authority",
       sourcePdfName: "SOR-1 21975.pdf",
@@ -1877,6 +1958,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-position-only",
       sourcePdfName: "Carrier position-only estimate.pdf",
@@ -1931,6 +2015,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-online-fallback",
       sourcePdfName: "Carrier online-fallback estimate.pdf",
@@ -1989,6 +2076,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-adas-authority",
       sourcePdfName: "Carrier ADAS estimate.pdf",
@@ -2042,6 +2132,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-glass-no-tint",
       sourcePdfName: "Carrier glass estimate.pdf",
@@ -2070,6 +2163,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "oem-carrier-21548",
       sourcePdfName: "SOR3 carrier estimate.pdf",
@@ -2090,6 +2186,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "sor-1-21975",
       sourcePdfName: "SOR-1 21975.pdf",
@@ -3033,6 +3132,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("extracted PDF rows anchor Ram diagnostic lines only on their source pages", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-21975",
       findings: [
@@ -3267,6 +3369,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("shop 21975 scan sublets and finish sand anchor to concrete rows", async () => {
     const sourcePdfBytes = await createShop21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3378,6 +3483,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("weak findings use the required label text", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3403,6 +3511,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("verified and ADAS labels come from authority status, not estimate gaps", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3444,6 +3555,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("uploaded documentation support uses VERIFIED DOCUMENTATION label", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3474,6 +3588,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("online fallback support is labeled ONLINE FALLBACK", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3499,6 +3616,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("non-ADAS operations are not labeled NEEDS ADAS by default", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3540,6 +3660,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   await run("annotation metadata exposes stable PDF coordinate context", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourceDocumentId: "carrier-source-pdf",
       findings: [baseFinding()],
@@ -3571,6 +3694,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     page.drawText("Line 119 finish sand and polish 0.8 hrs $80.00", { x: 50, y: 690, size: 11, font });
     const sourcePdfBytes = await doc.save();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       findings: [
         baseFinding({
@@ -3628,6 +3754,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Tesla carrier estimate.pdf",
       sourceText: "2023 Tesla Model Y",
@@ -3680,7 +3809,27 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
   });
 
-  await run("identity gate blocks a comparison from another claim and emits no artifacts", async () => {
+  await run("export redaction is ON by default and destroys the source text layer", async () => {
+  // The annotated estimate reproduces the customer's own pages, so the
+  // identifiers live in the page content. Rasterizing removes the text layer
+  // by construction — a drawn box would leave the glyphs selectable beneath it.
+  const sourcePdfBytes = await createSourcePdf();
+  const result = await buildAnnotatedCitationDensityEstimatePdf({
+    sourcePdfBytes,
+    sourcePdfName: "Shop.pdf",
+    sourceText: "VIN: 5YJSA1E65NF488007 Claim #: 012283486000000800001",
+    findings: [],
+    request: { estimateRole: "shop" },
+  });
+  const extracted = await require("pdf-parse")(Buffer.from(result.bytes));
+  // "Estimate 123" and the line rows are drawn on the source page; after
+  // rasterization none of that source text can be extracted.
+  assert.doesNotMatch(extracted.text, /Estimate 123/, "source page text survived rasterization");
+  assert.doesNotMatch(extracted.text, /ADAS calibration 1\.5 hrs/, "source row text survived rasterization");
+  assert.equal(result.finalPageCount >= 1, true, "pages are preserved, only their text layer is not");
+});
+
+await run("identity gate blocks a comparison from another claim and emits no artifacts", async () => {
   // A delta report comparing two different vehicles is not a degraded report,
   // it is a fabricated one. The gate is a precondition, not a warning.
   const sourcePdfBytes = await createSourcePdf();
@@ -3696,6 +3845,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   let blocked = null;
   try {
     await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop 22059.pdf",
       sourceText: SHOP_TEXT,
@@ -3727,10 +3879,20 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       "60 Repl LT Hub assy $250.00 1.0",
       "61 R&I Rear suspension access $85.00 0.5",
       "REFINISH",
-      "150 Rpr Finish sand and polish $80.00 0.8",
+      // Numbered 62, not 150. Three rows spanning lines 60-150 imply a 91-row
+      // document of which 3 were read — a 3% extraction by the line-span
+      // measure — and the confidence gate correctly refuses to let a read that
+      // poor support "the comparison omitted this". Nothing asserts on the
+      // number, and this fixture is meant to be a small COMPLETE estimate
+      // rather than a badly-read large one, so it is numbered like one. The
+      // gate is not relaxed to accommodate a synthetic input.
+      "62 Rpr Finish sand and polish $80.00 0.8",
     ].join("\n");
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop Final 21896.pdf",
       sourceDocumentId: "shop-final-21896",
@@ -3794,10 +3956,20 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       "60 Repl LT Hub assy $250.00 1.0",
       "61 R&I Rear suspension access $85.00 0.5",
       "REFINISH",
-      "150 Rpr Finish sand and polish $80.00 0.8",
+      // Numbered 62, not 150. Three rows spanning lines 60-150 imply a 91-row
+      // document of which 3 were read — a 3% extraction by the line-span
+      // measure — and the confidence gate correctly refuses to let a read that
+      // poor support "the comparison omitted this". Nothing asserts on the
+      // number, and this fixture is meant to be a small COMPLETE estimate
+      // rather than a badly-read large one, so it is numbered like one. The
+      // gate is not relaxed to accommodate a synthetic input.
+      "62 Rpr Finish sand and polish $80.00 0.8",
     ].join("\n");
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop Final 21896.pdf",
       sourceDocumentId: "shop-final-21896",
@@ -3852,6 +4024,9 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       "63 Rpr RT Rear mud flap 0.2",
     ].join("\n");
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop four-way.pdf",
       sourceText: "Shop estimate\nNet Cost of Repairs $2,000.00",
@@ -3893,6 +4068,9 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       ...sparseLines.map((line) => `${line} Rpr Panel operation ${line} 0.5`),
     ].join("\n");
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop intake.pdf",
       sourceText: "Shop estimate\nNet Cost of Repairs $5,000.00",
@@ -3921,6 +4099,9 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     drawCccEstimateRow(page, font, 10, "", "Rpr", "Front bumper cover", "1.0", "$100.00", 712);
     const sourcePdfBytes = await doc.save();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop lower.pdf",
       sourceText: "Shop estimate\nNet Cost of Repairs $5,000.00",
@@ -4035,6 +4216,9 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     totals.forEach((t, i) => page2.drawText(t, { x: 42, y: 716 - i * 16, size: 8, font }));
     const sourcePdfBytes = await doc.save();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop Final 21888.pdf",
       sourceDocumentId: "shop-final-21888",
@@ -4079,6 +4263,9 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     page2.drawText("75ReplCooper 255/50R19 tire1425.001.0", { x: 42, y: 726, size: 8, font });
     const sourcePdfBytes = await doc.save();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
+      // In-system mode: these assert annotation placement against the source
+      // text layer, which export redaction rasterizes away by design.
+      redactSourcePages: false,
       sourcePdfBytes,
       sourcePdfName: "Shop.pdf",
       sourceDocumentId: "shop-dup",
