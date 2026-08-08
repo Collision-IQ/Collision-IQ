@@ -145,3 +145,8 @@ android/app/client_secret_*.json
 # Sandbox PDF exports
 *MOTOR*Sandbox*.pdf
 *DaaS*Sandbox*.pdf
+
+# Vision regression artifacts, rewritten on every test run (damageLocalization,
+# damageSegmentation, leftFrontRegression). Sibling .tmp/vehicle-identity-tests
+# IS tracked, so ignore this directory specifically rather than all of .tmp.
+.tmp/damage-regression/

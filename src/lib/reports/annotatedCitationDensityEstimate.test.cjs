@@ -536,11 +536,31 @@ async function run(name, test) {
   }
 }
 
-function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) {
+// Both routes now share the authority retrieval engine. A harness that busts
+// only its own route's cache entry leaves the SHARED module frozen with
+// whatever mocks (or real modules) the first-loaded route bound, so the second
+// harness silently gets the first one's Drive wiring. Bust it in both.
+const AUTHORITY_RETRIEVAL_PATH = path.join(process.cwd(), "src", "lib", "reports", "oemAuthorityRetrieval.ts");
+function evictSharedRetrievalModule() {
+  try {
+    delete require.cache[require.resolve(AUTHORITY_RETRIEVAL_PATH)];
+  } catch {
+    // Not yet loaded — nothing to evict.
+  }
+}
+
+function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings, driveEnabled = false, driveRetrievalResponse = null }) {
   const originalLoad = Module._load;
   const routePath = path.join(process.cwd(), "src", "app", "api", "reports", "citation-density", "annotated-estimate", "route.ts");
   delete require.cache[require.resolve(routePath)];
+  evictSharedRetrievalModule();
   Module._load = function loadWithRouteMocks(request, parent, isMain) {
+    if (request === "@/lib/drive/download") {
+      return { isDriveEnabled: () => driveEnabled };
+    }
+    if (request === "@/lib/ai/driveRetrievalService") {
+      return { retrieveDriveSupport: async () => driveRetrievalResponse };
+    }
     if (request === "@/lib/auth/require-current-user") {
       class UnauthorizedError extends Error {
         constructor(message, status = 401) {
@@ -583,6 +603,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
   const originalLoad = Module._load;
   const routePath = path.join(process.cwd(), "src", "app", "api", "reports", "oem-citation-density", "annotated-estimate", "route.ts");
   delete require.cache[require.resolve(routePath)];
+  evictSharedRetrievalModule();
   Module._load = function loadWithRouteMocks(request, parent, isMain) {
     if (request === "@/lib/auth/require-current-user") {
       class UnauthorizedError extends Error {

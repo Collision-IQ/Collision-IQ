@@ -36,6 +36,13 @@ import {
   buildFileReviewLedger,
   resolveEvidenceCompletenessFromLedger,
 } from "@/lib/fileReviewLedger";
+// The delta report owns the findings, so it is the report that needs the
+// authority. Retrieval used to be reachable only from the OEM route, which
+// meant every source it found was traced and then orphaned.
+import {
+  buildOemAuthorityTrace,
+  mapAuthorityTraceToResolvedAuthorities,
+} from "@/lib/reports/oemAuthorityRetrieval";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -286,7 +293,7 @@ export async function POST(request: Request) {
     // titled, scored sources into the delta finding builder so scan/calibration
     // findings carry the retrieved position statement instead of "verify".
     const researchSnapshot = activeReport.report.exportResearchSnapshot;
-    const resolvedAuthorities = (researchSnapshot?.sourcesReviewed ?? [])
+    const snapshotAuthorities = (researchSnapshot?.sourcesReviewed ?? [])
       .filter(
         (source) =>
           source.accepted &&
@@ -300,6 +307,13 @@ export async function POST(request: Request) {
         locator: source.locator,
         confidenceScore: source.confidenceScore,
       }));
+    // The RIR snapshot is whatever the earlier analysis pass happened to leave
+    // behind; it is not a retrieval for THESE deltas. Run the OEM/jurisdictional
+    // retrieval engine against the estimate pair as well, and merge. Dedupe on
+    // title so a source present in both lanes is offered once.
+    const seenAuthorityTitles = new Set(
+      snapshotAuthorities.map((source) => source.sourceTitle.trim().toLowerCase())
+    );
     // D-4 gates: authorities attach by finding type × decoded make ×
     // jurisdiction — never by document name.
     const vehicleMake = activeReport.report.vehicle?.make ?? null;
@@ -383,6 +397,30 @@ export async function POST(request: Request) {
             return [];
           }
         });
+      // Retrieval is a network lane and must never be able to fail the report:
+      // an unavailable Drive/Serper lane degrades to the RIR snapshot alone,
+      // exactly as before this wiring existed.
+      let authorityTrace = null;
+      try {
+        authorityTrace = await buildOemAuthorityTrace({
+          selection,
+          sourceDocument,
+          sourceDocuments,
+          comparisonEstimateTexts,
+        });
+      } catch (error) {
+        console.warn("[citation-density] authority retrieval failed; continuing with snapshot authorities only", {
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+      }
+      const retrievedAuthorities = mapAuthorityTraceToResolvedAuthorities(authorityTrace).filter((source) => {
+        const key = source.sourceTitle.toLowerCase();
+        if (seenAuthorityTitles.has(key)) return false;
+        seenAuthorityTitles.add(key);
+        return true;
+      });
+      const resolvedAuthorities = [...snapshotAuthorities, ...retrievedAuthorities];
+
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -396,6 +434,7 @@ export async function POST(request: Request) {
         deltaDiagnostics: model.citationDensityDiagnostics,
         canonicalDeltaSet: canonicalDeltaSet ?? undefined,
         resolvedAuthorities,
+        authorityTrace: authorityTrace ?? undefined,
         vehicleMake,
         jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
