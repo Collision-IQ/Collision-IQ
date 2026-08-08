@@ -122,6 +122,15 @@ Do not redesign unrelated systems. Only modify files required to complete the re
 
 Preserve: authentication, entitlements, existing APIs, existing report behavior, existing provider architecture, existing routing, existing tests unless intentionally updated.
 
+## Deployment Destination (standing instruction)
+
+Work is not delivered until it is on `main` and in production. Always merge the
+feature branch to `main` — a green feature branch is an intermediate state, not
+a finished one. Production is the `collision-iq-origin-main-test` Vercel project
+serving `https://www.collision-iq.ai`, and it deploys on push to `main`; see
+`DEPLOYMENT_CHECKLIST.md` §0 before reporting any deployment status, and never
+infer "production" from a `target: production` field on some other project.
+
 ## Testing Requirements
 
 Every implementation should include unit tests, integration tests when appropriate, regression protection, type safety, and production build verification.
