@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server"
 
+import { getEgnyteRedirectUri } from "@/lib/integrations/egnyteRedirect"
+
 export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url)
   const code = searchParams.get("code")
 
-  const redirectUri =
-    "https://collision-academy-new-git-cha-bfa414-collision-academy-82dbb1d7.vercel.app/oauth/egnyte/callback"
+  const redirectUri = getEgnyteRedirectUri()
 
   if (!code) {
     return NextResponse.json({ error: "Missing authorization code" })

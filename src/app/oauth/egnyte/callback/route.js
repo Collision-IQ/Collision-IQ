@@ -1,3 +1,5 @@
+import { getEgnyteRedirectUri } from "@/lib/integrations/egnyteRedirect";
+
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get("code");
@@ -23,8 +25,7 @@ export async function GET(req) {
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        redirect_uri:
-          "https://collision-academy-new-git-cha-bfa414-collision-academy-82dbb1d7.vercel.app/oauth/egnyte/callback",
+        redirect_uri: getEgnyteRedirectUri(),
       }),
     }
   );
