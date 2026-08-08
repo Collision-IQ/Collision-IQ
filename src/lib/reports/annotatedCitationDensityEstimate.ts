@@ -204,8 +204,15 @@ export function attachResolvedAuthoritiesToFindings(
   const jurisdiction = attachContext?.jurisdiction?.trim() || null;
   const authorityText = (authority: (typeof authorities)[number]) =>
     `${authority.sourceTitle} ${authority.url ?? ""} ${authority.locator ?? ""}`;
-  const matchesMake = (authority: (typeof authorities)[number]) =>
-    !vehicleMake || new RegExp(`\\b${vehicleMake.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(authorityText(authority));
+  const matchesMake = (authority: (typeof authorities)[number]) => {
+    if (!vehicleMake) return true;
+    // A declared applicability is stronger evidence than the make happening to
+    // appear in the title, and it is also DISQUALIFYING when it names a
+    // different make — a Rivian file must never carry a GM statement.
+    const declared = authority.appliesToMake?.trim();
+    if (declared) return declared.toLowerCase() === vehicleMake.toLowerCase();
+    return new RegExp(`\\b${vehicleMake.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(authorityText(authority));
+  };
   const matchesJurisdiction = (authority: (typeof authorities)[number]) =>
     !jurisdiction || new RegExp(jurisdiction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(authorityText(authority));
   const restoreIdentifier = (authority: (typeof authorities)[number]): string => {
@@ -612,6 +619,10 @@ export type AnnotatedEstimateFindingGeneratorContext = {
     url?: string;
     locator?: string;
     confidenceScore?: number | null;
+    /** Declared make applicability (Drive/OEM retrieval metadata). Satisfies the
+     *  D-4 make gate on its own; without it the gate falls back to testing
+     *  whether the make appears in the title/url/locator text. */
+    appliesToMake?: string;
   }>;
   /** Decoded vehicle make (D-4): OEM/ADAS authority classes attach only when
    * the authority names this make — never a wrong-make document. */
@@ -2499,6 +2510,20 @@ export type OemCitationDensityAuthoritySource = {
   evidenceTier: number;
   verified: boolean;
   note?: string;
+  /** Citable reference, kept as a field rather than buried in `note` prose so a
+   *  consumer can gate/attach on it without scraping a sentence. */
+  url?: string;
+  /** Page/section within the cited document. */
+  locator?: string;
+  /** Make this authority is filed against (Drive folder metadata). An authority
+   *  that DECLARES its applicability satisfies the D-4 make gate directly,
+   *  instead of the gate hoping the make appears in the title prose. */
+  appliesToMake?: string;
+  /** Same source expressed in the RIR research vocabulary. Retained separately
+   *  because `sourceType` above collapses every web hit to `internet_fallback`
+   *  for the debug counters; the law/oem/industry distinction is still needed
+   *  when these sources are attached to findings. */
+  researchSourceType?: "drive" | "web" | "oem" | "policy" | "law" | "industry";
 };
 
 export type OemCitationDensityAuthorityTrace = {
