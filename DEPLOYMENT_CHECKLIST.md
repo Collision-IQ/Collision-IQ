@@ -2,6 +2,39 @@
 
 Use this before a production release.
 
+## 0. Where This Deploys
+
+Recorded here because the repository previously stated it nowhere, and a
+reader — human or agent — had no way to tell which Vercel project serves real
+traffic. That gap produced a full day of deployment status reported against
+the wrong project. `.vercel/project.json` is intentionally NOT committed
+(`.gitignore` line 105, standard Vercel CLI convention: it is a local link
+artifact), so this section is the authoritative record.
+
+| | |
+| --- | --- |
+| Vercel team | Collision Academy (`team_5XjHltnVsDuAVNds0chKVvkT`) |
+| Production project | `collision-iq-origin-main-test` |
+| Production domain | `https://www.collision-iq.ai` |
+| Deploys on | push to `main` |
+| Mobile (Capacitor) | loads the SAME origin — see `capacitor.config.ts`, `PRODUCTION_SERVER_URL` |
+
+There is one production surface. Web and mobile share it; the Capacitor shell
+is a native wrapper around `www.collision-iq.ai`, not a separate build target.
+
+**Verifying a release.** Confirm the deployment for the pushed commit SHA
+reaches **Ready** on `collision-iq-origin-main-test`. A `target: production`
+field on some other project is NOT evidence — more than one project can be
+connected to this repository at a time, and a project can report
+`target: production` while serving no real domain.
+
+**Retired:** `collision-academy-new` also built this repository until it was
+disconnected on 2026-08-08. It had no custom domain and `live: false`. Its
+only remaining entanglement was a hardcoded Egnyte OAuth `redirect_uri`
+pointing at one of its branch-preview URLs; that now resolves from the
+production origin (`src/lib/integrations/egnyteRedirect.ts`). If any other
+reference to that host appears, it is stale.
+
 ## 1. Environment Variables
 
 - Confirm required app secrets are present in the target environment.
