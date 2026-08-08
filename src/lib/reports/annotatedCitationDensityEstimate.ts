@@ -798,6 +798,12 @@ export type CitationDensityDebugTrace = {
   lineItemDeltaMissingCount?: number;
   /** Findings that received an RIR-resolved authority (O-5 attach pass). */
   resolvedAuthorityAttachedCount?: number;
+  /** How many authorities were OFFERED to the attach pass. Attached=0 with
+   *  candidates=0 is a retrieval (supply) problem; attached=0 with candidates>0
+   *  is a matcher (demand) problem. Without both numbers the two are
+   *  indistinguishable from the report, which is how the orphaned-retrieval
+   *  defect stayed invisible for so long. */
+  resolvedAuthorityCandidateCount?: number;
   /** C-10: comparison-document extraction coverage (0..1) and intake gate. */
   comparisonExtractionCoverage?: number;
   intakeModeActive?: boolean;
@@ -3181,12 +3187,19 @@ export function buildRequiredEstimatorDeltaFindings(
       intakeModeActive,
       rejectedAnchors: rejectedAnchors.slice(0, 40),
       rejectedBoilerplateCount: rejectedAnchors.length,
-      authoritySearchTrace: {
+      // This used to hardcode "No Google Drive/internal repair-procedure
+      // connector is available to this server-side PDF export path." That was
+      // true only while the retrieval engine was trapped in the OEM route. The
+      // delta route now runs retrieval and passes the real trace, so reporting
+      // the old sentence would state something false about our own evidence.
+      // When no trace is supplied the default still says retrieval did not run.
+      authoritySearchTrace: context.authorityTrace ?? {
         ...buildDefaultOemAuthorityTrace(),
-        authorityTraceBlockedReason: "No Google Drive/internal repair-procedure connector is available to this server-side PDF export path.",
-        skippedReason: "No Google Drive/internal repair-procedure connector is available to this server-side PDF export path.",
+        authorityTraceBlockedReason: "Authority retrieval was not run for this export.",
+        skippedReason: "Authority retrieval was not run for this export.",
         sandPolishSupportFound: false,
       },
+      resolvedAuthorityCandidateCount: (context.resolvedAuthorities ?? []).length,
     },
   };
 }
