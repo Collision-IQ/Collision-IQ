@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_ATTACHMENT_IDS_PER_MESSAGE,
+  MAX_THREADS_PER_USER,
   MAX_MESSAGE_CHARS,
   MAX_THREAD_MESSAGES,
   MAX_THREAD_TITLE_CHARS,
@@ -73,17 +74,28 @@ describe("deriveChatThreadTitle", () => {
 });
 
 describe("chatHistoryReopenLimit", () => {
-  it("maps plans to reopen limits: free 0, starter 5, pro 10, team/admin unlimited", () => {
+  it("maps plans to reopen limits: free 0, starter 3, pro 10, team/admin 20", () => {
     expect(chatHistoryReopenLimit("free")).toBe(0);
     expect(chatHistoryReopenLimit("none")).toBe(0);
     expect(chatHistoryReopenLimit(null)).toBe(0);
-    expect(chatHistoryReopenLimit("starter")).toBe(5);
+    expect(chatHistoryReopenLimit("starter")).toBe(3);
     expect(chatHistoryReopenLimit("pro")).toBe(10);
     expect(chatHistoryReopenLimit("trial")).toBe(10);
-    expect(chatHistoryReopenLimit("team")).toBe(Number.POSITIVE_INFINITY);
-    expect(chatHistoryReopenLimit("admin")).toBe(Number.POSITIVE_INFINITY);
-    expect(chatHistoryReopenLimit("free", true)).toBe(Number.POSITIVE_INFINITY);
-    expect(chatHistoryReopenLimit("STARTER")).toBe(5);
+    expect(chatHistoryReopenLimit("team")).toBe(20);
+    expect(chatHistoryReopenLimit("admin")).toBe(20);
+    expect(chatHistoryReopenLimit("free", true)).toBe(20);
+    expect(chatHistoryReopenLimit("STARTER")).toBe(3);
+  });
+
+  it("never promises a window wider than storage can hold", () => {
+    // listChatThreads takes Math.min(limit, MAX_THREADS_PER_USER), so any plan
+    // above the prune ceiling states a number it can never deliver. The old
+    // POSITIVE_INFINITY tiers silently behaved as 30, and a proposed 40 would
+    // have done the same.
+    for (const plan of ["free", "starter", "pro", "team", "admin"]) {
+      expect(chatHistoryReopenLimit(plan)).toBeLessThanOrEqual(MAX_THREADS_PER_USER);
+    }
+    expect(chatHistoryReopenLimit("free", true)).toBeLessThanOrEqual(MAX_THREADS_PER_USER);
   });
 });
 

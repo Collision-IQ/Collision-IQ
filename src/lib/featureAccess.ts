@@ -69,11 +69,16 @@ export function chatHistoryReopenLimit(
   plan: ProductPlan | string | null | undefined,
   isPlatformAdmin = false
 ): number {
-  if (isPlatformAdmin) return Number.POSITIVE_INFINITY;
+  // Every value here MUST stay at or below MAX_THREADS_PER_USER (30), the
+  // storage prune. A window wider than storage is a number that can never be
+  // reached: listChatThreads takes Math.min(limit, MAX_THREADS_PER_USER), so
+  // an "unlimited" or 40-thread plan silently behaved as 30. Case-linked
+  // threads are exempt from this window entirely -- see getChatThreadForReopen.
+  if (isPlatformAdmin) return 20;
   const normalized = normalizeProductPlan(plan);
-  if (normalized === "admin" || normalized === "team") return Number.POSITIVE_INFINITY;
+  if (normalized === "admin" || normalized === "team") return 20;
   if (normalized === "pro") return 10;
-  if (normalized === "starter") return 5;
+  if (normalized === "starter") return 3;
   return 0;
 }
 

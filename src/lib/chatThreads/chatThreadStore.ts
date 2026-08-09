@@ -125,12 +125,19 @@ export async function getChatThreadForReopen(
   threadId: string,
   limit: number
 ): Promise<ChatThreadDetail | null> {
-  const visible = await listChatThreads(ownerUserId, limit);
-  if (!visible.some((thread) => thread.id === threadId)) return null;
   const thread = await prisma.chatThread.findFirst({
     where: { id: threadId, ownerUserId },
   });
   if (!thread) return null;
+
+  // A case-linked thread is claim work product. It is exempt from the storage
+  // prune AND from the plan's recency window; exempting it from only the prune
+  // produced threads that could neither be deleted nor be seen, which is worse
+  // than deleting them. Ad-hoc chats still obey the plan window.
+  if (!thread.caseId) {
+    const visible = await listChatThreads(ownerUserId, limit);
+    if (!visible.some((candidate) => candidate.id === threadId)) return null;
+  }
 
   const messages = sanitizeChatThreadMessages(thread.messages);
   const attachmentIds = Array.from(
