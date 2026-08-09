@@ -29,6 +29,7 @@ import {
 import {
   planVerifiedKeyedNotes,
   type KeyedNoteRequest,
+  type PlacementRect,
   type PlacementWord,
 } from "./annotationPlacementEngine";
 import {
@@ -95,6 +96,37 @@ import {
 /** Strip side vocabulary (and optionally position vocabulary) from a display
  * description via the SAME synonym sets the engine keys on — presentation must
  * never re-implement side detection as an LT/RT string test (U-1). */
+/**
+ * Image/QR/logo footprints on the source PDF, in the same top-left coordinate
+ * space as the extracted words. Loaded through pdf.js separately from the text
+ * pass because the text pass discards the document handle. Any failure returns
+ * an empty list: placement then falls back to text-only whitespace, which is
+ * the behaviour that shipped before this check existed.
+ */
+async function loadSourceImageRegions(bytes: Uint8Array): Promise<PlacementRect[]> {
+  try {
+    const [{ extractPdfImageRegions }, pdfjs] = await Promise.all([
+      import("./pdfImageRegions"),
+      import("pdfjs-dist/legacy/build/pdf.mjs"),
+    ]);
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(bytes),
+      disableWorker: true,
+    } as unknown as Parameters<typeof pdfjs.getDocument>[0]);
+    const pdf = await loadingTask.promise;
+    const regions = await extractPdfImageRegions(pdf);
+    return regions.map((region) => ({
+      pageNumber: region.pageNumber,
+      x: region.x,
+      y: region.y,
+      width: region.width,
+      height: region.height,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): string {
   let out = desc
     .replace(/\((?:L|R)\)/gi, " ")
@@ -1957,6 +1989,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     if (!cachedWordExtraction) cachedWordExtraction = await extractPdfWordsWithDiagnostics(sourcePdfBytes);
     return cachedWordExtraction;
   };
+  // Image/QR/logo footprints, so "verified empty whitespace" means empty of
+  // marks as well as of glyphs. Computed once and shared by both note planners.
+  // A failure here yields no regions, which is the previous behaviour.
+  let cachedImageRegions: PlacementRect[] | null = null;
+  const getImageRegions = async (): Promise<PlacementRect[]> => {
+    if (cachedImageRegions) return cachedImageRegions;
+    cachedImageRegions = await loadSourceImageRegions(sourcePdfBytes);
+    return cachedImageRegions;
+  };
 
   // Default ON for the OEM report (its unanchored findings become blue keyed
   // notes on the page they cite); opt-in elsewhere. Explicit false wins.
@@ -2015,6 +2056,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           words: placementWords,
           pages: [...pageGeometries.values()],
           measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
+          occupiedRegions: await getImageRegions(),
         });
         const isOemReport = reportIdentity.reportType === "oem-citation-density";
         const noteFill = isOemReport ? rgb(0.3, 0.85, 1) : rgb(1, 0.95, 0);
@@ -2197,6 +2239,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             // page, so naming the carrier there puts insurance information
             // straight back into a redacted document. The role is what the
             // reader needs ("the comparison estimate"); the identity is not.
+            occupiedRegions: await getImageRegions(),
             competingLabel: sourcePagesRedacted ? "the comparison estimate" : competingLabel,
             measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
           });

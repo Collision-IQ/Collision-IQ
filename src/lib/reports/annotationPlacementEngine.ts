@@ -139,20 +139,35 @@ export function findCollidingWords(
 export function measureWhitespaceBands(
   words: PlacementWord[],
   page: PlacementPageGeometry,
-  options?: { minBandHeight?: number; horizontalInset?: number }
+  options?: {
+    minBandHeight?: number;
+    horizontalInset?: number;
+    /**
+     * Non-text marks — images, QR codes, logos, signature blocks — that occupy
+     * the page but carry no extractable glyphs. Without these a band measured
+     * "empty" from the text layer alone can be squarely on top of a picture,
+     * which is how RO 22194's note band landed on the payment QR code. A page
+     * is empty where it carries neither glyphs nor marks.
+     */
+    occupiedRegions?: PlacementRect[];
+  }
 ): WhitespaceBand[] {
   const minBandHeight = options?.minBandHeight ?? DEFAULT_MIN_BAND_HEIGHT;
   const inset = options?.horizontalInset ?? DEFAULT_HORIZONTAL_INSET;
   const scanX0 = inset;
   const scanX1 = page.pageWidth - inset;
-  const intervals = words
+  const occupied: Array<{ pageNumber: number; x: number; y: number; width: number; height: number }> = [
+    ...words,
+    ...(options?.occupiedRegions ?? []),
+  ];
+  const intervals = occupied
     .filter(
-      (word) =>
-        word.pageNumber === page.pageNumber &&
-        word.x < scanX1 &&
-        word.x + word.width > scanX0
+      (item) =>
+        item.pageNumber === page.pageNumber &&
+        item.x < scanX1 &&
+        item.x + item.width > scanX0
     )
-    .map((word) => [word.y, word.y + word.height] as const)
+    .map((item) => [item.y, item.y + item.height] as const)
     .sort((a, b) => a[0] - b[0]);
 
   const merged: Array<[number, number]> = [];
@@ -290,7 +305,9 @@ export function planKeyedNotes(
 export function auditPlacements(
   planned: Array<{ id: string; rect: PlacementRect }>,
   words: PlacementWord[],
-  pages: PlacementPageGeometry[]
+  pages: PlacementPageGeometry[],
+  /** Image/graphic footprints; covering one is a failure exactly as covering text is. */
+  occupiedRegions: PlacementRect[] = []
 ): PlacementFailure[] {
   const failures: PlacementFailure[] = [];
   const pageByNumber = new Map(pages.map((page) => [page.pageNumber, page]));
@@ -318,6 +335,17 @@ export function auditPlacements(
         id: item.id,
         pageNumber: item.rect.pageNumber,
         detail: `would cover: ${colliding.map((word) => word.text ?? "?").slice(0, 4).join(" ")}`,
+      });
+    }
+    const coveredGraphics = occupiedRegions.filter(
+      (region) => region.pageNumber === item.rect.pageNumber && rectsIntersect(item.rect, region)
+    );
+    if (coveredGraphics.length > 0) {
+      failures.push({
+        kind: "covers_document_text",
+        id: item.id,
+        pageNumber: item.rect.pageNumber,
+        detail: `would cover a non-text mark (image/QR/logo) at ${Math.round(coveredGraphics[0].x)},${Math.round(coveredGraphics[0].y)}`,
       });
     }
     for (let other = index + 1; other < planned.length; other += 1) {
@@ -348,11 +376,14 @@ export function planVerifiedKeyedNotes(params: {
   measureText: MeasureText;
   fontSize?: number;
   allowPageFallback?: boolean;
+  /** Non-text marks the text layer cannot see. See measureWhitespaceBands. */
+  occupiedRegions?: PlacementRect[];
 }): { placed: PlannedKeyedNote[]; unplaced: KeyedNoteRequest[]; audits: PlacementFailure[][] } {
+  const occupiedRegions = params.occupiedRegions ?? [];
   const bandsByPage = new Map<number, WhitespaceBand[]>(
     params.pages.map((page) => [
       page.pageNumber,
-      measureWhitespaceBands(params.words, page),
+      measureWhitespaceBands(params.words, page, { occupiedRegions }),
     ])
   );
   let { placed, unplaced } = planKeyedNotes(params.requests, bandsByPage, params.measureText, {
@@ -364,7 +395,8 @@ export function planVerifiedKeyedNotes(params: {
     const failures = auditPlacements(
       placed.map((note) => ({ id: note.request.id, rect: note.rect })),
       params.words,
-      params.pages
+      params.pages,
+      occupiedRegions
     );
     audits.push(failures);
     if (failures.length === 0) break;

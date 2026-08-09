@@ -53,6 +53,12 @@ export interface DeltaValueLayerParams {
   /** Short label for the competing document, derived from document data (never hardcoded). */
   competingLabel: string;
   measureText: MeasureText;
+  /**
+   * Footprints of images and other non-text marks on the subject PDF. The note
+   * band is placed in whitespace, and whitespace measured from the text layer
+   * alone does not know a payment QR code or a logo is sitting there.
+   */
+  occupiedRegions?: PlacementRect[];
 }
 
 export interface PlannedStamp {
@@ -425,6 +431,7 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     measureText: params.measureText,
     fontSize: NOTE_FONT_SIZE,
     allowPageFallback: true,
+    occupiedRegions: params.occupiedRegions,
   });
 
   return {
