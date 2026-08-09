@@ -9,6 +9,12 @@ export type ChatThreadMessage = {
   role: "user" | "assistant";
   content: string;
   kind?: "analysis" | "system_status";
+  /** Ids of previously-uploaded attachments (UploadedAttachment.id) this
+   *  message referenced or sent, if any. The files themselves already live
+   *  durably server-side; without this reference the reopened thread has the
+   *  conversation but not the estimates it was about, and the user has to
+   *  re-upload to keep working. */
+  attachmentIds?: string[];
 };
 
 /** Hard caps so a runaway session can never store unbounded JSON. */
@@ -17,6 +23,9 @@ export const MAX_MESSAGE_CHARS = 24_000;
 /** Oldest threads beyond this per-user count are pruned on save. */
 export const MAX_THREADS_PER_USER = 30;
 export const MAX_THREAD_TITLE_CHARS = 80;
+/** Hard cap on attachment refs carried per message; prevents a pathological
+ *  client payload from ballooning the stored thread JSON. */
+export const MAX_ATTACHMENT_IDS_PER_MESSAGE = 25;
 
 /**
  * Validate and bound an untrusted message payload. Transient system-status
@@ -32,11 +41,19 @@ export function sanitizeChatThreadMessages(input: unknown): ChatThreadMessage[] 
     if (typeof candidate.id !== "string" || typeof candidate.content !== "string") continue;
     if (candidate.role !== "user" && candidate.role !== "assistant") continue;
     if (candidate.kind === "system_status") continue;
+
+    const attachmentIds = Array.isArray(candidate.attachmentIds)
+      ? candidate.attachmentIds
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .slice(0, MAX_ATTACHMENT_IDS_PER_MESSAGE)
+      : undefined;
+
     messages.push({
       id: candidate.id.slice(0, 120),
       role: candidate.role,
       content: candidate.content.slice(0, MAX_MESSAGE_CHARS),
       ...(candidate.kind === "analysis" ? { kind: "analysis" as const } : {}),
+      ...(attachmentIds && attachmentIds.length ? { attachmentIds } : {}),
     });
   }
   return messages.slice(-MAX_THREAD_MESSAGES);

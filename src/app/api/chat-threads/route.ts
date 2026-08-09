@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  * is bounded by plan: free none, Starter 5, Pro 10, Team/Admin unlimited —
  * enforced here, never client-side.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { user, isPlatformAdmin } = await requireCurrentUser();
     const entitlements = await getCurrentEntitlements({ isPlatformAdmin });
@@ -25,7 +25,10 @@ export async function GET() {
         { status: 200 }
       );
     }
-    const threads = await listChatThreads(user.id, limit);
+    // Optional claim scoping: "every chat for this case", rather than general
+    // recency browsing.
+    const caseId = new URL(request.url).searchParams.get("caseId");
+    const threads = await listChatThreads(user.id, limit, caseId || undefined);
     return NextResponse.json(
       {
         ok: true,

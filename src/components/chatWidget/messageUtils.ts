@@ -6,19 +6,24 @@ export type ChatMessage = {
   role: Role;
   content: string;
   kind?: AssistantMessageKind;
+  /** Ids of uploaded attachments this message sent, so a reopened thread can
+   *  restore the attachment tray rather than losing the files behind it. */
+  attachmentIds?: string[];
 };
 
 export function createMessage(
   counter: number,
   role: Role,
   content: string,
-  kind?: AssistantMessageKind
+  kind?: AssistantMessageKind,
+  attachmentIds?: string[]
 ): ChatMessage {
   return {
     id: `${role}-${counter}`,
     role,
     content,
     kind,
+    ...(attachmentIds && attachmentIds.length ? { attachmentIds } : {}),
   };
 }
 

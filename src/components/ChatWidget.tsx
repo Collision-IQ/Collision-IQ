@@ -1585,11 +1585,51 @@ export default function ChatWidget({
             { cache: "no-store", credentials: "same-origin" }
           );
           const data = (await response.json().catch(() => null)) as {
-            thread?: { id: string; messages: Message[] };
+            thread?: {
+              id: string;
+              messages: Message[];
+              attachments?: Array<{
+                id: string;
+                filename: string;
+                type: string;
+                text: string;
+                imageDataUrl?: string;
+                pageCount?: number;
+                classification?: string;
+                sizeBytes?: number;
+              }>;
+            };
           } | null;
           if (!response.ok || !data?.thread?.messages?.length) return;
           chatThreadIdRef.current = data.thread.id;
           setMessages(data.thread.messages);
+          if (data.thread.attachments?.length) {
+            setAttachments(
+              data.thread.attachments.map((stored) => ({
+                attachmentId: stored.id,
+                filename: stored.filename,
+                mime: stored.type,
+                text: stored.text,
+                sizeBytes: stored.sizeBytes ?? 0,
+                imageDataUrl: stored.imageDataUrl,
+                pageCount: stored.pageCount,
+                source: "file" as const,
+                classification:
+                  stored.classification === "image" ||
+                  stored.classification === "video" ||
+                  stored.classification === "pdf" ||
+                  stored.classification === "text" ||
+                  stored.classification === "docx"
+                    ? stored.classification
+                    : undefined,
+                // Re-derived rather than trusted from storage: vision state is
+                // not a persisted column. Image classification plus present
+                // image data is the closest honest approximation.
+                hasVision: stored.classification === "image" && Boolean(stored.imageDataUrl),
+                usedInAnalysis: false,
+              }))
+            );
+          }
           shouldAutoScrollRef.current = true;
           window.setTimeout(() => {
             bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -2848,7 +2888,16 @@ export default function ChatWidget({
     };
     const analysisStartMs = Date.now();
     messageCounterRef.current += 1;
-    const userMessage: Message = createMessage(messageCounterRef.current, "user", messageToSend);
+    // Record which uploads this turn carried. The files already persist
+    // server-side; without this reference the saved thread keeps the
+    // conversation and loses the estimates it was about.
+    const userMessage: Message = createMessage(
+      messageCounterRef.current,
+      "user",
+      messageToSend,
+      undefined,
+      attachmentsForTurn.map((attachment) => attachment.attachmentId)
+    );
 
     const updatedMessages: Message[] = [...messages, userMessage];
     setMessages(updatedMessages);

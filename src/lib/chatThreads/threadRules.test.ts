@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_ATTACHMENT_IDS_PER_MESSAGE,
   MAX_MESSAGE_CHARS,
   MAX_THREAD_MESSAGES,
   MAX_THREAD_TITLE_CHARS,
@@ -83,5 +84,49 @@ describe("chatHistoryReopenLimit", () => {
     expect(chatHistoryReopenLimit("admin")).toBe(Number.POSITIVE_INFINITY);
     expect(chatHistoryReopenLimit("free", true)).toBe(Number.POSITIVE_INFINITY);
     expect(chatHistoryReopenLimit("STARTER")).toBe(5);
+  });
+});
+
+describe("attachmentIds survive the round trip to storage", () => {
+  it("carries the ids that let a reopened thread restore its files", () => {
+    const [message] = sanitizeChatThreadMessages([
+      { ...user("user-1", "compare these"), attachmentIds: ["att-1", "att-2"] },
+    ]);
+    expect(message.attachmentIds).toEqual(["att-1", "att-2"]);
+  });
+
+  it("omits the field entirely when a message carried no files", () => {
+    // Absent rather than an empty array, so stored threads do not grow a
+    // meaningless key on every text-only turn.
+    const [message] = sanitizeChatThreadMessages([user("user-1", "hello")]);
+    expect(message).not.toHaveProperty("attachmentIds");
+  });
+
+  it("drops non-string and blank ids rather than storing junk references", () => {
+    const [message] = sanitizeChatThreadMessages([
+      {
+        ...user("user-1", "hi"),
+        attachmentIds: ["att-1", "", "   ", 42, null, undefined, { id: "x" }, "att-2"],
+      },
+    ]);
+    expect(message.attachmentIds).toEqual(["att-1", "att-2"]);
+  });
+
+  it("bounds a pathological payload instead of ballooning the stored thread", () => {
+    const [message] = sanitizeChatThreadMessages([
+      {
+        ...user("user-1", "hi"),
+        attachmentIds: Array.from({ length: 500 }, (_, index) => `att-${index}`),
+      },
+    ]);
+    expect(message.attachmentIds).toHaveLength(MAX_ATTACHMENT_IDS_PER_MESSAGE);
+    expect(message.attachmentIds?.[0]).toBe("att-0");
+  });
+
+  it("ignores an attachmentIds field that is not an array at all", () => {
+    const [message] = sanitizeChatThreadMessages([
+      { ...user("user-1", "hi"), attachmentIds: "att-1" },
+    ]);
+    expect(message).not.toHaveProperty("attachmentIds");
   });
 });
