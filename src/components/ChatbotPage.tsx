@@ -4018,13 +4018,13 @@ function RailContent({
             </div>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ReportTabCard
               id="report-card-snapshot"
               icon={FileText}
               tone="sky"
               title="1-Page Snapshot"
-              description="A redacted one-page claim snapshot to preview, download, or send."
+              description="A single redacted page carrying the vehicle, the loss, the headline cost gap and the highest-impact findings. Personal details, the last eight of the VIN and insurer identity are stripped before it leaves the system, so it can be previewed, downloaded or emailed as-is."
               locked={!canUseSnapshotExport}
               onUnlock={onCustomerReportLocked}
               actions={
@@ -4041,7 +4041,7 @@ function RailContent({
               icon={FileDiff}
               tone="violet"
               title="Citation Density Report"
-              description="Annotates the estimate PDF with missed, reduced or under-documented operations, and produces the Forensic Estimate Analysis."
+              description="Two documents. The estimate PDF annotated in place, every mark anchored to the line it came from; and the Forensic Estimate Analysis — a line-level reconciliation that balances to each document’s own totals, quantifies the gap category by category, and separates fact from open verification item."
               locked={!canUseEstimateScrubberExport}
               onUnlock={onCustomerReportLocked}
               actions={
@@ -4071,7 +4071,7 @@ function RailContent({
               icon={Scale}
               tone="red"
               title="DOI Complaint Packet"
-              description="Formal documentation packet for DOI escalation support, evidence, citations, and unresolved claim items."
+              description="A formal packet for Department of Insurance escalation: the claim record, the evidence relied upon, the authority supporting each position, and every claim item still unresolved — assembled in the order a regulator reads them, with nothing asserted that the file does not support."
               locked={!canUseDoiComplaintPacketExport}
               onUnlock={onCustomerReportLocked}
               actions={
@@ -4093,7 +4093,7 @@ function RailContent({
               icon={Users}
               tone="blue"
               title="Customer Report"
-              description="Plain-language, customer-facing summary of the analysis and outcome."
+              description="Written for the vehicle owner rather than the adjuster: what happened, why the two estimates disagree, what the difference means financially, which omitted items affect safety rather than appearance, and what to ask for in writing before the repair begins."
               locked={!canUseCustomerReport}
               onUnlock={onCustomerReportLocked}
               actions={
