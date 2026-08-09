@@ -3063,8 +3063,9 @@ export function normalizeTotalsCategoryKey(name: string): string {
 }
 
 /** Below this many parsed operation rows, a substantive comparison document
- *  has not been read at all — see the second limb of assessComparisonExtraction. */
-const MIN_PARSED_ROWS_FOR_LINE_VERDICTS = 12;
+ *  has not been read at all — see the second limb of assessComparisonExtraction.
+ *  Exported so the annotator can prefer a better-parsing lane BEFORE gating. */
+export const MIN_PARSED_ROWS_FOR_LINE_VERDICTS = 12;
 /** A subject this size implies a counterpart with real line items. */
 const SUBSTANTIVE_SUBJECT_ROWS = 40;
 

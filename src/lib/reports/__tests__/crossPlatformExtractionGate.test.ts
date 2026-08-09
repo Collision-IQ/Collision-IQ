@@ -208,3 +208,85 @@ describe("release gate R19/R22", () => {
     expect(violations.filter((violation) => violation.rule === "R22")).toEqual([]);
   });
 });
+
+describe("degenerate PDF lane falls back to the text lane (RO 22104 class)", () => {
+  // The 22104 failure: the comparison PDF's word layer parsed to a handful of
+  // junk rows — not zero — so the text fallback (which read the same document
+  // fine) never engaged, and the not-read gate then suppressed the entire
+  // value layer. The report shipped with badges and no keyed notes, silently.
+  it("uses the text lane when the PDF lane yields almost nothing, and keeps the notes", async () => {
+    const { PDFDocument, StandardFonts } = await import("pdf-lib");
+    const { buildAnnotatedCitationDensityEstimatePdf, buildRequiredEstimatorDeltaFindings } =
+      await import("../annotatedCitationDensityEstimate");
+
+    // Subject: a substantive estimate (>= 40 operation rows arms the
+    // not-read limb of the gate).
+    const subjectLines: string[] = [
+      "SHOP OF RECORD",
+      "Net Cost of Repairs $18,201.00",
+    ];
+    for (let line = 1; line <= 44; line += 1) {
+      subjectLines.push(`${line} Repl RT Component ${line} 88162530${String(50 + line).padStart(2, "0")} ${(100 + line).toFixed(2)} 1.5`);
+    }
+    const subjectPdf = await PDFDocument.create();
+    const subjectFont = await subjectPdf.embedFont(StandardFonts.Helvetica);
+    for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+      const page = subjectPdf.addPage([612, 792]);
+      subjectLines.slice(pageIndex * 23, pageIndex * 23 + 23).forEach((text, index) => {
+        page.drawText(text, { x: 42, y: 752 - index * 16, size: 9, font: subjectFont });
+      });
+    }
+
+    // Comparison PDF: a word layer the typed parser cannot read (the
+    // image-only/Mitchell class) — fragments, no parseable rows.
+    const junkPdf = await PDFDocument.create();
+    const junkFont = await junkPdf.embedFont(StandardFonts.Helvetica);
+    const junkPage = junkPdf.addPage([612, 792]);
+    ["Supplement", "of", "Record", "S2", "fragments", "only"].forEach((text, index) => {
+      junkPage.drawText(text, { x: 60 + index * 70, y: 700, size: 9, font: junkFont });
+    });
+
+    // Comparison TEXT: the same document read correctly — plenty of rows.
+    const comparisonText = [
+      "USAA",
+      "Estimate of Record",
+      "Total Cost of Repairs $14,850.00",
+      ...Array.from({ length: 20 }, (_, index) => {
+        const line = index + 1;
+        return `${line} Repl RT Component ${line} 88162530${String(50 + line).padStart(2, "0")} ${(90 + line).toFixed(2)} 1.0`;
+      }),
+    ].join("\n");
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes: await subjectPdf.save(),
+      sourcePdfName: "Shop Final.pdf",
+      sourceDocumentId: "shop-final",
+      selectedEstimateTotal: 18201,
+      sourceText: subjectLines.join("\n"),
+      comparisonEstimatePdfs: [
+        {
+          fileName: "SOR-1.pdf",
+          sourceDocumentId: "carrier-sor",
+          estimateRole: "carrier",
+          bytes: await junkPdf.save(),
+        },
+      ],
+      comparisonEstimateTexts: [
+        {
+          fileName: "SOR-1.pdf",
+          sourceDocumentId: "carrier-sor",
+          estimateRole: "carrier",
+          text: comparisonText,
+        },
+      ],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: true, annotationMode: "both", estimateRole: "shop" },
+    });
+
+    // The text lane read 20 rows; the run must not be branded "not read", and
+    // the value layer (keyed notes included) must engage.
+    expect(result.warnings.join(" ")).not.toMatch(/it was not read/i);
+    expect(result.warnings.join(" ")).not.toMatch(/delta value marks suppressed/i);
+  }, 120_000);
+});

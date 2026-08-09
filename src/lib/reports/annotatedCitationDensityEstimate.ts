@@ -91,6 +91,7 @@ import {
   parseEstimateNetTotal,
   assessComparisonExtraction,
   assessHoursCoverage,
+  MIN_PARSED_ROWS_FOR_LINE_VERDICTS,
   type EstimateDeltaKind,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
@@ -2149,6 +2150,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // ESTIMATE TOTALS gap, merged keyed margin notes) driven by the typed
   // deltaEngine pairing. Default ON for citation-density; guarded so any
   // extraction/pairing failure degrades to the marker-only output.
+  //
+  // When a gate suppresses the layer, the reason is carried to the legend page
+  // so the document explains its own missing keyed notes instead of promising
+  // notes it does not contain.
+  let valueLayerSuppressionNote: string | null = null;
   if (deltaValueLayerActive) {
     try {
       const wordExtraction = await getWordExtraction();
@@ -2182,9 +2188,13 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         // from producing false deltas. Text parsing is the fallback.
         let competingRows: ReturnType<typeof parseDeltaEngineRows> = [];
         let competingTotals: Array<{ category: string; hours: number | null; rate: number | null; amount: number }> = [];
+        let competingRowLane: "pdf" | "text" | "none" = "none";
+        let pdfLaneRowCount = 0;
         if (comparisonWordSet) {
           const byPage = pdfWordsToEnginePages(comparisonWordSet.words);
           competingRows = parseDeltaEngineRows(byPage);
+          pdfLaneRowCount = competingRows.length;
+          if (competingRows.length > 0) competingRowLane = "pdf";
           competingTotals = parseDeltaEngineTotals(byPage).map((row) => ({
             category: row.category,
             hours: row.hours,
@@ -2192,8 +2202,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             amount: row.amount,
           }));
         }
-        if (competingRows.length === 0 && comparisonText) {
-          competingRows = parseCccEstimateRows(comparisonText.text)
+        // The PDF lane can fail DEGENERATELY: a producer whose glyph layer the
+        // typed parser can't read yields a HANDFUL of junk rows, not zero. A
+        // fallback that engaged only at exactly zero let that partial nonsense
+        // stand, and the not-read gate below then suppressed the whole value
+        // layer — on a pair whose comparison the text lane reads fine. Compare
+        // the two lanes below the line-verdict floor and keep the better read.
+        if (competingRows.length < MIN_PARSED_ROWS_FOR_LINE_VERDICTS && comparisonText) {
+          const textLaneRows = parseCccEstimateRows(comparisonText.text)
             .map((row) =>
               estimateRowFromTextFields({
                 lineNumber: row.lineNumber,
@@ -2208,6 +2224,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
               })
             )
             .filter((row): row is NonNullable<typeof row> => row !== null);
+          if (textLaneRows.length > competingRows.length) {
+            competingRows = textLaneRows;
+            competingRowLane = "text";
+          }
           if (competingTotals.length === 0) {
             competingTotals = (parseCccEstimateTotals(comparisonText.text)?.categories ?? []).map((category) => ({
               category: category.category,
@@ -2245,12 +2265,30 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           competingRows.map((row) => ({ labor: row.labor, paint: row.paint })),
           comparisonText?.text ?? ""
         );
+        // One greppable line per run: which lane read the comparison, how much
+        // of it, and whether a gate is about to suppress the value layer. The
+        // 22104 regression shipped SILENTLY — marks with no keyed notes and no
+        // way to tell why from the artifact or the logs. Never again.
+        console.info("[citation-density] value-layer coverage", {
+          comparisonLane: competingRowLane,
+          pdfLaneRowCount,
+          chosenRowCount: competingRows.length,
+          parsedRows: valueLayerExtraction.parsedRows,
+          impliedRows: valueLayerExtraction.impliedRows,
+          coverage: valueLayerExtraction.coverage,
+          gate: valueLayerExtraction.gate,
+          gateReason: valueLayerExtraction.gateReason,
+          hoursCoverage: hoursCoverage.coverage,
+          hoursGate: hoursCoverage.gate,
+          comparisonIdentityResolved: competingLabel !== null,
+        });
         if (valueLayerExtraction.gate) {
-          warnings.push(
+          const suppressionNote =
             valueLayerExtraction.gateReason === "source_not_read"
               ? `The comparison estimate yielded ${valueLayerExtraction.parsedRows} readable line item(s) — it was not read. Delta value marks suppressed; no line is described as absent from a document that could not be parsed.`
-              : `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
-          );
+              : `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`;
+          warnings.push(suppressionNote);
+          valueLayerSuppressionNote = suppressionNote;
         }
         if (hoursCoverage.gate) {
           warnings.push(
@@ -2262,9 +2300,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           // comparison document; with no resolved identity there is no honest
           // way to word one, and a role-word fallback is what shipped the
           // "MISSED on SHOP" defect.
-          warnings.push(
-            "Comparison document identity did not resolve to an organization name — delta value marks suppressed rather than labelled with a role word."
-          );
+          const identityNote =
+            "Comparison document identity did not resolve to an organization name — delta value marks suppressed rather than labelled with a role word.";
+          warnings.push(identityNote);
+          valueLayerSuppressionNote = valueLayerSuppressionNote ?? identityNote;
         }
         if (competingLabel !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
           const plan = planDeltaValueAnnotations({
@@ -2371,7 +2410,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       ...matches.map(({ finding }) => getProofBucketLabel(finding)),
       ...unmatched.map((finding) => getProofBucketLabel(finding)),
     ].filter(Boolean);
-    addLegendPage(pdfDoc, { font, boldFont, reportIdentity, emittedLabels });
+    addLegendPage(pdfDoc, { font, boldFont, reportIdentity, emittedLabels, valueLayerSuppressionNote });
   }
 
   const bytes = await pdfDoc.save();
@@ -8989,6 +9028,10 @@ function addLegendPage(
     /** Labels this RUN actually emitted (D-5) — the legend is generated from
      * them, never from a hand-maintained list that drifts. */
     emittedLabels?: string[];
+    /** Why the delta value layer (cell marks + keyed notes) is absent from
+     * this run, when it is. The legend must never promise keyed notes a
+     * suppressed run does not contain. */
+    valueLayerSuppressionNote?: string | null;
   }
 ) {
   const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
@@ -9005,7 +9048,12 @@ function addLegendPage(
     ...reportIdentity.legendBoundaryTexts,
     "",
     // D-6: the badge-to-callout key. One line, so the page explains itself.
-    "Key: the numbered badge in the left margin is the FINDING number in the Findings Report; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).",
+    // On a suppressed run the promise of keyed notes would be untrue — the
+    // suppression reason prints in its place, so the document explains its
+    // own missing notes.
+    options.valueLayerSuppressionNote
+      ? `NOTE: ${options.valueLayerSuppressionNote} The numbered badges key to the Findings Report; per-line value notes are withheld on this run.`
+      : "Key: the numbered badge in the left margin is the FINDING number in the Findings Report; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).",
   ], {
     x: 48,
     y: height - 84,
