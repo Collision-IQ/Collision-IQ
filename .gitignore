@@ -16,6 +16,11 @@ dist/
 .env.production
 .env*.local
 .env.off
+# copies made by hand or by editors — these carried real keys into a commit once
+.env.backup
+.env*.backup
+.env.*.bak
+*.env.bak
 
 # ===============================
 # Third-party API Keys
