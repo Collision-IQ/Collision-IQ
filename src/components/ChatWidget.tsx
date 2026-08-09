@@ -1572,76 +1572,113 @@ export default function ChatWidget({
     return () => window.clearTimeout(timer);
   }, [messages, isSignedIn, disabled]);
 
-  // Reopen a saved chat when History asks for it: load the stored transcript
-  // and continue the same thread (further messages autosave onto it).
+  /**
+   * Restore a saved chat from either source — History or the Toolbox — and
+   * continue the same thread, so further messages autosave onto it.
+   *
+   * One function for both because the restore is identical: transcript plus
+   * the attachment tray. Only the endpoint differs (the Toolbox is not gated
+   * by the history recency window). Duplicating it would let the two drift,
+   * and the attachment mapping is exactly the part that must not.
+   */
+  const restoreSavedThread = useCallback(async (endpoint: string) => {
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const data = (await response.json().catch(() => null)) as {
+        thread?: {
+          id: string;
+          messages: Message[];
+          attachments?: Array<{
+            id: string;
+            filename: string;
+            type: string;
+            text: string;
+            imageDataUrl?: string;
+            pageCount?: number;
+            classification?: string;
+            sizeBytes?: number;
+          }>;
+        };
+      } | null;
+      if (!response.ok || !data?.thread?.messages?.length) return;
+      chatThreadIdRef.current = data.thread.id;
+      setMessages(data.thread.messages);
+      if (data.thread.attachments?.length) {
+        setAttachments(
+          data.thread.attachments.map((stored) => ({
+            attachmentId: stored.id,
+            filename: stored.filename,
+            mime: stored.type,
+            text: stored.text,
+            sizeBytes: stored.sizeBytes ?? 0,
+            imageDataUrl: stored.imageDataUrl,
+            pageCount: stored.pageCount,
+            source: "file" as const,
+            classification:
+              stored.classification === "image" ||
+              stored.classification === "video" ||
+              stored.classification === "pdf" ||
+              stored.classification === "text" ||
+              stored.classification === "docx"
+                ? stored.classification
+                : undefined,
+            // Re-derived rather than trusted from storage: vision state is not
+            // a persisted column. Image classification plus present image data
+            // is the closest honest approximation.
+            hasVision: stored.classification === "image" && Boolean(stored.imageDataUrl),
+            usedInAnalysis: false,
+          }))
+        );
+      }
+      shouldAutoScrollRef.current = true;
+      window.setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }, 80);
+    } catch {
+      // Reopen is user-triggered; a failure just leaves the current chat.
+    }
+  }, []);
+
+  // History reopen, raised as an event by the reports/history panel.
   useEffect(() => {
     const handleReopen = (event: Event) => {
       const threadId = (event as CustomEvent<ChatReopenDetail>).detail?.threadId;
       if (!threadId) return;
-      void (async () => {
-        try {
-          const response = await fetch(
-            `/api/chat-threads/${encodeURIComponent(threadId)}`,
-            { cache: "no-store", credentials: "same-origin" }
-          );
-          const data = (await response.json().catch(() => null)) as {
-            thread?: {
-              id: string;
-              messages: Message[];
-              attachments?: Array<{
-                id: string;
-                filename: string;
-                type: string;
-                text: string;
-                imageDataUrl?: string;
-                pageCount?: number;
-                classification?: string;
-                sizeBytes?: number;
-              }>;
-            };
-          } | null;
-          if (!response.ok || !data?.thread?.messages?.length) return;
-          chatThreadIdRef.current = data.thread.id;
-          setMessages(data.thread.messages);
-          if (data.thread.attachments?.length) {
-            setAttachments(
-              data.thread.attachments.map((stored) => ({
-                attachmentId: stored.id,
-                filename: stored.filename,
-                mime: stored.type,
-                text: stored.text,
-                sizeBytes: stored.sizeBytes ?? 0,
-                imageDataUrl: stored.imageDataUrl,
-                pageCount: stored.pageCount,
-                source: "file" as const,
-                classification:
-                  stored.classification === "image" ||
-                  stored.classification === "video" ||
-                  stored.classification === "pdf" ||
-                  stored.classification === "text" ||
-                  stored.classification === "docx"
-                    ? stored.classification
-                    : undefined,
-                // Re-derived rather than trusted from storage: vision state is
-                // not a persisted column. Image classification plus present
-                // image data is the closest honest approximation.
-                hasVision: stored.classification === "image" && Boolean(stored.imageDataUrl),
-                usedInAnalysis: false,
-              }))
-            );
-          }
-          shouldAutoScrollRef.current = true;
-          window.setTimeout(() => {
-            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-          }, 80);
-        } catch {
-          // Reopen is user-triggered; a failure just leaves the current chat.
-        }
-      })();
+      void restoreSavedThread(`/api/chat-threads/${encodeURIComponent(threadId)}`);
     };
     window.addEventListener(CHAT_REOPEN_EVENT, handleReopen);
     return () => window.removeEventListener(CHAT_REOPEN_EVENT, handleReopen);
-  }, []);
+  }, [restoreSavedThread]);
+
+  // Toolbox reopen: the panel links to /?toolboxThread=<id> so a saved chat
+  // opens straight into the workspace. The parameter is stripped once consumed,
+  // otherwise a refresh would silently re-restore and discard anything the user
+  // typed since.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const threadId = params.get("toolboxThread");
+    if (!threadId) return;
+    params.delete("toolboxThread");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`
+    );
+    // Deferred off the mount commit: restoring a whole transcript plus its
+    // attachment tray is a large state change, and running it synchronously
+    // during commit is exactly the cascade React warns about. The timeout also
+    // makes the one-shot explicit, since the parameter is already stripped
+    // above and a StrictMode second pass finds nothing to do.
+    const timer = window.setTimeout(() => {
+      void restoreSavedThread(`/api/toolbox/${encodeURIComponent(threadId)}`);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [restoreSavedThread]);
 
   useEffect(() => {
     if (!introDismissed || !isInitialOnlyMessages(messages)) return;
