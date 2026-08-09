@@ -2415,6 +2415,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             ])
         ).values()
       ),
+      // Everything the claim's research passes retrieved -- the RIR snapshot
+      // authorities plus the OEM/jurisdictional lane. The forensic report ranks
+      // and filters these itself rather than trusting the upstream sourceType,
+      // which is what let an Instagram post be listed as OEM support.
+      retrievedSources: [
+        ...(params.resolvedAuthorities ?? []).map((authority) => ({
+          title: authority.sourceTitle,
+          url: authority.url,
+          locator: authority.locator,
+        })),
+        ...(params.authorityTrace?.authoritySources ?? []).map((authority) => ({
+          title: authority.title,
+          url: authority.url,
+          locator: authority.locator,
+        })),
+      ],
       generatedAt: new Date().toISOString(),
     });
     findingsReportBytes = forensic.bytes;

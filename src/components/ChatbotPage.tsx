@@ -8,7 +8,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, Users, Wrench, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, Users, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import { WorkspaceExtraSlotsProvider } from "@/components/workspace/WorkspaceExtraSlots";
 import ChatWidget from "@/components/ChatWidget";
@@ -1169,11 +1169,6 @@ export function ChatbotWorkspacePage({
     canUseSnapshotExport
       ? { label: "1-Page Snapshot", type: "pdf" }
       : null,
-    canUseBasicPdfExport
-      ? { label: "Repair Intelligence Report", type: "pdf" }
-      : hasResolvedAnalysis
-        ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
-      : null,
     canUseEstimateScrubberExport
       ? { label: "Citation Density Report", type: "pdf" }
       : hasResolvedAnalysis
@@ -1795,7 +1790,7 @@ export function ChatbotWorkspacePage({
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-foreground">Reports are ready</div>
               <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                Snapshot, Repair Intelligence, Citation Density, DOI, and
+                Snapshot, Citation Density, DOI, and
                 Customer Report are ready to inspect.
               </div>
               <button
@@ -3404,7 +3399,6 @@ function RailContent({
           <div className="mt-2 grid grid-cols-2 gap-1.5">
             {[
               { id: "report-card-snapshot", label: "1-Page Snapshot", enabled: canUseSnapshotExport },
-              { id: "report-card-repair-intelligence", label: "Repair Intelligence", enabled: canUseBasicPdfExport },
               { id: "report-card-delta", label: "Citation Density", enabled: canUseBasicPdfExport },
               { id: "report-card-doi", label: "DOI Complaint Packet", enabled: canUseDoiComplaintPacketExport },
               { id: "report-card-customer", label: "Customer Report", enabled: canUseCustomerReport },
@@ -3838,49 +3832,6 @@ function RailContent({
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
-            {canUseBasicPdfExport ? (
-              <div id="report-card-repair-intelligence" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
-                    Repair Intelligence Report
-                  </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Technical, procedural, evidentiary, and negotiation-aware repair position.
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void downloadReportDocument("repair_intelligence");
-                      emitSafeCrmEventFromClient({
-                        event: "report_generated",
-                        plan,
-                        exportType: "repair_intelligence",
-                      });
-                    }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
-                    data-tour="download-button"
-                  >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openReportSend("repair_intelligence")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
-                  >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                </div>
-                <ReportSendStatusLine
-                  send={getLastSendFor("repair_intelligence")}
-                  loading={reportSendHistoryLoading}
-                />
-              </div>
-            ) : null}
             {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
               <CitationDensityTargetSelector
                 value={citationDensityTargetEstimate}
@@ -4004,7 +3955,7 @@ function RailContent({
                 onClick={onCustomerReportLocked}
                 className="w-full rounded-md border border-orange-400/18 bg-[var(--accent)]/10 p-3 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
               >
-                Repair Intelligence, Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
+                Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
             ) : null}
             {academyTrigger ? (
@@ -4086,41 +4037,11 @@ function RailContent({
               }
             />
             <ReportTabCard
-              id="report-card-repair-intelligence"
-              icon={Wrench}
-              tone="accent"
-              title="Repair Intelligence Report"
-              description="Technical, procedural, evidentiary, and negotiation-aware repair position."
-              locked={!canUseBasicPdfExport}
-              onUnlock={onCustomerReportLocked}
-              actions={
-                <div className="grid gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void downloadReportDocument("repair_intelligence");
-                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "repair_intelligence" });
-                    }}
-                    className={REPORT_TAB_DOWNLOAD_BTN}
-                    data-tour="download-button"
-                  >
-                    <Download size={14} aria-hidden /> Download PDF
-                  </button>
-                  <button type="button" onClick={() => openReportSend("repair_intelligence")} className={REPORT_TAB_EMAIL_BTN}>
-                    <Mail size={14} aria-hidden /> Email report
-                  </button>
-                </div>
-              }
-              status={
-                <ReportSendStatusLine send={getLastSendFor("repair_intelligence")} loading={reportSendHistoryLoading} />
-              }
-            />
-            <ReportTabCard
               id="report-card-delta"
               icon={FileDiff}
               tone="violet"
-              title="Delta Citation Density Report"
-              description="Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations."
+              title="Citation Density Report"
+              description="Annotates the estimate PDF with missed, reduced or under-documented operations, and produces the Forensic Estimate Analysis."
               locked={!canUseEstimateScrubberExport}
               onUnlock={onCustomerReportLocked}
               actions={
@@ -4209,7 +4130,7 @@ function RailContent({
               onClick={onCustomerReportLocked}
               className="w-full cursor-pointer rounded-2xl border border-orange-400/18 bg-[var(--accent)]/10 p-3.5 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
             >
-              Repair Intelligence, Citation Density, DOI Complaint
+              Citation Density, DOI Complaint
               Packet, and Customer Report are available on Pro.
             </button>
           ) : null}

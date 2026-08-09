@@ -18,6 +18,7 @@ import {
   describeReconciliation,
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
+import { classifyAuthorities } from "./authorityTier";
 
 const MARGIN = 54;
 const PAGE_WIDTH = 612;
@@ -310,6 +311,9 @@ export type ForensicReportInput = {
   limitations: string[];
   /** Authorities that actually reached a finding, for Section 11. */
   authorities: Array<{ title: string; relevance: string; where: string }>;
+  /** Everything retrieved for this claim (RIR research pass + OEM lane), before
+   *  tiering. Classified here so the report states its own evidence quality. */
+  retrievedSources: Array<{ title: string; url?: string; locator?: string; uploadedEvidence?: boolean }>;
   generatedAt: string;
 };
 
@@ -557,20 +561,55 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   writer.heading("Authorities relied upon");
   if (input.authorities.length === 0) {
     writer.paragraph(
-      "No OEM procedure, position statement or jurisdictional authority was retrieved for this claim. Every " +
-        "finding above therefore rests on the two estimates themselves. Where a finding needs external support " +
-        "to be relied upon in a formal proceeding, that support must be obtained and attached before it is used.",
+      "No retrieved authority is attached to a specific finding above. Every finding therefore rests on the two " +
+        "estimates themselves. Where a finding needs external support to be relied upon in a formal proceeding, " +
+        "that support must be obtained and attached before it is used.",
       { color: MUTED }
     );
   } else {
     writer.table({
       columns: [
         { header: "Source", width: 0.36 },
-        { header: "Relevance", width: 0.34 },
+        { header: "Attached to", width: 0.34 },
         { header: "Where to obtain", width: 0.3 },
       ],
       rows: input.authorities.map((authority) => [authority.title, authority.relevance, authority.where]),
     });
+  }
+
+  // Everything retrieved for the claim, ranked. Separate from the table above
+  // because "retrieved" and "relied upon" are different claims, and conflating
+  // them is how a report ends up appearing to cite support it never used.
+  const { accepted: tiered, rejected: refusedSources } = classifyAuthorities(input.retrievedSources);
+  if (tiered.length > 0) {
+    writer.subheading("Retrieved for this claim, by authority tier");
+    writer.paragraph(
+      "Tier 1 is the OEM or the case file itself; tier 2 licensed estimating data; tier 3 statute, regulation or " +
+        "regulator; tier 4 an industry technical body; tier 5 other published technical sources. Lower-tier " +
+        "material does not override a higher tier.",
+      { size: 8.4, color: MUTED }
+    );
+    writer.table({
+      columns: [
+        { header: "Tier", width: 0.08, align: "right" },
+        { header: "Source", width: 0.5 },
+        { header: "Basis", width: 0.42 },
+      ],
+      rows: tiered.map((authority) => [String(authority.tier), authority.title, authority.tierBasis]),
+    });
+  }
+  if (refusedSources.length > 0) {
+    // Stated, not silently dropped: a reader comparing this against a raw
+    // search result list should be able to see what was excluded and why.
+    writer.subheading("Retrieved but not cited");
+    writer.paragraph(
+      `${refusedSources.length} retrieved result${refusedSources.length === 1 ? " was" : "s were"} excluded as ` +
+        "not constituting repair authority:",
+      { size: 8.8 }
+    );
+    for (const refused of refusedSources.slice(0, 12)) {
+      writer.bullet(`${refused.title} — ${refused.reason}`);
+    }
   }
   writer.paragraph(
     "The two estimates themselves are the source of every dollar figure, part number, hour and printed note in " +
