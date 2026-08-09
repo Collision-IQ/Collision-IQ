@@ -82,6 +82,29 @@ export function chatHistoryReopenLimit(
   return 0;
 }
 
+/**
+ * Toolbox slots: chats the user explicitly saved to pick back up later,
+ * complete with the documents and photos that were uploaded to them.
+ *
+ * Distinct from chatHistoryReopenLimit, which is a passive recency window over
+ * autosaved threads. A toolbox slot is a deliberate act of keeping, so it is
+ * never evicted silently — displacing one requires the user's confirmation.
+ *
+ * Free accounts have no toolbox at all; the UI hides it rather than showing an
+ * empty locked panel.
+ */
+export function toolboxSlotLimit(
+  plan: ProductPlan | string | null | undefined,
+  isPlatformAdmin = false
+): number {
+  if (isPlatformAdmin) return 20;
+  const normalized = normalizeProductPlan(plan);
+  if (normalized === "admin" || normalized === "team") return 20;
+  if (normalized === "pro") return 10;
+  if (normalized === "starter") return 3;
+  return 0;
+}
+
 export function buildPlanRecommendationGuard(hasProChatRecommendations: boolean) {
   return hasProChatRecommendations
     ? "Repair Intelligence Report, Delta Citation Density Report, OEM Citation Density Report, DOI Complaint Packet, and rebuttal recommendations may be suggested when relevant."

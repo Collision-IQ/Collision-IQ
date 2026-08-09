@@ -79,12 +79,16 @@ export async function saveChatThread(params: {
     data: { ...data, ownerUserId: params.ownerUserId },
   });
 
-  // Bound per-user storage for AD-HOC chats only. Threads tied to a case are
-  // exempt: a claim's chat history spans months of supplement and appraisal
-  // phases, and evicting it because of unrelated chat volume elsewhere in the
-  // account would silently destroy the record of an active claim.
+  // Bound per-user storage for AD-HOC chats only. Two exemptions:
+  //
+  // - Threads tied to a case. A claim's chat spans months of supplement and
+  //   appraisal phases; evicting it because of unrelated chat volume elsewhere
+  //   in the account would silently destroy the record of an active claim.
+  // - Threads saved to the toolbox. The user explicitly kept these, and the
+  //   toolbox promises that displacing one requires their confirmation. An
+  //   autosave quietly deleting a saved chat would break that promise outright.
   const excess = await prisma.chatThread.findMany({
-    where: { ownerUserId: params.ownerUserId, caseId: null },
+    where: { ownerUserId: params.ownerUserId, caseId: null, toolboxSavedAt: null },
     orderBy: { updatedAt: "desc" },
     skip: MAX_THREADS_PER_USER,
     select: { id: true },

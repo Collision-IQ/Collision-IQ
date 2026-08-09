@@ -237,7 +237,14 @@ model ChatThread {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Toolbox membership. Presence means saved; the value is the save time, which
+  /// is also the eviction order when the plan's slots are full. One nullable
+  /// column rather than a boolean plus a timestamp, so the two can never
+  /// disagree about whether a thread is in the toolbox.
+  toolboxSavedAt DateTime?
+
   @@index([ownerUserId, updatedAt])
+  @@index([ownerUserId, toolboxSavedAt])
 }
 
 model UsageCounter {
