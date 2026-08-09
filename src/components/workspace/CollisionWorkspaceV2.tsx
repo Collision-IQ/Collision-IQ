@@ -31,6 +31,7 @@ import {
   Settings as SettingsIcon,
   Workflow,
   X,
+  Briefcase,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -44,6 +45,7 @@ import DamagePreviewPanel, {
   type DamagePreviewImage,
 } from "@/components/workspace/DamagePreviewPanel";
 import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
+import ToolboxPanel from "@/components/workspace/ToolboxPanel";
 import MyVehiclePanel from "@/components/workspace/MyVehiclePanel";
 import ScanIqPanel from "@/components/workspace/ScanIqPanel";
 import {
@@ -88,7 +90,8 @@ type WorkspaceView =
   | "evidence"
   | "calibration"
   | "vehicle"
-  | "scaniq";
+  | "scaniq"
+  | "toolbox";
 
 // In-workspace items switch the main content (`view`); items with `href`
 // navigate to an existing route. `requiresAnalysis` items stay disabled until an
@@ -113,7 +116,15 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
   { id: "history", label: "History", icon: BookOpen, view: "reports" },
+  // Toolbox = saved CHATS, deliberately kept, reopenable with their files.
+  // History above it is saved ANALYSES. Adjacent because both are "things I
+  // came back for", distinct because one is a conversation and one is a report.
+  { id: "toolbox", label: "Toolbox", icon: Briefcase, view: "toolbox" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
+];
+
+/** Pinned to the bottom of the rail beside Tutorial: account-level, not workflow. */
+const NAV_FOOTER_ITEMS: typeof NAV_ITEMS = [
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
 ];
 
@@ -124,6 +135,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   vehicle: "nav-my-vehicle",
   scaniq: "nav-scan-iq",
   history: "nav-history",
+  toolbox: "nav-toolbox",
   knowledge: "nav-knowledge-base",
   settings: "nav-settings",
 };
@@ -468,17 +480,20 @@ export default function CollisionWorkspaceV2({
               </button>
             </div>
             {NAV_ITEMS.map((item) => renderNavItem(item, () => setMobileNavOpen(false)))}
-            <button
-              type="button"
-              onClick={() => {
-                setMobileNavOpen(false);
-                restartOnboardingTour();
-              }}
-              className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-            >
-              <HelpCircle size={16} />
-              Tutorial
-            </button>
+            <div className="mt-auto flex flex-col gap-1">
+              {NAV_FOOTER_ITEMS.map((item) => renderNavItem(item, () => setMobileNavOpen(false)))}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  restartOnboardingTour();
+                }}
+                className="inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+              >
+                <HelpCircle size={16} />
+                Tutorial
+              </button>
+            </div>
           </nav>
         </div>
       ) : null}
@@ -500,14 +515,17 @@ export default function CollisionWorkspaceV2({
               Collapse
             </button>
             {NAV_ITEMS.map((item) => renderNavItem(item))}
-            <button
-              type="button"
-              onClick={restartOnboardingTour}
-              className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-            >
-              <HelpCircle size={16} />
-              Tutorial
-            </button>
+            <div className="mt-auto flex flex-col gap-1">
+              {NAV_FOOTER_ITEMS.map((item) => renderNavItem(item))}
+              <button
+                type="button"
+                onClick={restartOnboardingTour}
+                className="inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+              >
+                <HelpCircle size={16} />
+                Tutorial
+              </button>
+            </div>
           </nav>
         ) : (
           // Entire collapsed strip is the click target — the chevron is the
@@ -534,7 +552,9 @@ export default function CollisionWorkspaceV2({
           <div className="flex items-center gap-2 px-1">
             <Workflow size={16} className="text-[var(--accent)]" />
             <h1 className="text-[15px] font-semibold text-foreground">
-              {activeView === "reports"
+              {activeView === "toolbox"
+                ? "Toolbox"
+                : activeView === "reports"
                 ? "History"
                 : activeView === "reportcenter"
                   ? "Reports"
@@ -606,7 +626,9 @@ export default function CollisionWorkspaceV2({
             // the claim panel instead of pooling dead space on one side.
             style={{ "--workspace-chat-col": rightRailOpen ? "1080px" : "1280px" } as CSSProperties}
           >
-            {activeView === "reports" ? (
+            {activeView === "toolbox" ? (
+              <ToolboxPanel />
+            ) : activeView === "reports" ? (
               <div data-tour="past-reports">
                 <ReportsHistoryPanel initialReportId={pendingReportId} />
               </div>

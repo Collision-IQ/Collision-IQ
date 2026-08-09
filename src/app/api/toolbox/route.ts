@@ -6,6 +6,7 @@ import {
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { toolboxSlotLimit } from "@/lib/featureAccess";
 import { listToolbox, saveToToolbox } from "@/lib/chatThreads/toolboxStore";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
@@ -58,9 +59,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "THREAD_ID_REQUIRED" }, { status: 400 });
     }
 
+    // "latest" = the open conversation. Autosave writes the active chat every
+    // 1.5s, so the most recently updated thread IS what the user is looking at;
+    // resolving it here avoids coupling the Toolbox panel to ChatWidget's
+    // internal thread ref purely to pass an id back down.
+    let resolvedThreadId = threadId;
+    if (threadId === "latest") {
+      const latest = await prisma.chatThread.findFirst({
+        where: { ownerUserId: user.id },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true },
+      });
+      if (!latest) {
+        return NextResponse.json({ ok: false, error: "NO_CHAT_TO_SAVE" }, { status: 404 });
+      }
+      resolvedThreadId = latest.id;
+    }
+
     const result = await saveToToolbox({
       ownerUserId: user.id,
-      threadId,
+      threadId: resolvedThreadId,
       limit,
       confirmed: body?.confirmed === true,
     });
