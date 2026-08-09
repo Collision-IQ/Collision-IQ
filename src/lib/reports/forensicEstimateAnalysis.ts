@@ -273,6 +273,10 @@ export function buildForensicReconciliation(params: {
 export function describeReconciliation(reconciliation: ForensicReconciliation): {
   gapStatement: string | null;
   rateDisputeStatement: string | null;
+  /** Named rate differences, when the categories do NOT all agree. */
+  rateDifferences: string[];
+  /** Categories where the COMPARISON allows more, stated plainly. */
+  comparisonAllowsMore: string[];
   balanceWarnings: string[];
 } {
   const money = (value: number) =>
@@ -290,6 +294,34 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
     ? "Every labour rate printed on both documents matches exactly; this report raises no rate dispute. " +
       "The labour difference is a function of hours allowed and operations included."
     : null;
+
+  // A rate gap is one of the largest and most arguable drivers in any file, and
+  // it applies across every hour in the category. Reporting it only as one
+  // finding among dozens buries it; it belongs beside the reconciliation the
+  // reader is already looking at.
+  const rateDifferences = reconciliation.rows
+    .filter((row) => row.higherRate !== null && row.lowerRate !== null && !row.ratesAgree)
+    .map((row) => {
+      const delta = (row.lowerRate ?? 0) - (row.higherRate ?? 0);
+      return (
+        `${row.category}: ${money(row.higherRate!)}/hr on the higher estimate against ` +
+        `${money(row.lowerRate!)}/hr on the comparison — a ${money(delta)}/hr ` +
+        `${delta > 0 ? "increase" : "reduction"} applied across every hour in the category.`
+      );
+    });
+
+  // Even-handedness is what makes the document credible: a report that only
+  // ever finds against the carrier reads as advocacy. Where the comparison
+  // allows MORE, the report says so in the same voice.
+  const comparisonAllowsMore = reconciliation.rows
+    .filter((row) => (row.costDifference ?? 0) > 0)
+    .map((row) => {
+      const hoursNote =
+        row.hoursDifference !== null && row.hoursDifference > 0
+          ? ` (${row.hoursDifference} hr more)`
+          : "";
+      return `${row.category}: ${money(row.costDifference!)} more${hoursNote} on the comparison estimate.`;
+    });
 
   const balanceWarnings: string[] = [];
   const warn = (side: "higher" | "lower", check: ReconciliationCheck) => {
@@ -317,5 +349,5 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
   warn("higher", reconciliation.higherCheck);
   warn("lower", reconciliation.lowerCheck);
 
-  return { gapStatement, rateDisputeStatement, balanceWarnings };
+  return { gapStatement, rateDisputeStatement, rateDifferences, comparisonAllowsMore, balanceWarnings };
 }

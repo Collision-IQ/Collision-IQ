@@ -164,3 +164,49 @@ describe("'no rate dispute' is asserted only when it is true", () => {
     expect(describeReconciliation(result).rateDisputeStatement).toBeNull();
   });
 });
+
+describe("rate differences and credits are surfaced, not buried", () => {
+  const mixed = () =>
+    buildForensicReconciliation({
+      higherTotals: totals([
+        ["Mechanical Labor", 9.3, 175, 1627.5],
+        ["Body Labor", 52.7, 90, 4743],
+      ]),
+      lowerTotals: totals([
+        ["Mechanical Labor", 9.6, 110, 1056],
+        ["Body Labor", 71.5, 95, 6792.5],
+      ]),
+    });
+
+  it("names each category whose rate differs, with both rates", () => {
+    // RO 22059: mechanical labour is $175/hr against $110/hr. A rate gap applies
+    // across every hour in the category, so it must not sit as one finding among
+    // dozens on page five.
+    const { rateDifferences } = describeReconciliation(mixed());
+    expect(rateDifferences.join(" ")).toMatch(
+      /Mechanical Labor: \$175\.00\/hr on the higher estimate against \$110\.00\/hr on the comparison/
+    );
+    // money() prints the magnitude; the word "reduction" carries the direction.
+    expect(rateDifferences.join(" ")).toMatch(/\$65\.00\/hr reduction/);
+    expect(rateDifferences.join(" ")).toMatch(/Body Labor.*\$5\.00\/hr increase/);
+  });
+
+  it("states where the COMPARISON allows more — a report that only ever finds one way is advocacy", () => {
+    const { comparisonAllowsMore } = describeReconciliation(mixed());
+    expect(comparisonAllowsMore.join(" ")).toMatch(
+      /Body Labor: \$2,049\.50 more \(18\.8 hr more\) on the comparison estimate/
+    );
+    // Mechanical is lower on the comparison, so it is not a credit.
+    expect(comparisonAllowsMore.join(" ")).not.toMatch(/Mechanical/);
+  });
+
+  it("says nothing about rates when they all agree beyond the no-dispute statement", () => {
+    const agreeing = buildForensicReconciliation({
+      higherTotals: totals([["Body Labor", 78.9, 61, 4812.9]]),
+      lowerTotals: totals([["Body Labor", 50.6, 61, 3086.6]]),
+    });
+    const described = describeReconciliation(agreeing);
+    expect(described.rateDifferences).toEqual([]);
+    expect(described.rateDisputeStatement).toMatch(/raises no rate dispute/);
+  });
+});

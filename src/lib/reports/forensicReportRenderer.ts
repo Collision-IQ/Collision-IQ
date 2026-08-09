@@ -258,13 +258,16 @@ const DOMAINS: Array<{ title: string; match: (finding: CitationDensityFinding) =
   {
     title: "Findings — structural repair",
     match: (finding) =>
-      // A refinish operation ON a structural part is a refinish finding. Without
-      // this exclusion "Blnd RT Roof rail" is claimed by the structural matcher
-      // on the word "rail" and files a blend-hours difference under structural
-      // repair, where a reader looking for weld/sectioning issues will not
-      // expect it.
+      // A refinish operation ON a structural part is a refinish finding. The
+      // label reads "Missing from comparison estimate: Roof rail" — the CCC
+      // operation token ("Blnd") appears only in the evidence prose, so testing
+      // the label alone still filed a blend-hours difference under structural
+      // repair, where a reader looking for weld and sectioning issues will not
+      // expect it. Test the row text the finding actually cites.
       finding.category !== "refinish" &&
-      !/\bblnd|blend|refinish|clear ?coat|tint\b/i.test(finding.operationLabel) &&
+      !/\b(?:blnd|blend|refinish|clear ?coat|tint)\b/i.test(
+        `${finding.operationLabel} ${finding.currentSupportSummary ?? ""}`
+      ) &&
       (finding.category === "structural_or_fit_verification" ||
         /\brail|floor pan|frame|structural|sectioning|apron|crossmember\b/i.test(finding.operationLabel)),
   },
@@ -449,6 +452,24 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     ],
     emphasizeLastRow: true,
   });
+  if (described.rateDisputeStatement) {
+    writer.subheading("Note on rates");
+    writer.paragraph(described.rateDisputeStatement);
+  } else if (described.rateDifferences.length > 0) {
+    writer.subheading("Note on rates");
+    writer.paragraph(
+      "The two documents do not use the same rate in every category. A rate difference applies across every " +
+        "hour in that category, so it compounds independently of any disagreement about hours:"
+    );
+    for (const difference of described.rateDifferences) writer.bullet(difference);
+  }
+  if (described.comparisonAllowsMore.length > 0) {
+    writer.subheading("Where the comparison estimate allows more");
+    writer.paragraph(
+      "These are credited to the comparison estimate and are already netted into the totals above."
+    );
+    for (const line of described.comparisonAllowsMore) writer.bullet(line);
+  }
   for (const lane of input.reconciliation.unmatchedTaxLanes) {
     writer.paragraph(
       `Tax lane "${lane.label}" (${money(lane.amount)}) appears on ${
