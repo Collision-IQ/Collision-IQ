@@ -456,6 +456,10 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     ],
     emphasizeLastRow: true,
   });
+  if (described.offsettingMovementStatement) {
+    writer.subheading("The totals are close; the estimates are not");
+    writer.paragraph(described.offsettingMovementStatement);
+  }
   if (described.rateDisputeStatement) {
     writer.subheading("Note on rates");
     writer.paragraph(described.rateDisputeStatement);

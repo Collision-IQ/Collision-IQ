@@ -114,7 +114,12 @@ describe("the reconciliation pairs categories by concept, not by string", () => 
     });
     const glass = result.rows.find((row) => /glass/i.test(row.category));
     expect(glass?.presentOnlyOn).toBe("lower");
-    expect(glass?.costDifference).toBeNull(); // no counterpart to difference against
+    // Absence IS a zero once the other document reconciles to its own subtotal,
+    // and the difference must carry the full amount or the Difference column
+    // stops summing to the Subtotal row. (This assertion previously demanded
+    // null on the reasoning that there was "no counterpart to difference
+    // against" — which is what left RO 22062's table not adding up.)
+    expect(glass?.costDifference).toBeCloseTo(158.6, 2);
   });
 
   it("surfaces a tax lane one document charges and the other does not", () => {
@@ -208,5 +213,86 @@ describe("rate differences and credits are surfaced, not buried", () => {
     const described = describeReconciliation(agreeing);
     expect(described.rateDifferences).toEqual([]);
     expect(described.rateDisputeStatement).toMatch(/raises no rate dispute/);
+  });
+});
+
+describe("RO 22062: a small headline gap over a large rewrite", () => {
+  // Both documents reconcile to their own printed subtotals, so a category
+  // absent from one genuinely IS zero there.
+  const ro22062 = () =>
+    buildForensicReconciliation({
+      higherTotals: totals(
+        [
+          ["Parts", null, null, 3363.15],
+          ["Body Labor", 37.4, 75, 2805],
+          ["Paint Labor", 26.2, 75, 1965],
+          ["Paint Supplies", 26.2, 60, 1572],
+          ["Miscellaneous", null, null, 543.65],
+        ],
+        { tax: 614.93 }
+      ),
+      lowerTotals: totals(
+        [
+          ["Parts", null, null, 4890.61],
+          ["Body Labor", 41.7, 61, 2543.7],
+          ["Paint Labor", 24.5, 61, 1494.5],
+          ["Paint Supplies", null, null, 999.99],
+          ["Miscellaneous", null, null, 187.25],
+          ["Mechanical Labor", 0.9, 125, 112.5],
+        ],
+        { tax: 604.34 }
+      ),
+    });
+
+  it("makes the Difference column ADD UP, including one-sided categories", () => {
+    // The shipped report printed an em-dash for comparison-only Mechanical
+    // Labor, so the visible column summed to -$132.75 while the Subtotal row
+    // said -$20.25. A reconciliation whose own column does not add up is worse
+    // than none.
+    const result = ro22062();
+    expect(result.balances).toBe(true);
+    const columnSum = result.rows.reduce((sum, row) => sum + (row.costDifference ?? 0), 0);
+    const subtotalDifference = result.lowerSubtotal! - result.higherSubtotal!;
+    expect(Math.round(columnSum * 100)).toBe(Math.round(subtotalDifference * 100));
+
+    const mechanical = result.rows.find((row) => /mechanical/i.test(row.category));
+    expect(mechanical?.presentOnlyOn).toBe("lower");
+    expect(mechanical?.costDifference).toBeCloseTo(112.5, 2);
+  });
+
+  it("says so when $3,300 of movement nets to a $30.84 gap", () => {
+    const described = describeReconciliation(ro22062());
+    expect(described.offsettingMovementStatement).toMatch(/The two totals are close, but they are not built the same way/);
+    expect(described.offsettingMovementStatement).toMatch(/\$3,300\.17 of category-level movement/);
+    expect(described.offsettingMovementStatement).toMatch(/\$30\.84 difference in the total/);
+  });
+
+  it("stays quiet when the net gap fairly represents what happened", () => {
+    // A straight reduction with nothing shifted: the headline is the story.
+    const straight = buildForensicReconciliation({
+      higherTotals: totals([["Body Labor", 78.9, 61, 4812.9]]),
+      lowerTotals: totals([["Body Labor", 50.6, 61, 3086.6]]),
+    });
+    expect(describeReconciliation(straight).offsettingMovementStatement).toBeNull();
+  });
+
+  it("refuses to treat a one-sided category as zero when that document did NOT reconcile", () => {
+    // Rows missing their own subtotal mean the category may be folded into
+    // another line rather than genuinely unfunded; calling it zero would invent
+    // a difference.
+    const unreconciled: EstimateTotalsSummary = {
+      categories: [{ category: "Parts", hours: null, rate: null, cost: 100 }],
+      subtotal: 500,
+      salesTax: 0,
+      grandTotal: 500,
+      taxLanes: [],
+    };
+    const result = buildForensicReconciliation({
+      higherTotals: totals([["Parts", null, null, 100], ["Glass Labor", 2, 61, 122]]),
+      lowerTotals: unreconciled,
+    });
+    const glass = result.rows.find((row) => /glass/i.test(row.category));
+    expect(glass?.presentOnlyOn).toBe("higher");
+    expect(glass?.costDifference).toBeNull();
   });
 });

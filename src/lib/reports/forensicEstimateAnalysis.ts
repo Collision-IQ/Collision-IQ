@@ -181,6 +181,37 @@ export function buildForensicReconciliation(params: {
     ...[...lowerIndex.keys()].filter((key) => !higherIndex.has(key)),
   ];
 
+  // Computed before the rows, because whether a one-sided category counts as a
+  // zero on the other document depends on whether that document's categories
+  // reconcile to its own printed subtotal.
+  const higherCheck = checkDocument(higherTotals);
+  const lowerCheck = checkDocument(lowerTotals);
+
+  /**
+   * A category on only ONE document.
+   *
+   * The instinct is to print no difference — there is nothing to difference
+   * against. That is wrong, and it broke the table: on RO 22062 the Difference
+   * column summed to -$132.75 while the Subtotal row said -$20.25, because a
+   * comparison-only Mechanical Labor row of $112.50 printed an em-dash. A
+   * reconciliation whose own column does not add up is worse than none.
+   *
+   * Absence is a zero ONLY when that document's categories reconcile to its own
+   * printed subtotal. If they do not, the category may simply be folded into
+   * another line rather than genuinely unfunded, and calling it zero would
+   * invent a difference. In that case the difference stays unknown and the
+   * limitation is already reported.
+   */
+  const oneSidedDifference = (
+    cost: number | null,
+    presentOn: "higher" | "lower"
+  ): number | null => {
+    const otherReconciles = presentOn === "higher" ? lowerCheck.categoriesSumToSubtotal : higherCheck.categoriesSumToSubtotal;
+    if (!otherReconciles || cost === null) return null;
+    // Present on higher only: the comparison allows nothing, so lower - higher.
+    return presentOn === "higher" ? fromCents(-(cents(cost) ?? 0)) : cost;
+  };
+
   const rows: ReconciliationRow[] = orderedKeys.map((categoryKey) => {
     const higher = higherIndex.get(categoryKey) ?? null;
     const lower = lowerIndex.get(categoryKey) ?? null;
@@ -200,7 +231,11 @@ export function buildForensicReconciliation(params: {
       costDifference:
         higherCost !== null && lowerCost !== null
           ? fromCents((cents(lowerCost) ?? 0) - (cents(higherCost) ?? 0))
-          : null,
+          : higher && !lower
+            ? oneSidedDifference(higherCost, "higher")
+            : lower && !higher
+              ? oneSidedDifference(lowerCost, "lower")
+              : null,
       hoursDifference:
         higherHours !== null && lowerHours !== null
           ? Math.round((lowerHours - higherHours) * 10) / 10
@@ -234,9 +269,6 @@ export function buildForensicReconciliation(params: {
   );
   const allSharedRatesAgree =
     sharedRateRows.length > 0 && sharedRateRows.every((row) => row.ratesAgree);
-
-  const higherCheck = checkDocument(higherTotals);
-  const lowerCheck = checkDocument(lowerTotals);
 
   return {
     rows,
@@ -273,6 +305,11 @@ export function buildForensicReconciliation(params: {
 export function describeReconciliation(reconciliation: ForensicReconciliation): {
   gapStatement: string | null;
   rateDisputeStatement: string | null;
+  /**
+   * Present when large category movements cancel out into a small headline gap.
+   * Null when the net figure fairly represents what happened.
+   */
+  offsettingMovementStatement: string | null;
   /** Named rate differences, when the categories do NOT all agree. */
   rateDifferences: string[];
   /** Categories where the COMPARISON allows more, stated plainly. */
@@ -294,6 +331,33 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
     ? "Every labour rate printed on both documents matches exactly; this report raises no rate dispute. " +
       "The labour difference is a function of hours allowed and operations included."
     : null;
+
+  /**
+   * A SMALL HEADLINE GAP CAN HIDE A LARGE REWRITE.
+   *
+   * On RO 22062 the two appraisals differ by $30.84 — a figure that invites the
+   * conclusion there is nothing to argue about. Underneath it the comparison
+   * moved $1,527.46 INTO parts and took $1,660.21 OUT of labour, supplies and
+   * miscellaneous, with a $14.00/hr rate cut across both labour categories.
+   * $3,300 of gross movement nets to $20.25: a ratio of over 100 to 1.
+   *
+   * Reporting only the net figure there would be true and profoundly
+   * misleading, so when gross movement dwarfs the net gap the report says so
+   * before the reader draws the wrong conclusion. The threshold is deliberately
+   * generous — this fires only when the movement is genuinely the story.
+   */
+  const grossMovement = reconciliation.rows.reduce(
+    (sum, row) => sum + Math.abs(row.costDifference ?? 0),
+    0
+  );
+  const netGap = Math.abs(reconciliation.grandTotalDifference ?? 0);
+  const offsettingMovementStatement =
+    grossMovement > 0 && grossMovement >= Math.max(netGap * 3, 500)
+      ? `The two totals are close, but they are not built the same way. ` +
+        `${money(grossMovement)} of category-level movement nets to a ${money(netGap)} difference in the total: ` +
+        `amounts were shifted between categories rather than simply removed. The category table and the findings ` +
+        `below show where. A comparison of the two bottom lines alone would miss this.`
+      : null;
 
   // A rate gap is one of the largest and most arguable drivers in any file, and
   // it applies across every hour in the category. Reporting it only as one
@@ -349,5 +413,12 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
   warn("higher", reconciliation.higherCheck);
   warn("lower", reconciliation.lowerCheck);
 
-  return { gapStatement, rateDisputeStatement, rateDifferences, comparisonAllowsMore, balanceWarnings };
+  return {
+    gapStatement,
+    rateDisputeStatement,
+    offsettingMovementStatement,
+    rateDifferences,
+    comparisonAllowsMore,
+    balanceWarnings,
+  };
 }
