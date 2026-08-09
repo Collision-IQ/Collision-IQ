@@ -16,17 +16,9 @@
  * internals for no behavioural gain.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Briefcase, ExternalLink, Loader2, Trash2, TriangleAlert } from "lucide-react";
-
-type ToolboxEntry = {
-  id: string;
-  title: string;
-  caseId: string | null;
-  messageCount: number;
-  attachmentCount: number;
-  savedAt: string;
-  updatedAt: string;
-};
+import { Briefcase, ExternalLink, Loader2, Trash2 } from "lucide-react";
+import ToolboxEvictionOverlay from "./ToolboxEvictionOverlay";
+import { useToolboxSave, type ToolboxEntry } from "./useToolboxSave";
 
 type Listing = {
   entries: ToolboxEntry[];
@@ -35,9 +27,6 @@ type Listing = {
   slotsUsed: number;
   slotsRemaining: number;
 };
-
-/** Remembers a "don't ask again" choice. A nag preference, not a policy. */
-const SKIP_WARNING_KEY = "collisioniq.toolbox.skipEvictionWarning";
 
 function formatSaved(value: string): string {
   try {
@@ -55,12 +44,9 @@ function formatSaved(value: string): string {
 export default function ToolboxPanel() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [pendingEviction, setPendingEviction] = useState<ToolboxEntry | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
   /** Distinct from `locked`. A failed load is not a plan limitation. */
   const [loadFailed, setLoadFailed] = useState(false);
-  const [skipWarningChecked, setSkipWarningChecked] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -95,72 +81,23 @@ export default function ToolboxPanel() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  const save = useCallback(
-    async (confirmed: boolean) => {
-      // Resolve the standing "don't ask again" BEFORE the request rather than
-      // re-entering this callback on the 409. Recursing through the memoized
-      // function would reference it before its own declaration.
-      const autoConfirm =
-        confirmed ||
-        (typeof window !== "undefined" &&
-          window.localStorage.getItem(SKIP_WARNING_KEY) === "true");
-      setBusy(true);
-      setStatus(null);
-      try {
-        const response = await fetch("/api/toolbox", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ threadId: "latest", confirmed: autoConfirm }),
-        });
-        const data = (await response.json().catch(() => null)) as {
-          ok?: boolean;
-          needsConfirmation?: boolean;
-          evicts?: ToolboxEntry;
-          evicted?: ToolboxEntry | null;
-          alreadySaved?: boolean;
-          error?: string;
-        } | null;
-
-        if (response.status === 409 && data?.needsConfirmation && data.evicts) {
-          // Nothing was written server-side, so raising the overlay costs the
-          // user nothing and declining leaves the Toolbox exactly as it was.
-          setPendingEviction(data.evicts);
-          return;
-        }
-        if (!response.ok || !data?.ok) {
-          setStatus(data?.error ?? "Could not save this chat to the Toolbox.");
-          return;
-        }
-        setPendingEviction(null);
-        setStatus(
-          data.alreadySaved
-            ? "Already in your Toolbox — save point updated."
-            : data.evicted
-              ? `Saved. "${data.evicted.title}" was removed from the Toolbox.`
-              : "Saved to your Toolbox."
-        );
-        await refresh();
-      } catch {
-        setStatus("Could not reach the Toolbox. Try again.");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [refresh]
-  );
-
-  const confirmEviction = useCallback(async () => {
-    if (skipWarningChecked && typeof window !== "undefined") {
-      window.localStorage.setItem(SKIP_WARNING_KEY, "true");
-    }
-    setPendingEviction(null);
-    await save(true);
-  }, [save, skipWarningChecked]);
+  // The save flow (two-phase confirmation included) is shared with the
+  // command-surface "Add to toolbox" button — one implementation, one promise.
+  const {
+    busy: saveBusy,
+    status,
+    pendingEviction,
+    skipWarningChecked,
+    setSkipWarningChecked,
+    save,
+    confirmEviction,
+    dismissEviction,
+  } = useToolboxSave({ onSaved: refresh });
+  const busy = saveBusy || removeBusy;
 
   const remove = useCallback(
     async (id: string) => {
-      setBusy(true);
+      setRemoveBusy(true);
       try {
         await fetch(`/api/toolbox/${encodeURIComponent(id)}`, {
           method: "DELETE",
@@ -168,7 +105,7 @@ export default function ToolboxPanel() {
         });
         await refresh();
       } finally {
-        setBusy(false);
+        setRemoveBusy(false);
       }
     },
     [refresh]
@@ -308,55 +245,13 @@ export default function ToolboxPanel() {
       )}
 
       {pendingEviction ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="toolbox-evict-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
-            <div className="flex items-center gap-2">
-              <TriangleAlert size={17} className="text-amber-500" aria-hidden />
-              <h2 id="toolbox-evict-title" className="text-sm font-semibold text-foreground">
-                Your Toolbox is full
-              </h2>
-            </div>
-            <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
-              All {listing.limit} slots are in use. Saving this chat will remove your oldest saved
-              chat, <span className="font-semibold text-foreground">{pendingEviction.title}</span>,
-              from the Toolbox.
-            </p>
-            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-              The conversation itself is not deleted — it stays in History. Only its Toolbox slot is
-              freed.
-            </p>
-            <label className="mt-4 flex cursor-pointer items-start gap-2 text-[12px] leading-5 text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={skipWarningChecked}
-                onChange={(event) => setSkipWarningChecked(event.target.checked)}
-                className="mt-0.5 cursor-pointer"
-              />
-              Don&apos;t ask again — always replace the oldest saved chat.
-            </label>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPendingEviction(null)}
-                className="cursor-pointer rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted"
-              >
-                No, keep it
-              </button>
-              <button
-                type="button"
-                onClick={() => void confirmEviction()}
-                className="cursor-pointer rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90"
-              >
-                Yes, replace it
-              </button>
-            </div>
-          </div>
-        </div>
+        <ToolboxEvictionOverlay
+          pending={pendingEviction}
+          skipWarningChecked={skipWarningChecked}
+          onSkipWarningChange={setSkipWarningChecked}
+          onConfirm={() => void confirmEviction()}
+          onDismiss={dismissEviction}
+        />
       ) : null}
     </div>
   );

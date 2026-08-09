@@ -8,7 +8,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, Users, X } from "lucide-react";
+import { ArrowRight, Briefcase, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, Users, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import { WorkspaceExtraSlotsProvider } from "@/components/workspace/WorkspaceExtraSlots";
 import ChatWidget from "@/components/ChatWidget";
@@ -32,7 +32,9 @@ import { markNavUpdate } from "@/lib/ui/navUpdates";
 import { requestWorkspaceNav } from "@/lib/ui/workspaceNav";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
-import { canAccessFeature } from "@/lib/featureAccess";
+import { canAccessFeature, toolboxSlotLimit } from "@/lib/featureAccess";
+import ToolboxEvictionOverlay from "@/components/workspace/ToolboxEvictionOverlay";
+import { useToolboxSave } from "@/components/workspace/useToolboxSave";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import {
   buildExportModel,
@@ -1156,6 +1158,27 @@ export function ChatbotWorkspacePage({
   const canViewSupplementLines = featureFlags?.supplement_lines ?? false;
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const plan = viewerAccess?.plan ?? "none";
+  // The Toolbox is not offered at all on free accounts — the header button
+  // follows the same rule as the rail panel rather than advertising an absence.
+  const canUseToolbox = toolboxSlotLimit(plan) > 0;
+  const {
+    busy: toolboxBusy,
+    status: toolboxStatus,
+    setStatus: setToolboxStatus,
+    pendingEviction: toolboxPendingEviction,
+    skipWarningChecked: toolboxSkipWarning,
+    setSkipWarningChecked: setToolboxSkipWarning,
+    save: saveToToolbox,
+    confirmEviction: confirmToolboxEviction,
+    dismissEviction: dismissToolboxEviction,
+  } = useToolboxSave();
+  // The header has no persistent status area; the confirmation reads once and
+  // clears itself instead of squatting above the chat.
+  useEffect(() => {
+    if (!toolboxStatus) return;
+    const timer = window.setTimeout(() => setToolboxStatus(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toolboxStatus, setToolboxStatus]);
   const canUseSnapshotExport = canAccessFeature(plan, "snapshot_export");
   const canUseBasicPdfExport = canAccessFeature(plan, "repair_intelligence_export");
   const canUseEstimateScrubberExport = canAccessFeature(plan, "estimate_scrubber_export");
@@ -1623,6 +1646,18 @@ export function ChatbotWorkspacePage({
                                 Open review
                               </button>
                             )}
+                            {canUseToolbox && (
+                              <button
+                                type="button"
+                                onClick={() => void saveToToolbox(false)}
+                                disabled={toolboxBusy}
+                                title="Save this chat and its files to your Toolbox"
+                                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/15 px-3 py-1.5 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/25 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <Briefcase size={13} aria-hidden />
+                                Add to toolbox
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setChatOnlyMode((value) => !value)}
@@ -1645,6 +1680,20 @@ export function ChatbotWorkspacePage({
                             </button>
                           </div>
                         </div>
+                        {toolboxStatus ? (
+                          <div className="border-b border-border bg-muted/35 px-3 py-1.5 text-[11px] text-muted-foreground">
+                            {toolboxStatus}
+                          </div>
+                        ) : null}
+                        {toolboxPendingEviction ? (
+                          <ToolboxEvictionOverlay
+                            pending={toolboxPendingEviction}
+                            skipWarningChecked={toolboxSkipWarning}
+                            onSkipWarningChange={setToolboxSkipWarning}
+                            onConfirm={() => void confirmToolboxEviction()}
+                            onDismiss={dismissToolboxEviction}
+                          />
+                        ) : null}
                         {assistanceProfileResolved && !assistanceProfile ? (
                           <div className="border-b border-border bg-muted/35 px-3 py-2">
                             <div className="flex flex-wrap items-center gap-2">
