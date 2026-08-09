@@ -58,6 +58,8 @@ export default function ToolboxPanel() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [pendingEviction, setPendingEviction] = useState<ToolboxEntry | null>(null);
+  /** Distinct from `locked`. A failed load is not a plan limitation. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [skipWarningChecked, setSkipWarningChecked] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -65,6 +67,7 @@ export default function ToolboxPanel() {
       const response = await fetch("/api/toolbox", { cache: "no-store", credentials: "same-origin" });
       const data = (await response.json().catch(() => null)) as (Listing & { ok?: boolean }) | null;
       if (data && response.ok) {
+        setLoadFailed(false);
         setListing({
           entries: data.entries ?? [],
           limit: data.limit ?? 0,
@@ -72,14 +75,24 @@ export default function ToolboxPanel() {
           slotsUsed: data.slotsUsed ?? 0,
           slotsRemaining: data.slotsRemaining ?? 0,
         });
+      } else {
+        // A 403 IS a plan limitation and carries locked: true. Anything else is
+        // a failure, and must not be dressed up as one.
+        setLoadFailed(response.status !== 403);
       }
+    } catch {
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    // Deferred off the mount commit: refresh now has a synchronous failure path
+    // (a fetch that throws before its first await), and setting state during
+    // commit is the render cascade React warns about.
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   const save = useCallback(
@@ -165,6 +178,39 @@ export default function ToolboxPanel() {
     return (
       <div className="flex items-center gap-2 rounded-2xl border border-border bg-card p-6 text-[13px] text-muted-foreground">
         <Loader2 size={15} className="animate-spin" aria-hidden /> Loading your Toolbox…
+      </div>
+    );
+  }
+
+  // A LOAD FAILURE IS NOT A PLAN LIMITATION.
+  //
+  // This branch previously fired on `!listing`, which is also the state after
+  // any failed request — so a server error told a paying customer their plan
+  // did not include the feature. Shipped that way, with the Toolbox live in
+  // production before its migration had run, every Pro user clicking Toolbox
+  // was shown an upsell for the plan they were already paying for. Three
+  // distinct states (free plan, server error, network failure) must not
+  // collapse into one message.
+  if (loadFailed) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Briefcase size={16} className="text-[var(--accent)]" aria-hidden /> Toolbox
+        </div>
+        <p className="mt-2 max-w-prose text-[13px] leading-6 text-muted-foreground">
+          The Toolbox could not be loaded. This is a problem on our side, not with your plan —
+          your saved chats are unaffected.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            void refresh();
+          }}
+          className="mt-3 cursor-pointer rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted"
+        >
+          Try again
+        </button>
       </div>
     );
   }
