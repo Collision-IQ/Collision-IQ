@@ -44,6 +44,12 @@ export type CarrierReportSection = {
 
 export type CarrierReportDocument = {
   filename?: string;
+  /**
+   * "classic" (default): uppercase section headings, plain bullets — the
+   * professional exports. "friendly": sentence-case headings and bold bullet
+   * lead-ins — the customer report, which is read by the vehicle owner.
+   */
+  presentation?: "classic" | "friendly";
   brand: {
     companyName: string;
     reportLabel: string;
@@ -73,18 +79,28 @@ export type CarrierReportDocument = {
 export function dedupeRepeatedDocumentSentences(document: CarrierReportDocument): CarrierReportDocument {
   const seen = new Set<string>();
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // Per paragraph: the sentence-boundary split also consumes the "\n\n" that
+  // separates deliberately built paragraphs, and joining with " " flattened a
+  // multi-paragraph body back into one wall of text.
   const filterText = (text: string): string =>
     text
-      .split(/(?<=[.!?])\s+/)
-      .filter((sentence) => {
-        if (sentence.trim().length < 90) return true;
-        const key = normalize(sentence);
-        if (!key) return true;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .join(" ")
+      .split(/\n{2,}/)
+      .map((paragraph) =>
+        paragraph
+          .split(/(?<=[.!?])\s+/)
+          .filter((sentence) => {
+            if (sentence.trim().length < 90) return true;
+            const key = normalize(sentence);
+            if (!key) return true;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .join(" ")
+          .trim()
+      )
+      .filter(Boolean)
+      .join("\n\n")
       .trim();
   // Summary tiles are headlines — seed them as already-seen so a section body
   // never repeats a tile verbatim (the "Repair Conclusion" tile text printed

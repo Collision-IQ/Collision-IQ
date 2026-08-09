@@ -116,3 +116,35 @@ describe("the insurer IS redacted on export", () => {
     expect(out).toContain("$22,886.68");
   });
 });
+
+describe("a sentence boundary is not a label separator", () => {
+  // "…for the vehicle owner. Final repair decisions should…" used to parse as
+  // label "owner" + person value "Final repair decisions should", which was
+  // then captured and blanket-replaced with [REDACTED_PERSON] document-wide.
+  it("leaves prose after 'owner.' intact", () => {
+    const out = redactDownloadContent(
+      "This report is written for the vehicle owner. Final repair decisions should still be confirmed by the repair facility."
+    );
+    expect(out).not.toContain("[REDACTED_PERSON]");
+    expect(out).toContain("Final repair decisions should still be confirmed");
+  });
+
+  it("leaves prose after 'insurance.' intact", () => {
+    const out = redactDownloadContent(
+      "You are being paid through the other driver's insurance. Ask for a written explanation of the reductions."
+    );
+    expect(out).toContain("Ask for a written explanation");
+  });
+
+  it("still redacts an abbreviated identifier label", () => {
+    const out = redactDownloadContent("Claim No. 012283486000000800001");
+    expect(out).toContain("[REDACTED_CLAIM]");
+    expect(out).not.toContain("012283486000000800001");
+  });
+
+  it("still redacts a colon-labelled owner", () => {
+    const out = redactDownloadContent("Owner: MARCOLINO, JOSHUA");
+    expect(out).toContain("[REDACTED_PERSON]");
+    expect(out).not.toContain("MARCOLINO");
+  });
+});

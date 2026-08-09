@@ -125,9 +125,9 @@ run("customer report heading aligns with carrier-selected posture", () => {
     vehicle: "2020 Tesla Model 3",
     selectedEstimatePosture: posture,
   });
-  const section = document.sections.find((item) => /what this means for you/i.test(item.title));
+  const section = document.sections.find((item) => /what this actually means for you/i.test(item.title));
 
-  assert.match(section?.title ?? "", /What This Means for You/);
+  assert.match(section?.title ?? "", /What this actually means for you/);
   assert.doesNotMatch(JSON.stringify(section), /shop estimate appears materially more complete/i);
   assert.match(JSON.stringify(section), /insurance estimate appears more complete/i);
 });
@@ -146,7 +146,7 @@ run("customer HTML heading aligns with shop-selected posture", () => {
     selectedEstimatePosture: posture,
   });
 
-  assert.match(html, /What This Means for You/);
+  assert.match(html, /What this actually means for you/);
   assert.doesNotMatch(html, /carrier estimate appears materially more complete/i);
   assert.match(html, /shop estimate appears more complete/i);
 });
@@ -176,9 +176,9 @@ run("customer report uses neutral heading for undetermined posture", () => {
     vehicle: "2020 Tesla Model 3",
     selectedEstimatePosture: posture,
   });
-  const section = document.sections.find((item) => /what this means for you/i.test(item.title));
+  const section = document.sections.find((item) => /what this actually means for you/i.test(item.title));
 
-  assert.match(section?.title ?? "", /What This Means for You/i);
+  assert.match(section?.title ?? "", /What this actually means for you/i);
   assert.doesNotMatch(JSON.stringify(section), /shop estimate appears materially more complete/i);
   assert.match(JSON.stringify(section), /estimate posture is not yet clear/i);
 });
@@ -247,7 +247,7 @@ run("single-estimate customer report drops carrier-comparison wording and headin
 
   assert.equal(
     titles,
-    "Plain-English Summary|What This Means for You|Key Findings|Why These Items Matter|Questions to Ask|Supporting Documentation|Technical Appendix"
+    "The short version|What this actually means for you|What still needs to be double-checked|Why this actually matters|What you can do next|Supporting documentation on file|Where things stand"
   );
   assert.doesNotMatch(flattened, /insurance estimate|insurer|carrier estimate|\[REDACTED_INSURER\]/i);
   assert.doesNotMatch(titles, /estimates differ|insurance estimate/i);

@@ -107,6 +107,7 @@ export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise
       section,
       state,
       layout,
+      presentation: redactedInput.presentation ?? "classic",
     });
     state.y += SECTION_GAP + 1;
   }
@@ -622,6 +623,51 @@ export function estimateComparisonRowHeight(
   return height + BLOCK_GAP;
 }
 
+type BulletLine =
+  | { text: string; bold: boolean; indent: number }
+  | { segments: Array<{ text: string; bold: boolean }> };
+
+/**
+ * Wrap a "Lead: rest" bullet with the lead in bold. The first line is filled
+ * word-by-word against the width REMAINING after the measured bold lead, so
+ * the heavier glyphs never push the line past the column; the rest wraps at
+ * full width. Assumes the caller has already set font size 10.
+ */
+function splitLeadBulletLines(doc: jsPDF, lead: string, rest: string, width: number): BulletLine[] {
+  setPdfFont(doc, "bold");
+  const leadWidth = doc.getTextWidth(`${lead} `);
+  setPdfFont(doc);
+  const firstLineWidth = width - leadWidth;
+  if (firstLineWidth < 20) {
+    return [
+      { segments: [{ text: lead, bold: true }] },
+      ...doc.splitTextToSize(rest, width).map((line: string) => ({ text: line, bold: false, indent: 0 })),
+    ];
+  }
+  const words = rest.split(/\s+/).filter(Boolean);
+  let firstLine = "";
+  let consumed = 0;
+  for (const word of words) {
+    const candidate = firstLine ? `${firstLine} ${word}` : word;
+    if (doc.getTextWidth(candidate) <= firstLineWidth) {
+      firstLine = candidate;
+      consumed += 1;
+      continue;
+    }
+    break;
+  }
+  const lines: BulletLine[] = [
+    { segments: [{ text: `${lead} `, bold: true }, { text: firstLine, bold: false }] },
+  ];
+  const remainder = words.slice(consumed).join(" ");
+  if (remainder) {
+    for (const line of doc.splitTextToSize(remainder, width)) {
+      lines.push({ text: line, bold: false, indent: 0 });
+    }
+  }
+  return lines;
+}
+
 function drawSection(
   doc: jsPDF,
   params: {
@@ -630,11 +676,13 @@ function drawSection(
     section: CarrierReportDocument["sections"][number];
     state: PdfRenderState;
     layout: PdfPageLayout;
+    presentation?: "classic" | "friendly";
   }
 ) {
+  const presentation = params.presentation ?? "classic";
   const startContinuationPage = () => {
     addPdfPage(doc, params.state, params.layout, { force: true });
-    drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, true);
+    drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, true, presentation);
   };
 
   ensurePdfSpace(
@@ -643,7 +691,7 @@ function drawSection(
     params.layout,
     Math.min(estimateSectionKeepTogetherHeight(doc, params.width, params.section), params.layout.usableHeight)
   );
-  drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, false);
+  drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, false, presentation);
 
   if (params.section.body) {
     params.state.y += HEADING_BODY_GAP;
@@ -690,10 +738,19 @@ function drawSection(
       doc.setFontSize(10);
       doc.setTextColor(62, 65, 70);
 
-      for (const [index, line] of doc.splitTextToSize(bullet, params.width - 8).entries()) {
+      // Friendly documents bold a short "Lead:" phrase so a reader scanning
+      // the bullets can find the one that concerns them. The lead is drawn in
+      // bold and the remainder reflowed around its measured width, so the
+      // wrap stays honest to the bolder (wider) glyphs.
+      const leadMatch =
+        presentation === "friendly" ? /^([^:\n]{3,60}:)\s+(\S[\s\S]*)$/.exec(bullet) : null;
+      const lines = leadMatch
+        ? splitLeadBulletLines(doc, leadMatch[1], leadMatch[2], params.width - 8)
+        : doc.splitTextToSize(bullet, params.width - 8).map((line: string) => ({ text: line, bold: false as const, indent: 0 }));
+
+      for (const [index, line] of lines.entries()) {
         if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
           startContinuationPage();
-          setPdfFont(doc);
           doc.setFontSize(10);
           doc.setTextColor(62, 65, 70);
           params.state.y += HEADING_BODY_GAP;
@@ -702,7 +759,19 @@ function drawSection(
           doc.setFillColor(190, 80, 30);
           doc.circle(params.x + 1.8, params.state.y - 1.2, 0.8, "F");
         }
-        doc.text(line, params.x + 5, params.state.y);
+        if (typeof line === "object" && "segments" in line) {
+          let cursorX = params.x + 5;
+          for (const segment of line.segments) {
+            setPdfFont(doc, segment.bold ? "bold" : undefined);
+            doc.text(segment.text, cursorX, params.state.y);
+            cursorX += doc.getTextWidth(segment.text);
+          }
+          setPdfFont(doc);
+        } else {
+          setPdfFont(doc, line.bold ? "bold" : undefined);
+          doc.text(line.text, params.x + 5, params.state.y);
+          setPdfFont(doc);
+        }
         params.state.y += LINE_HEIGHT;
       }
       params.state.y += BLOCK_GAP;
@@ -716,12 +785,23 @@ function drawSectionHeading(
   width: number,
   title: string,
   state: PdfRenderState,
-  continued: boolean
+  continued: boolean,
+  presentation: "classic" | "friendly" = "classic"
 ) {
   setPdfFont(doc, "bold");
   doc.setFontSize(11.5);
   doc.setTextColor(190, 80, 30);
-  doc.text(continued ? `${title.toUpperCase()} (CONT.)` : title.toUpperCase(), x, state.y);
+  // Friendly documents keep the heading as written ("The short version");
+  // classic exports keep their uppercase convention.
+  const headingText =
+    presentation === "friendly"
+      ? continued
+        ? `${title} (continued)`
+        : title
+      : continued
+        ? `${title.toUpperCase()} (CONT.)`
+        : title.toUpperCase();
+  doc.text(headingText, x, state.y);
 
   doc.setDrawColor(226, 228, 233);
   doc.setLineWidth(0.25);

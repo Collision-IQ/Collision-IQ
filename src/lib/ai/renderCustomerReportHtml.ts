@@ -183,32 +183,32 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     </div>
 
     <div class="section">
-      <h2>Plain-English Summary</h2>
+      <h2>The short version</h2>
       <p>${escapeHtml(openingSummary)}</p>
     </div>
 
     <div class="section">
-      <h2>What This Means for You</h2>
+      <h2>What this actually means for you</h2>
       <p>${escapeHtml([strongerPlan, bottomLine].filter(Boolean).join(" "))}</p>
     </div>
 
     <div class="section">
-      <h2>Key Findings</h2>
+      <h2>What still needs to be double-checked</h2>
       <ul>${renderList(keyFindings)}</ul>
     </div>
 
     <div class="section">
-      <h2>Why These Items Matter</h2>
+      <h2>Why this actually matters</h2>
       <p>${escapeHtml(safetyFirst)}</p>
     </div>
 
     <div class="section">
-      <h2>Questions to Ask</h2>
+      <h2>What you can do next</h2>
       <ul>${renderList(questionsToAsk)}</ul>
     </div>
 
     <div class="section">
-      <h2>Supporting Documentation</h2>
+      <h2>Supporting documentation on file</h2>
       <ul>${renderList([
         ...keyFindings.slice(0, 4),
         "If repairs are complete, request the final invoice, scan, calibration, alignment, and delivery documentation.",
@@ -216,7 +216,7 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     </div>
 
     <div class="section">
-      <h2>Technical Appendix</h2>
+      <h2>Where things stand</h2>
       <ul>${renderList([
         "Repair completion status is not established from the reviewed file.",
         "If repairs are ongoing, open items should remain available for supplement review.",

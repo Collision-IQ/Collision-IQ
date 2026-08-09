@@ -79,6 +79,15 @@ type LabelRule = {
 	captureValue?: boolean;
 	/** Omit only for rules whose value is transformed rather than replaced. */
 	valueShape?: ValueShape;
+	/**
+	 * Allow "." in the label/value separator. Needed for identifier labels
+	 * whose printed form ends in an abbreviation ("Claim No. 0122…"). Off for
+	 * prose-shaped values: with the period allowed, the sentence boundary in
+	 * "…for the vehicle owner. Final repair decisions should…" parsed as label
+	 * "owner" + value "Final repair decisions should", which was then captured
+	 * and blanket-replaced with [REDACTED_PERSON] across the whole document.
+	 */
+	allowPeriodSeparator?: boolean;
 };
 
 const LABEL_RULES: LabelRule[] = [
@@ -114,26 +123,31 @@ const LABEL_RULES: LabelRule[] = [
 		labels: ["claim", "claim number", "claim no", "claim #", "claim id"],
 		replacementToken: "CLAIM",
 		valueShape: IDENTIFIER_SHAPE,
+		allowPeriodSeparator: true,
 	},
 	{
 		labels: ["policy", "policy number", "policy no", "policy #", "policy id"],
 		replacementToken: "POLICY",
 		valueShape: IDENTIFIER_SHAPE,
+		allowPeriodSeparator: true,
 	},
 	{
 		labels: ["license plate", "plate", "plate number"],
 		replacementToken: "PLATE",
 		valueShape: IDENTIFIER_SHAPE,
+		allowPeriodSeparator: true,
 	},
 	{
 		labels: ["zip", "zip code", "zipcode", "postal", "postal code"],
 		replacementToken: "ZIP",
 		valueShape: IDENTIFIER_SHAPE,
+		allowPeriodSeparator: true,
 	},
 	{
 		labels: ["vin", "vehicle vin"],
 		replacementToken: "VIN",
 		valueTransformer: (value) => maskVinInText(value),
+		allowPeriodSeparator: true,
 	},
 ];
 
@@ -199,8 +213,9 @@ function applyLabelRule(input: string, rule: LabelRule): { text: string; capture
 		.join("|");
 	const capturedValues: string[] = [];
 	// Separators come in runs and include the period of "No." — "Claim #:" is two
-	// characters, and taking only one leaves the value starting at ":".
-	const separator = "\\s*[:#.-]{1,3}\\s*";
+	// characters, and taking only one leaves the value starting at ":". The
+	// period is opt-in per rule; see LabelRule.allowPeriodSeparator.
+	const separator = rule.allowPeriodSeparator ? "\\s*[:#.-]{1,3}\\s*" : "\\s*[:#-]{1,3}\\s*";
 	const linePattern = new RegExp(`(^|\\n)(\\s*(?:${escapedLabels})${separator})([^\\n]+)`, "gi");
 	const inlinePattern = new RegExp(`(\\b(?:${escapedLabels})${separator})([^\\n,;|]+)`, "gi");
 

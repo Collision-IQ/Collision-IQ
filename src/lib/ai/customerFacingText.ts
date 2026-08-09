@@ -33,8 +33,10 @@ const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
     "Fit-sensitive replacement part support is not verified from the reviewed file",
   ],
   [
+    // "each open item", never "this item" — the sentence lands in bullet lists
+    // where "this" has no antecedent and reads as a template artifact.
     /\bRequest\s+the\s+missing\s+supporting\s+documentation\s+or\s+a\s+written\s+estimate\s+explanation\b/gi,
-    "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
+    "Ask the insurer or repair shop to explain whether each open item is included, and if not, why.",
   ],
 ];
 
@@ -77,7 +79,25 @@ const DEBUG_LINE_PATTERNS = [
 
 export function toCustomerFacingText(value?: string | null, fallback = ""): string {
   if (!value) return fallback;
+  const output = cleanCustomerFacingCore(value);
+  const sanitized = sanitizeUserFacingEvidenceText(output);
+  const normalized = normalizeNarrativeProse(sanitized, "CUSTOMER_SUMMARY");
+  return cleanCustomerExportFragments(normalized) || cleanCustomerExportFragments(normalizeNarrativeProse(sanitizeUserFacingEvidenceText(fallback), "CUSTOMER_SUMMARY")) || fallback;
+}
 
+/**
+ * The same scrubbing as toCustomerFacingText, WITHOUT prose normalization.
+ * For grid labels, values, and headings: "Vehicle" is not a sentence, and the
+ * narrative normalizer's terminal punctuation turned every label and dollar
+ * figure on the customer report into "VEHICLE." and "$4,959.35.".
+ */
+export function toCustomerFacingInline(value?: string | null, fallback = ""): string {
+  if (!value) return fallback;
+  const sanitized = sanitizeUserFacingEvidenceText(cleanCustomerFacingCore(value));
+  return cleanCustomerExportFragments(sanitized).trim() || fallback;
+}
+
+function cleanCustomerFacingCore(value: string): string {
   let output = value.replace(/\r/g, " ");
   for (const [pattern, replacement] of TECHNICAL_TRANSLATIONS) {
     output = output.replace(pattern, replacement);
@@ -111,7 +131,11 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
 
   output = output
     .replace(/(?:^|[\s;|])(?:Evidence|Evidence references?|Risk if omitted|Support|Support basis|Confidence|Source|Runtime|Immutable)\s*:\s*[^.;|\n]*/gi, " ")
-    .replace(/\bDOCUMENTED\b|\bSUPPORTABLE_BUT_UNCONFIRMED\b|\bOPEN_PENDING_FURTHER_DOCUMENTATION\b|\bREFERENCED_NOT_PRODUCED\b/gi, "")
+    // Case-SENSITIVE on purpose: these are internal ALL-CAPS status tokens.
+    // With /i this rule deleted the English word "documented" from every
+    // sentence — "be documented and submitted" shipped as "be and submitted",
+    // and each new mangling grew another one-off repair pattern downstream.
+    .replace(/\bDOCUMENTED\b|\bSUPPORTABLE_BUT_UNCONFIRMED\b|\bOPEN_PENDING_FURTHER_DOCUMENTATION\b|\bREFERENCED_NOT_PRODUCED\b/g, "")
     .replace(/\bAI\s+audit\b|\baudit\s+language\b/gi, "")
     .replace(/\s*;\s*(?:Evidence|Risk|Support|Source|Confidence|Citation)\s*:[^.;]*/gi, "")
     .replace(/\s*\|\s*(?:Evidence|Risk|Support|Source|Confidence|Citation)\s*:[^|.]*/gi, "")
@@ -120,9 +144,7 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     .replace(/^[\s:;|.-]+|[\s:;|-]+$/g, "")
     .trim();
 
-  const sanitized = sanitizeUserFacingEvidenceText(output);
-  const normalized = normalizeNarrativeProse(sanitized, "CUSTOMER_SUMMARY");
-  return cleanCustomerExportFragments(normalized) || cleanCustomerExportFragments(normalizeNarrativeProse(sanitizeUserFacingEvidenceText(fallback), "CUSTOMER_SUMMARY")) || fallback;
+  return output;
 }
 
 function cleanCustomerExportFragments(value: string): string {
@@ -191,34 +213,45 @@ export function sanitizeCustomerReportForRender(report: CustomerReport): Custome
 }
 
 export function sanitizeCustomerFacingDocument(document: CarrierReportDocument): CarrierReportDocument {
+  // Prose fields go through the narrative normalizer; grid fields (labels,
+  // values, titles, the generated-date line) use the inline variant so they
+  // are never punctuated as sentences.
   return {
     ...document,
     brand: {
       ...document.brand,
-      companyName: toCustomerFacingText(document.brand.companyName, document.brand.companyName),
-      reportLabel: toCustomerFacingText(document.brand.reportLabel, document.brand.reportLabel),
+      companyName: toCustomerFacingInline(document.brand.companyName, document.brand.companyName),
+      reportLabel: toCustomerFacingInline(document.brand.reportLabel, document.brand.reportLabel),
     },
     header: {
-      title: toCustomerFacingText(document.header.title, document.header.title),
+      title: toCustomerFacingInline(document.header.title, document.header.title),
       subtitle: toCustomerFacingText(document.header.subtitle, document.header.subtitle),
-      generatedLabel: toCustomerFacingText(document.header.generatedLabel, document.header.generatedLabel),
+      generatedLabel: toCustomerFacingInline(document.header.generatedLabel, document.header.generatedLabel),
     },
     summary: document.summary.map((item) => ({
-      label: toCustomerFacingText(item.label, item.label),
-      value: toCustomerFacingText(item.value, item.value),
+      label: toCustomerFacingInline(item.label, item.label),
+      value: toCustomerFacingInline(item.value, item.value),
     })),
     sections: document.sections.map((section) => ({
       ...section,
-      title: toCustomerFacingText(section.title, section.title),
-      body: section.body ? toCustomerFacingText(section.body) : undefined,
+      title: toCustomerFacingInline(section.title, section.title),
+      // Sanitize per paragraph: the core cleaner flattens newlines, and a body
+      // deliberately built as separate paragraphs must not ship as one wall.
+      body: section.body
+        ? section.body
+            .split(/\n{2,}/)
+            .map((paragraph) => toCustomerFacingText(paragraph))
+            .filter(Boolean)
+            .join("\n\n")
+        : undefined,
       bullets: section.bullets ? toCustomerFacingList(section.bullets, []) : undefined,
       comparisonRows: section.comparisonRows?.map((row) => ({
-        label: toCustomerFacingText(row.label, row.label),
-        leftLabel: toCustomerFacingText(row.leftLabel, row.leftLabel),
-        leftValue: toCustomerFacingText(row.leftValue, row.leftValue),
-        rightLabel: toCustomerFacingText(row.rightLabel, row.rightLabel),
-        rightValue: toCustomerFacingText(row.rightValue, row.rightValue),
-        delta: row.delta ? toCustomerFacingText(row.delta, row.delta) : undefined,
+        label: toCustomerFacingInline(row.label, row.label),
+        leftLabel: toCustomerFacingInline(row.leftLabel, row.leftLabel),
+        leftValue: toCustomerFacingInline(row.leftValue, row.leftValue),
+        rightLabel: toCustomerFacingInline(row.rightLabel, row.rightLabel),
+        rightValue: toCustomerFacingInline(row.rightValue, row.rightValue),
+        delta: row.delta ? toCustomerFacingInline(row.delta, row.delta) : undefined,
         note: row.note ? toCustomerFacingText(row.note) : undefined,
       })),
     })),

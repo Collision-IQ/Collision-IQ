@@ -159,28 +159,36 @@ export function buildCustomerReportPdf({
   const askForItems = buildAskForItems(sanitizedReport, singleEstimateScrub).map(singleEstimateScrub);
 
   // Approved customer-facing section order — these exact headings are the
-  // contract; the prose sanitizer must not re-case them.
+  // contract; the prose sanitizer must not re-case them. Conversational on
+  // purpose: this report is read by the vehicle owner, not an adjuster.
   const APPROVED_SECTION_TITLES = [
-    "Plain-English Summary",
-    "What This Means for You",
-    "Key Findings",
-    "Why These Items Matter",
-    "Questions to Ask",
-    "Supporting Documentation",
-    "Technical Appendix",
+    "The short version",
+    "What this actually means for you",
+    "What still needs to be double-checked",
+    "Why this actually matters",
+    "What you can do next",
+    "Supporting documentation on file",
+    "Where things stand",
   ];
 
   const sanitizedDocument = sanitizeCustomerFacingDocument({
     filename: filename || "customer-report.pdf",
+    presentation: "friendly",
     brand: {
       companyName: "Collision Academy",
       reportLabel: "Customer Report",
       logoPath: "/brand/logos/logo-horizontal.png",
     },
     header: {
-      title: sanitizedReport.title || "Customer Report",
+      // Second person, addressed to the owner — "Your 2020 Honda Civic Coupe
+      // EX: What's Going On With Your Repair" — with the LLM title only as a
+      // fallback when no vehicle was identified.
+      title:
+        vehicle && !/^(?:vehicle|unspecified|not provided)$/i.test(vehicle.trim())
+          ? `Your ${vehicle}: What's Going On With Your Repair`
+          : sanitizedReport.title || "Customer Report",
       subtitle:
-        "A plain-language explanation of the repair plan, what is supported, what still needs proof, and the practical next steps.",
+        "A plain-language look at your repair plan, what's already backed up by paperwork, what still needs proof, and what to do next.",
       generatedLabel:
         generatedAt ||
         `Generated ${new Date().toLocaleDateString("en-US", {
@@ -209,12 +217,16 @@ export function buildCustomerReportPdf({
       },
       {
         title: "What This Means for You",
-        body: toCustomerFacingText(
+        // Joined as PARAGRAPHS, not one glued blob — the three parts come from
+        // different sources and read as a wall of text when run together. Each
+        // part is already sanitized; the document sanitizer re-sanitizes per
+        // paragraph, preserving the breaks (toCustomerFacingText here would
+        // flatten them).
+        body:
           [estimatePrecisionNote, estimatePostureBody, singleEstimateScrub(sanitizedReport.bottomLine)]
             .filter(Boolean)
-            .join(" "),
-          "The safest next step is to have the estimate reviewed against the actual repair needs before treating it as complete."
-        ),
+            .join("\n\n") ||
+          "The safest next step is to have the estimate reviewed against the actual repair needs before treating it as complete.",
       },
       {
         title: "Key Findings",
@@ -346,7 +358,7 @@ function buildAskForItems(
   return toCustomerFacingList(
     [
       ...report.yourOptions,
-      "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
+      "Ask the insurer or repair shop to explain whether each open item is included, and if not, why.",
       "Ask what documentation is not produced in the reviewed file and what would be handled as a supplement if repairs are ongoing.",
     ].map(transform),
     [
