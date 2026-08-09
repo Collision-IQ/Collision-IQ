@@ -41,6 +41,16 @@ const nextConfig: NextConfig = {
     "/api/reports/citation-density/annotated-estimate": [
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
       "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      // The forensic report masthead reads the wordmark from disk. Files under
+      // public/ are served as static assets but are NOT traced into a function
+      // bundle, so without this the deployed report falls back to the typeset
+      // mark while local runs show the logo — a difference nobody would catch.
+      "./public/iq/iq_logo.png",
+    ],
+    "/api/reports/oem-citation-density/annotated-estimate": [
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      "./public/iq/iq_logo.png",
     ],
     "/api/upload": OCR_TRACE_INCLUDES,
     "/api/upload/finalize": OCR_TRACE_INCLUDES,

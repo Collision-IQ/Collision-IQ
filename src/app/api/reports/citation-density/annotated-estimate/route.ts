@@ -31,6 +31,7 @@ import {
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
 import { resolveCanonicalDeltaSetFromFixtures } from "@/lib/reports/canonicalDeltaFixtureRegistry";
+import { buildVehicleLabel } from "@/lib/ai/vehicleContext";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import {
   buildFileReviewLedger,
@@ -438,6 +439,17 @@ export async function POST(request: Request) {
         vehicleMake,
         jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
+        // The forensic report's header block. The decoded vehicle identity is
+        // authoritative here — it survives a header the estimate prints across
+        // two lines — and the annotator falls back to reading the document
+        // itself for anything the report does not carry.
+        reportContext: {
+          vehicle: buildVehicleLabel(activeReport.report.vehicle) || null,
+          vin: activeReport.report.vehicle?.vin ?? null,
+          insurer: activeReport.report.analysis?.estimateFacts?.insurer ?? null,
+          mileage: formatReportMileage(activeReport.report.analysis?.estimateFacts?.mileage),
+          jurisdiction,
+        },
         request: {
           findingIds: coerceStringArray(body.findingIds),
           annotationMode: coerceAnnotationMode(body.annotationMode),
@@ -665,6 +677,13 @@ function logAnnotatedEstimateRoute(payload: Record<string, unknown>) {
 
 function coerceString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Odometer for the report header, or null when none was extracted. */
+function formatReportMileage(mileage: number | null | undefined): string | null {
+  return typeof mileage === "number" && Number.isFinite(mileage) && mileage > 0
+    ? `${mileage.toLocaleString("en-US")} mi`
+    : null;
 }
 
 function coerceTargetEstimate(value: unknown): CitationDensityTargetEstimate {

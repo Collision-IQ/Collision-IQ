@@ -230,6 +230,40 @@ class Writer {
     this.cursor.y -= 4;
   }
 
+  /**
+   * Claim identity under the title: label column, value column. Values arrive
+   * already redacted — the caller owns the policy because it owns the raw
+   * identifiers; this method must never see an unredacted VIN or claim number.
+   */
+  identityRows(rows: Array<{ label: string; value: string }>) {
+    const size = 9;
+    const labelWidth = 112;
+    for (const row of rows) {
+      const lines = this.wrap(row.value, size, this.font, this.width - labelWidth);
+      lines.forEach((line, index) => {
+        this.reserve(size + LINE_GAP);
+        if (index === 0) {
+          this.cursor.page.drawText(row.label, {
+            x: MARGIN,
+            y: this.cursor.y,
+            size,
+            font: this.bold,
+            color: MUTED,
+          });
+        }
+        this.cursor.page.drawText(line, {
+          x: MARGIN + labelWidth,
+          y: this.cursor.y,
+          size,
+          font: this.font,
+          color: INK,
+        });
+        this.cursor.y -= size + LINE_GAP;
+      });
+    }
+    this.cursor.y -= 6;
+  }
+
   titleBlock(title: string, subtitle: string) {
     this.cursor.page.drawText(title, {
       x: MARGIN,
@@ -307,6 +341,12 @@ export type ForensicReportInput = {
   /** Lines the higher estimate carries that have no counterpart at all. */
   noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
   vehicleLabel: string | null;
+  /**
+   * Claim identity rows for the header block (owner, VIN, RO, insurer…).
+   * The caller redacts these before passing them in — same policy as every
+   * export: claim numbers scrubbed, VIN last eight masked.
+   */
+  identity?: Array<{ label: string; value: string }>;
   /** Document-level caveats already resolved upstream (OCR, coverage, PII). */
   limitations: string[];
   /** Authorities that actually reached a finding, for Section 11. */
@@ -348,6 +388,10 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
       input.generatedAt
     ).toISOString().slice(0, 10)}`
   );
+
+  if (input.identity?.length) {
+    writer.identityRows(input.identity);
+  }
 
   // 1
   writer.heading("1. Purpose and scope");

@@ -26,6 +26,15 @@ import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, Citatio
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
 import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
 import {
+  buildDeltaForensicReportModel,
+  type ForensicClaimContext,
+  type ForensicEstimateDocument,
+} from "./deltaForensicReport";
+import {
+  loadCollisionIqLogo,
+  renderDeltaForensicReport,
+} from "./deltaForensicReportRenderer";
+import {
   buildPdfRectFromTopLeftAnchor,
   normalizePdfRect,
   normalizeRotation,
@@ -1308,6 +1317,13 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   /** Decoded make + jurisdiction gating the authority attach (D-4). */
   vehicleMake?: string | null;
   jurisdiction?: string | null;
+  /**
+   * Claim identity for the forensic report's header block. Every field is
+   * optional and a missing one is simply not printed — the report never
+   * invents an owner, a claim number or a date of loss to fill the grid.
+   * Values pass through the download redaction policy before they are drawn.
+   */
+  reportContext?: ForensicClaimContext;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -2215,7 +2231,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         // findings lane — no delta verdict marks over a mostly-unread
         // comparison document.
         const valueLayerExtraction = assessComparisonExtraction(
-          competingRows.map((row) => ({ lineNumber: row.line }))
+          competingRows.map((row) => ({ lineNumber: row.line })),
+          { subjectRowCount: anchors.filter((anchor) => anchor.anchorType === "estimate_line").length }
         );
         // A SECOND, independent coverage signal. The line-span test above asks
         // whether the numbering was read; it counts a row as covered even when
@@ -2230,7 +2247,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         );
         if (valueLayerExtraction.gate) {
           warnings.push(
-            `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
+            valueLayerExtraction.gateReason === "source_not_read"
+              ? `The comparison estimate yielded ${valueLayerExtraction.parsedRows} readable line item(s) — it was not read. Delta value marks suppressed; no line is described as absent from a document that could not be parsed.`
+              : `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
           );
         }
         if (hoursCoverage.gate) {
@@ -2386,8 +2405,39 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // The Citation Density Report produces exactly two PDFs: the annotated delta
   // estimate, and this narrative reconciliation of the two appraisals. It
   // replaces the old Delta findings report AND the OEM report pair, which
-  // between them produced four overlapping documents per review.
-  if (forensicInput) {
+  // between them produced four overlapping documents per review. Gated to the
+  // delta identity: the OEM report is not a two-estimate comparison, and must
+  // keep its plain cover even if a caller hands it a delta generator.
+  if (forensicInput && reportIdentity.reportType === "citation-density") {
+    // Claim identity is read from the document (same reader as the identity
+    // gate), then redacted to the export policy before it can reach the
+    // renderer: claim numbers scrubbed, VIN keeps only its first nine. The
+    // label is scrubbed together with its value because the policy is
+    // label-aware — a bare claim number is not recognisable as one.
+    const claimContext = resolveForensicClaimContext(params);
+    const redactIdentityRows = request.redactSensitive !== false;
+    const identity = (
+      [
+        ["Owner / insured", claimContext.ownerName],
+        ["Vehicle", claimContext.vehicle],
+        ["VIN", claimContext.vin],
+        ["Claim number", claimContext.claimNumber],
+        ["RO number", claimContext.roNumber],
+        ["Insurer", claimContext.insurer],
+        ["Jurisdiction", claimContext.jurisdiction],
+      ] as Array<[string, string | null | undefined]>
+    )
+      .filter(([, value]) => String(value ?? "").trim().length > 0)
+      .map(([label, value]) => {
+        const prefix = `${label}: `;
+        const labeled = `${prefix}${String(value).trim()}`;
+        const scrubbed = redactIdentityRows ? redactDownloadContent(labeled) : labeled;
+        return {
+          label,
+          value: scrubbed.startsWith(prefix) ? scrubbed.slice(prefix.length) : scrubbed,
+        };
+      })
+      .filter((row) => row.value.trim().length > 0);
     const forensic = await buildForensicReportPdf({
       reconciliation: forensicInput.reconciliation,
       findings,
@@ -2396,7 +2446,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       higherLineCount: forensicInput.higherLineCount,
       lowerLineCount: forensicInput.lowerLineCount,
       noCounterpartRows: forensicInput.noCounterpartRows,
-      vehicleLabel: params.vehicleMake ?? null,
+      vehicleLabel: claimContext.vehicle ?? params.vehicleMake ?? null,
+      identity,
       limitations: textLayerNotes,
       // Only authorities that actually reached a finding. An authority that
       // supported nothing is not "relied upon" and must not be listed as if
@@ -2476,16 +2527,61 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         }
       }
     }
-    addFindingsReportCoverPage(findingsDoc, {
-      font: findingsFont,
-      boldFont: findingsBoldFont,
-      reportIdentity,
-      sourcePdfName,
-      annotatedCount: matches.length,
-      unanchoredCount: unmatched.length,
-      generatedAt: new Date().toISOString(),
-      textLayerNotes,
-    });
+    // The Delta report opens as a forensic document — purpose, documents
+    // examined, plain-language summary, reconciliation, findings grouped by
+    // subject, authorities, limitations, appendices — because a reader needs
+    // the adjudication before the record. The per-finding detail cards keep
+    // every id, hash and anchor and follow as the record itself. The OEM
+    // report is not a two-estimate comparison, so it keeps its plain cover.
+    let detailStartPage = 2;
+    if (reportIdentity.reportType === "citation-density") {
+      const forensicModel = buildDeltaForensicReportModel({
+        reportTitle: "Forensic Estimate Analysis and Repair Cost Gap Report",
+        reportShortTitle: reportIdentity.reportShortTitle,
+        subject: {
+          fileName: sourcePdfName,
+          estimateRole: resolveForensicEstimateRole(
+            findingDetails[0]?.finding.sourceEstimateRole,
+            params.canonicalDeltaSet?.estimateFiles.supplement.estimateRole,
+            sourceDocumentRole
+          ),
+          total: params.selectedEstimateTotal ?? params.canonicalDeltaSet?.estimateFiles.supplement.total ?? null,
+        },
+        comparisons: buildForensicComparisonDocuments(params, findingDetails),
+        anchored: findingDetails.map((detail) => ({
+          finding: detail.finding,
+          markerNumber: detail.metadata.markerNumber,
+          sourcePageNumber: detail.metadata.sourcePageNumber,
+          sourceLineNumber: detail.metadata.sourceLineNumber ?? null,
+        })),
+        unanchored: unmatched.map((finding) => ({ finding })),
+        canonicalDeltaSet: params.canonicalDeltaSet,
+        claimContext: resolveForensicClaimContext(params),
+        warnings,
+        textLayerNotes,
+        generatedAt: new Date().toISOString(),
+        redactSensitive: request.redactSensitive !== false,
+      });
+      const logo = await loadCollisionIqLogo(findingsDoc);
+      detailStartPage =
+        renderDeltaForensicReport(findingsDoc, forensicModel, {
+          font: findingsFont,
+          boldFont: findingsBoldFont,
+          logo,
+          startPageNumber: 1,
+        }) + 1;
+    } else {
+      addFindingsReportCoverPage(findingsDoc, {
+        font: findingsFont,
+        boldFont: findingsBoldFont,
+        reportIdentity,
+        sourcePdfName,
+        annotatedCount: matches.length,
+        unanchoredCount: unmatched.length,
+        generatedAt: new Date().toISOString(),
+        textLayerNotes,
+      });
+    }
     if (findingDetails.length > 0) {
       trace.detailLayoutBlocks = addCitationDensityFindingDetailPages(findingsDoc, findingDetails, {
         font: findingsFont,
@@ -2494,6 +2590,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         sourcePdfHash: trace.sourcePdfHash,
         buildCommit: trace.buildCommit,
         reportIdentity,
+        startPageNumber: detailStartPage,
       });
     }
     if (request.includeSummaryPage) {
@@ -2594,6 +2691,113 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
 function toSourcePdfPageIndex(sourcePdfPageNumber: number) {
   return Math.max(0, sourcePdfPageNumber - 1);
+}
+
+/**
+ * The vehicle line as a HEADER would print it, matched within a single line.
+ *
+ * readClaimIdentity's pattern separates tokens with \s+, which crosses line
+ * breaks. For identity comparison that over-capture is symmetric and harmless
+ * — both documents over-capture the same way. Printed in a header it is not:
+ * "2023 LEXUS IS 300 AWD" became "2023 LEXUS IS 300 AWD NET COST" because the
+ * totals line sat directly underneath. The gate keeps its pattern; display gets
+ * one that cannot span lines.
+ */
+function readDisplayVehicle(text: string | null | undefined): string | null {
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const match = /\b((?:19|20)\d{2}[ \t]+[A-Z][A-Za-z]{1,}(?:[ \t]+[A-Za-z0-9/-]{1,}){0,5})/.exec(line);
+    if (match) return match[1].replace(/\s+/g, " ").trim();
+  }
+  return null;
+}
+
+/**
+ * Claim identity for the forensic header. It is READ FROM THE DOCUMENT rather
+ * than requested from the caller, using the same reader the identity gate uses
+ * to decide whether two files belong to the same claim — one extractor, not
+ * two. An explicitly supplied value always wins, and any field neither source
+ * yields is simply absent from the header rather than guessed at.
+ */
+function resolveForensicClaimContext(params: {
+  sourceText?: string | null;
+  reportContext?: ForensicClaimContext;
+  canonicalDeltaSet?: CanonicalDeltaSet;
+  vehicleMake?: string | null;
+  jurisdiction?: string | null;
+}): ForensicClaimContext {
+  const supplied = params.reportContext ?? {};
+  const fromDocument = readClaimIdentity(params.sourceText ?? "");
+  const files = params.canonicalDeltaSet?.estimateFiles;
+  const ownerFromDocument = fromDocument.ownerTokens.length
+    ? fromDocument.ownerTokens.join(" ")
+    : null;
+  return {
+    vehicle: supplied.vehicle ?? readDisplayVehicle(params.sourceText) ?? params.vehicleMake ?? null,
+    vin: supplied.vin ?? fromDocument.vin ?? null,
+    claimNumber: supplied.claimNumber ?? fromDocument.claimNumber ?? null,
+    roNumber: supplied.roNumber ?? fromDocument.roNumber ?? null,
+    ownerName: supplied.ownerName ?? files?.insuredName ?? files?.ownerName ?? ownerFromDocument,
+    insurer: supplied.insurer ?? files?.supplement.insurer ?? files?.initial.insurer ?? null,
+    jurisdiction: supplied.jurisdiction ?? params.jurisdiction ?? null,
+    repairFacility: supplied.repairFacility ?? null,
+    lossDate: supplied.lossDate ?? null,
+    mileage: supplied.mileage ?? null,
+  };
+}
+
+/**
+ * The estimate role the forensic header prints for a document. Resolution order
+ * is provenance first (the findings' own resolved role, then the canonical
+ * delta set), and only then the coarse carrier/shop family the annotator uses
+ * internally. A shop-to-shop pair must never fall through to "carrier".
+ */
+function resolveForensicEstimateRole(
+  findingRole: CitationDensityFinding["sourceEstimateRole"] | undefined,
+  canonicalRole: CanonicalDeltaSet["estimateFiles"]["initial"]["estimateRole"] | undefined,
+  documentRole: "carrier" | "shop"
+): ForensicEstimateDocument["estimateRole"] {
+  if (findingRole) return findingRole;
+  if (canonicalRole && canonicalRole !== "unknown") return canonicalRole;
+  return documentRole === "carrier" ? "carrier_estimate" : "shop_final";
+}
+
+/**
+ * The documents this run measured the annotated estimate against. The canonical
+ * delta set wins when present because it carries the extracted totals; the
+ * comparison texts are the fallback and contribute names only. Nothing here
+ * infers a total that was not extracted.
+ */
+function buildForensicComparisonDocuments(
+  params: {
+    comparisonEstimateTexts?: ComparisonEstimateText[];
+    canonicalDeltaSet?: CanonicalDeltaSet;
+  },
+  findingDetails: FindingDetail[]
+): ForensicEstimateDocument[] {
+  const canonicalInitial = params.canonicalDeltaSet?.estimateFiles.initial;
+  if (canonicalInitial) {
+    return [
+      {
+        fileName: canonicalInitial.filename,
+        estimateRole:
+          canonicalInitial.estimateRole && canonicalInitial.estimateRole !== "unknown"
+            ? canonicalInitial.estimateRole
+            : undefined,
+        total: canonicalInitial.total,
+      },
+    ];
+  }
+  const comparisonRole = findingDetails.find((detail) => detail.finding.comparisonEstimateRole)
+    ?.finding.comparisonEstimateRole;
+  return (params.comparisonEstimateTexts ?? [])
+    .filter((comparison) => comparison.fileName)
+    .map((comparison) => ({
+      fileName: comparison.fileName,
+      estimateRole:
+        comparisonRole ??
+        (comparison.estimateRole === "carrier" ? "carrier_estimate" : comparison.estimateRole === "shop" ? "shop_initial" : undefined),
+      total: null,
+    }));
 }
 
 type PartSourceRow = {
@@ -3258,7 +3462,10 @@ export function buildRequiredEstimatorDeltaFindings(
           context,
           anchor: intakeAnchor,
           findingType: "delta-intake-comparison-extraction",
-          title: `Intake only — the comparison estimate could not be read completely (${Math.round(extraction.coverage * 100)}% of its lines)`,
+          title:
+            extraction.gateReason === "source_not_read"
+              ? `Intake only — the comparison estimate could not be read (${extraction.parsedRows} line item(s) recovered)`
+              : `Intake only — the comparison estimate could not be read completely (${Math.round(extraction.coverage * 100)}% of its lines)`,
           category: "other",
           label: "INTAKE",
           estimateGapType: "needs_proof",
@@ -3266,9 +3473,12 @@ export function buildRequiredEstimatorDeltaFindings(
           safetyImpact: "low",
           priority: "high",
           currentSupportSummary:
-            `What was read: ${extraction.parsedRows} line(s) of ${deltaMatch.comparisonName} across a line-number span of ${extraction.impliedRows} — ` +
-            `${Math.round(extraction.coverage * 100)}% coverage. What could not be read: approximately ${Math.max(0, extraction.impliedRows - extraction.parsedRows)} line(s) implied by the document's own numbering. ` +
-            `No line-level delta verdict is rendered over this comparison — a demand built on a mostly-unread document is not defensible.`,
+            extraction.gateReason === "source_not_read"
+              ? `What was read: ${extraction.parsedRows} line item(s) of ${deltaMatch.comparisonName}. A document of this size carries far more, so its line items were not recovered — typically an image-only PDF with no machine-readable text layer. ` +
+                `No line-level delta verdict is rendered over this comparison. In particular, no operation is described as absent from it: with its line items unread, every operation on the annotated estimate would appear to have no counterpart, and that appearance is an artefact of the extraction, not a fact about the claim.`
+              : `What was read: ${extraction.parsedRows} line(s) of ${deltaMatch.comparisonName} across a line-number span of ${extraction.impliedRows} — ` +
+                `${Math.round(extraction.coverage * 100)}% coverage. What could not be read: approximately ${Math.max(0, extraction.impliedRows - extraction.parsedRows)} line(s) implied by the document's own numbering. ` +
+                `No line-level delta verdict is rendered over this comparison — a demand built on a mostly-unread document is not defensible.`,
           missingProofSummary:
             "The comparison estimate's extraction coverage is below the confidence threshold (image-only/degraded source). Delta verdicts are withheld until a readable copy is supplied.",
           recommendedNextAction:
@@ -4294,7 +4504,12 @@ function matchStructuredLineItemDeltas(
     paintSystemMismatch,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
-    comparisonExtraction: assessComparisonExtraction(lowerRows),
+    // The subject row count and the comparison's own printed total are what
+    // let the assessment recognise a document that was not read AT ALL, as
+    // opposed to one read with holes — see assessComparisonExtraction.
+    comparisonExtraction: assessComparisonExtraction(lowerRows, {
+      subjectRowCount: dedupedHigherRows.length,
+    }),
   };
 }
 
@@ -8961,10 +9176,16 @@ function addCitationDensityFindingDetailPages(
     sourcePdfHash?: string;
     buildCommit?: string;
     reportIdentity?: AnnotatedEstimateReportIdentity;
+    /**
+     * Document page number of the first detail page. The forensic front matter
+     * occupies pages 1..N, so the detail footers continue that count instead of
+     * restarting at 1 and giving the reader two page ones.
+     */
+    startPageNumber?: number;
   }
 ) {
   const detailLayoutBlocks: NonNullable<CitationDensityDebugTrace["detailLayoutBlocks"]> = [];
-  let nextDetailPageNumber = 1;
+  let nextDetailPageNumber = options.startPageNumber ?? 1;
 
   details.forEach(({ finding, metadata }) => {
     let context = createFindingDetailLayoutContext(pdfDoc, {

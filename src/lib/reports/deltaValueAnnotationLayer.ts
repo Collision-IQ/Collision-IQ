@@ -344,9 +344,16 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     const competingRow = params.competingTotals.find(
       (row) => canonTotalsCategory(row.category) === key
     );
-    const competingHours = hoursDelta ? hoursDelta.competing : (competingRow?.hours ?? null);
-    const competingRate = rateDelta ? rateDelta.competing : (competingRow?.rate ?? null);
-    const basisIsAbsent = !competingHours && !competingRate;
+    // A labour category is never billed at $0.00/hr and never at 0.0 hours: a
+    // zero here is an unread cell, not a rate the carrier set. Treating it as a
+    // value is how "26.2 hr @ $0.00/hr" reached the page. Normalise zero to
+    // absent BEFORE deciding how to word the basis, so the absent-basis branch
+    // (flat amount, no hrs/rate shown) is the one that runs.
+    const nonZero = (value: number | null | undefined) =>
+      typeof value === "number" && value > 0 ? value : null;
+    const competingHours = nonZero(hoursDelta ? hoursDelta.competing : competingRow?.hours);
+    const competingRate = nonZero(rateDelta ? rateDelta.competing : competingRow?.rate);
+    const basisIsAbsent = competingHours === null && competingRate === null;
     const stampText = basisIsAbsent
       ? competingRow?.amount != null
         ? formatBasis({
@@ -356,12 +363,16 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
             amount: competingRow.amount,
           })
         : null
-      : hoursDelta && rateDelta
-        ? `${label} ${fmtHours(hoursDelta.competing)} @ ${fmtMoney(rateDelta.competing)}/hr`
-        : hoursDelta
-          ? `${label} ${fmtHours(hoursDelta.competing)}`
-          : rateDelta
-            ? `${label} ${fmtMoney(rateDelta.competing)}/hr`
+      // WHICH branch is chosen by what DIFFERS; what it PRINTS is the
+      // zero-suppressed value. Selecting on the values instead of the deltas
+      // widened the combined "h @ $r/hr" stamp from the one category where both
+      // hours and rate differ to every category carrying both numbers.
+      : hoursDelta && rateDelta && competingHours !== null && competingRate !== null
+        ? `${label} ${fmtHours(competingHours)} @ ${fmtMoney(competingRate)}/hr`
+        : hoursDelta && competingHours !== null
+          ? `${label} ${fmtHours(competingHours)}`
+          : rateDelta && competingRate !== null
+            ? `${label} ${fmtMoney(competingRate)}/hr`
             : null;
     const anchorBox = subjectRow.hoursBox ?? subjectRow.rateBox;
     const rect =

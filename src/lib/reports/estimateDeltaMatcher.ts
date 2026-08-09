@@ -3062,12 +3062,62 @@ export function normalizeTotalsCategoryKey(name: string): string {
   return canonTotalsCategory(name);
 }
 
+/** Below this many parsed operation rows, a substantive comparison document
+ *  has not been read at all — see the second limb of assessComparisonExtraction. */
+const MIN_PARSED_ROWS_FOR_LINE_VERDICTS = 12;
+/** A subject this size implies a counterpart with real line items. */
+const SUBSTANTIVE_SUBJECT_ROWS = 40;
+
+export type ComparisonExtractionAssessment = {
+  parsedRows: number;
+  impliedRows: number;
+  coverage: number;
+  gate: boolean;
+  /** Which limb fired, for the intake finding and the release gate (R19). */
+  gateReason: "partial_line_coverage" | "source_not_read" | null;
+};
+
 /**
  * C-10 (Work Order R4): extraction completeness of a parsed estimate — rows
  * actually parsed vs rows IMPLIED by the document's own line-number sequence.
  * An OCR'd comparison that yields 30 rows across a 1–190 line span is mostly
  * unread; publishing a demand-grade delta verdict over it is the completion-
  * gate failure. Below threshold the pack renders as an INTAKE report.
+ *
+ * THE ORIGINAL CHECK COULD NOT SEE TOTAL FAILURE, ONLY PARTIAL FAILURE.
+ *
+ * Both of its measures are computed FROM THE ROWS THAT PARSED: `impliedRows` is
+ * the line-number span of those same rows, and the `parsedRows >= 15` guard
+ * exists to keep short documents from reading as degraded. Together they invert
+ * the intended behaviour — the WORSE the extraction, the less likely the gate
+ * fires, and at zero usable rows it cannot fire at all. On the first image-only
+ * comparison (Mitchell S2, no ToUnicode layer) glyph repair recovered no line
+ * items; `parsedRows` never reached 15, the gate stayed shut, and the matcher
+ * compared 250 subject lines against an empty pool. Every one came back
+ * unmatched and shipped as "not written on the comparison estimate" — roughly
+ * 230 accusations, at least 18 of them against operations the carrier had in
+ * fact funded, four to the exact cent.
+ *
+ * The second limb closes that hole: a comparison that yielded almost no rows,
+ * against a subject that plainly has them or a document whose own total says it
+ * must have them, was not read. It is deliberately an ABSOLUTE floor rather
+ * than a ratio, so it stays independent of the rows that did parse.
+ *
+ * Calibrated so a real difference in scope is never mistaken for a read
+ * failure: RO 22182's carrier Estimate of Record carries 33 operations against
+ * the shop's 179 — genuinely narrow scope, and the finding — and 33 clears the
+ * floor untouched. Same-platform pairs, which parse dozens of rows, cannot
+ * reach either limb.
+ *
+ * The trigger is the SUBJECT's row count, deliberately, and not the comparison
+ * document's printed total. "Large total, few parsed lines" looks like evidence
+ * of a read failure and is not: a supplement can legitimately carry most of its
+ * money on a handful of expensive lines. Keyed on the total, this limb fired on
+ * a healthy same-platform pair whose comparison had one line item and a $27,232
+ * total, and suppressed three correct rate findings. The sound formulation is
+ * the one that matches the claim being made: we are about to say that N
+ * operations on the subject have no counterpart, so the question is whether the
+ * subject has many operations while the comparison yielded almost none.
  */
 /**
  * Extraction coverage measured in HOURS against the document's own printed
@@ -3154,12 +3204,13 @@ export function assessHoursCoverage(
   };
 }
 
-export function assessComparisonExtraction(rows: Array<{ lineNumber: number | null }>): {
-  parsedRows: number;
-  impliedRows: number;
-  coverage: number;
-  gate: boolean;
-} {
+export function assessComparisonExtraction(
+  rows: Array<{ lineNumber: number | null }>,
+  context?: {
+    /** Operation rows parsed from the annotated (subject) document. */
+    subjectRowCount?: number | null;
+  }
+): ComparisonExtractionAssessment {
   const lineNumbers = rows
     .map((row) => row.lineNumber)
     .filter((line): line is number => line !== null && Number.isFinite(line));
@@ -3176,10 +3227,24 @@ export function assessComparisonExtraction(rows: Array<{ lineNumber: number | nu
   const high = sorted.length >= 20 ? at(0.98) : sorted[sorted.length - 1];
   const impliedRows = parsedRows ? Math.max(1, high - low + 1) : 0;
   const coverage = impliedRows > 0 ? parsedRows / impliedRows : 1;
-  // Gate only on substantive documents: a sparse synthetic or a genuinely
-  // short estimate must not read as degraded.
-  const gate = parsedRows >= 15 && impliedRows >= 40 && coverage < 0.5;
-  return { parsedRows, impliedRows, coverage: Math.round(coverage * 100) / 100, gate };
+
+  // Limb 1 — partial read: enough rows to measure a span, and the span is full
+  // of holes. Gate only on substantive documents: a sparse synthetic or a
+  // genuinely short estimate must not read as degraded.
+  const partiallyRead = parsedRows >= 15 && impliedRows >= 40 && coverage < 0.5;
+
+  // Limb 2 — not read at all. Independent of the parsed rows' own span.
+  const notRead =
+    parsedRows < MIN_PARSED_ROWS_FOR_LINE_VERDICTS &&
+    (context?.subjectRowCount ?? 0) >= SUBSTANTIVE_SUBJECT_ROWS;
+
+  return {
+    parsedRows,
+    impliedRows,
+    coverage: Math.round(coverage * 100) / 100,
+    gate: partiallyRead || notRead,
+    gateReason: notRead ? "source_not_read" : partiallyRead ? "partial_line_coverage" : null,
+  };
 }
 
 export function compareEstimateTotals(params: {
