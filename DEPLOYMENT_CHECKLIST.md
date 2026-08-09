@@ -35,6 +35,21 @@ pointing at one of its branch-preview URLs; that now resolves from the
 production origin (`src/lib/integrations/egnyteRedirect.ts`). If any other
 reference to that host appears, it is stale.
 
+## 0A. Database Migrations
+
+`npm run build` is `prisma generate && next build` — it does NOT apply
+migrations. Schema changes reach production only when someone runs them.
+
+```bash
+npm run db:migrate:status   # what is pending
+npm run db:migrate          # apply
+```
+
+Pending as of this writing: `20260809060000_add_chat_thread_toolbox`, required
+before the Toolbox works at all. See `docs/toolbox-rollout.md`, including the
+note on checking `migrate status` first on a database whose migration history
+may predate any automated apply step.
+
 ## 1. Environment Variables
 
 - Confirm required app secrets are present in the target environment.
