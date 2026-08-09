@@ -8,7 +8,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, ShieldCheck, Users, Wrench, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, Users, Wrench, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import { WorkspaceExtraSlotsProvider } from "@/components/workspace/WorkspaceExtraSlots";
 import ChatWidget from "@/components/ChatWidget";
@@ -1175,14 +1175,9 @@ export function ChatbotWorkspacePage({
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Delta Citation Density Report", type: "pdf" }
+      ? { label: "Citation Density Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Delta Citation Density Report (Pro)", type: "locked" }
-      : null,
-    canUsePolicyRightsReviewExport
-      ? { label: "OEM Citation Density Report", type: "pdf" }
-      : hasResolvedAnalysis
-        ? { label: "OEM Citation Density Report (Pro)", type: "locked" }
+        ? { label: "Citation Density Report (Pro)", type: "locked" }
       : null,
     canUseDoiComplaintPacketExport
       ? { label: "DOI Complaint Packet", type: "pdf" }
@@ -1800,7 +1795,7 @@ export function ChatbotWorkspacePage({
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-foreground">Reports are ready</div>
               <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                Snapshot, Repair Intelligence, Delta &amp; OEM Citation Density, DOI, and
+                Snapshot, Repair Intelligence, Citation Density, DOI, and
                 Customer Report are ready to inspect.
               </div>
               <button
@@ -2635,7 +2630,7 @@ function RailContent({
         if (res.ok) blob = await res.blob();
       }
       if (blob) {
-        downloadBlob(blob, exportResult.findingsReportFilename ?? "citation-density-findings.pdf");
+        downloadBlob(blob, exportResult.findingsReportFilename ?? "forensic-estimate-analysis.pdf");
       }
     } catch {
       // Non-blocking: the annotated estimate already downloaded successfully.
@@ -2795,11 +2790,11 @@ function RailContent({
     });
     return {
       blob,
-      filename: "delta-citation-density-report.pdf",
+      filename: "citation-density-report.pdf",
       findingsReportUrl: typeof data.findingsReportUrl === "string" ? data.findingsReportUrl : undefined,
       findingsReportPdfBase64:
         typeof data.findingsReportPdfBase64 === "string" ? data.findingsReportPdfBase64 : undefined,
-      findingsReportFilename: "delta-citation-density-findings.pdf",
+      findingsReportFilename: "forensic-estimate-analysis.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -3410,8 +3405,7 @@ function RailContent({
             {[
               { id: "report-card-snapshot", label: "1-Page Snapshot", enabled: canUseSnapshotExport },
               { id: "report-card-repair-intelligence", label: "Repair Intelligence", enabled: canUseBasicPdfExport },
-              { id: "report-card-delta", label: "Delta Citation Density", enabled: canUseBasicPdfExport },
-              { id: canUseBasicPdfExport ? "report-card-oem" : "report-card-oem-locked", label: "OEM Citation Density", enabled: true },
+              { id: "report-card-delta", label: "Citation Density", enabled: canUseBasicPdfExport },
               { id: "report-card-doi", label: "DOI Complaint Packet", enabled: canUseDoiComplaintPacketExport },
               { id: "report-card-customer", label: "Customer Report", enabled: canUseCustomerReport },
             ].map((link) => (
@@ -3901,7 +3895,7 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
-                    Delta Citation Density Report
+                    Citation Density Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
                     Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations.
@@ -3921,7 +3915,7 @@ function RailContent({
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                     data-tour="download-button"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Delta Citation Density Report</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3929,7 +3923,7 @@ function RailContent({
                     onClick={() => openReportSend("estimate_scrubber", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Delta Citation Density Report</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
@@ -3937,72 +3931,6 @@ function RailContent({
                   send={getLastSendFor("estimate_scrubber")}
                   loading={reportSendHistoryLoading}
                 />
-              </div>
-            ) : null}
-            {canUsePolicyRightsReviewExport ? (
-              <div id="report-card-oem" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
-                    OEM Citation Density Report
-                  </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Reviews uploaded estimate(s) against OEM procedures, position statements, MOTOR guidance, safety requirements, documentation gaps, and repair-standard support.
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void downloadReportDocument("oem_citation_density");
-                      emitSafeCrmEventFromClient({
-                        event: "report_generated",
-                        plan,
-                        exportType: "oem_citation_density",
-                      });
-                    }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
-                    data-tour="download-button"
-                  >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density Report</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openReportSend("oem_citation_density", "carrier")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
-                  >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email OEM Citation Density Report</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                </div>
-                <ReportSendStatusLine
-                  send={getLastSendFor("oem_citation_density")}
-                  loading={reportSendHistoryLoading}
-                />
-              </div>
-            ) : hasResolvedAnalysis ? (
-              <div id="report-card-oem-locked" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[var(--accent)]/25 dark:bg-card">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
-                    OEM Citation Density Report
-                    <span className="rounded-sm border border-[var(--accent)]/25 bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
-                      Pro
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    OEM procedures, position statements, MOTOR guidance, safety requirements, documentation gaps, and repair-standard support.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={onCustomerReportLocked}
-                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
-                >
-                  <span className="inline-flex items-center gap-2"><ArrowRight size={15} aria-hidden /> Unlock report</span>
-                  <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                </button>
               </div>
             ) : null}
             {canUseDoiComplaintPacketExport ? (
@@ -4076,7 +4004,7 @@ function RailContent({
                 onClick={onCustomerReportLocked}
                 className="w-full rounded-md border border-orange-400/18 bg-[var(--accent)]/10 p-3 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
               >
-                Repair Intelligence, Delta Citation Density Report, OEM Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
+                Repair Intelligence, Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
             ) : null}
             {academyTrigger ? (
@@ -4218,36 +4146,6 @@ function RailContent({
               }
             />
             <ReportTabCard
-              id={canUsePolicyRightsReviewExport ? "report-card-oem" : "report-card-oem-locked"}
-              icon={ShieldCheck}
-              tone="emerald"
-              title="OEM Citation Density Report"
-              description="Reviews uploaded estimate(s) against OEM procedures, position statements, MOTOR guidance, safety requirements, and documentation gaps."
-              locked={!canUsePolicyRightsReviewExport}
-              onUnlock={onCustomerReportLocked}
-              actions={
-                <div className="grid gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void downloadReportDocument("oem_citation_density");
-                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "oem_citation_density" });
-                    }}
-                    className={REPORT_TAB_DOWNLOAD_BTN}
-                    data-tour="download-button"
-                  >
-                    <Download size={14} aria-hidden /> Download PDF
-                  </button>
-                  <button type="button" onClick={() => openReportSend("oem_citation_density", "carrier")} className={REPORT_TAB_EMAIL_BTN}>
-                    <Mail size={14} aria-hidden /> Email report
-                  </button>
-                </div>
-              }
-              status={
-                <ReportSendStatusLine send={getLastSendFor("oem_citation_density")} loading={reportSendHistoryLoading} />
-              }
-            />
-            <ReportTabCard
               id="report-card-doi"
               icon={Scale}
               tone="red"
@@ -4311,7 +4209,7 @@ function RailContent({
               onClick={onCustomerReportLocked}
               className="w-full cursor-pointer rounded-2xl border border-orange-400/18 bg-[var(--accent)]/10 p-3.5 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
             >
-              Repair Intelligence, Delta Citation Density, OEM Citation Density, DOI Complaint
+              Repair Intelligence, Citation Density, DOI Complaint
               Packet, and Customer Report are available on Pro.
             </button>
           ) : null}
@@ -4601,7 +4499,7 @@ function CitationDensityTargetSelector({
       <span>
         <span className="font-semibold text-foreground">Citation Density target</span>
         <span className="mt-0.5 block leading-5">
-          Used for Delta Citation Density and OEM Citation Density exports.
+          Used for the Citation Density Report exports.
         </span>
       </span>
       <select
@@ -4949,7 +4847,7 @@ function getDefaultReportFilename(reportType: ReportKind): string {
 }
 
 function getCitationDensityWorkspaceTitle(reportFlavor: CitationDensityWorkspaceReportFlavor): string {
-  return reportFlavor === "oem" ? "OEM Citation Density Report" : "Delta Citation Density Report";
+  return reportFlavor === "oem" ? "OEM Citation Density Report" : "Citation Density Report";
 }
 
 function getReportWorkspaceTitle(reportType: ReportKind, document: CarrierReportDocument): string {

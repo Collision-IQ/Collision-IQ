@@ -2954,9 +2954,9 @@ export default function ChatWidget({
           const downloadLinks = data.outputs?.length
             ? data.outputs
                 .filter((output) => typeof output.downloadUrl === "string")
-                .map((output) => `[Download Delta Citation Density Report${output.estimateRole ? ` (${output.estimateRole})` : ""}](${output.downloadUrl})`)
+                .map((output) => `[Download Citation Density Report${output.estimateRole ? ` (${output.estimateRole})` : ""}](${output.downloadUrl})`)
                 .join("\n")
-            : `[Download Delta Citation Density Report](${data.downloadUrl ?? "#"})`;
+            : `[Download Citation Density Report](${data.downloadUrl ?? "#"})`;
           const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
           const reply = allUnanchored
             ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`

@@ -3,6 +3,11 @@ import DELTA_RULES from "./data/deltaRules.json";
 import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
 import { redactAndRasterizePdf } from "@/lib/privacy/rasterRedactPdf";
 import { canonicalOperationKey } from "./operationAliases";
+import {
+  buildForensicReconciliation,
+  type ForensicReconciliation,
+} from "./forensicEstimateAnalysis";
+import { buildForensicReportPdf } from "./forensicReportRenderer";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
   PDFDocument,
@@ -582,6 +587,15 @@ export type ComparisonEstimatePdf = {
 export type AnnotatedEstimateGeneratedFindings = {
   findings: CitationDensityFinding[];
   debug?: Partial<CitationDensityDebugTrace>;
+  /** Reconciliation + no-counterpart rows for the forensic report. Produced by
+   *  the delta pass because that is where both documents' totals are parsed;
+   *  consumed at PDF assembly, which has no access to the delta engine. */
+  forensic?: {
+    reconciliation: ForensicReconciliation;
+    higherLineCount: number | null;
+    lowerLineCount: number | null;
+    noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
+  };
 };
 
 export type CitationDensityToolUsageTraceEntry = {
@@ -1665,6 +1679,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     }
   }
 
+  // Carried from the delta pass to the PDF assembly below; null when this
+  // report has no structured delta (nothing to reconcile, so no forensic doc).
+  let forensicInput: AnnotatedEstimateGeneratedFindings["forensic"] | null = null;
   if (params.findingGenerator) {
     const generated = params.findingGenerator({
       anchors,
@@ -1700,6 +1717,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     findings = sanitizedGenerated.findings;
     suppressed = sanitizedGenerated.suppressed;
     Object.assign(trace, generated.debug ?? {});
+    forensicInput = generated.forensic ?? null;
     appendToolUsageTrace(trace, {
       tool: "oem_procedure_position_support",
       ran: reportIdentity.reportType === "oem-citation-density",
@@ -2363,8 +2381,61 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let findingsReportExportId: string | undefined;
   let findingsReportBytes: Uint8Array | undefined;
   let findingsReportPageCount = 0;
+  // THE SECOND DOCUMENT IS THE FORENSIC REPORT, NOT A CARD DUMP.
+  //
+  // The Citation Density Report produces exactly two PDFs: the annotated delta
+  // estimate, and this narrative reconciliation of the two appraisals. It
+  // replaces the old Delta findings report AND the OEM report pair, which
+  // between them produced four overlapping documents per review.
+  if (forensicInput) {
+    const forensic = await buildForensicReportPdf({
+      reconciliation: forensicInput.reconciliation,
+      findings,
+      higherDocumentName: sourcePdfName,
+      lowerDocumentName: params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate",
+      higherLineCount: forensicInput.higherLineCount,
+      lowerLineCount: forensicInput.lowerLineCount,
+      noCounterpartRows: forensicInput.noCounterpartRows,
+      vehicleLabel: params.vehicleMake ?? null,
+      limitations: textLayerNotes,
+      // Only authorities that actually reached a finding. An authority that
+      // supported nothing is not "relied upon" and must not be listed as if
+      // it were.
+      authorities: Array.from(
+        new Map(
+          findings
+            .filter((finding) => finding.bestAvailableAuthority?.status === "verified")
+            .map((finding) => [
+              finding.bestAvailableAuthority!.title,
+              {
+                title: finding.bestAvailableAuthority!.title,
+                relevance: finding.operationLabel,
+                where: finding.matchedDocumentUrl ?? "Retrieved during preparation of this report",
+              },
+            ])
+        ).values()
+      ),
+      generatedAt: new Date().toISOString(),
+    });
+    findingsReportBytes = forensic.bytes;
+    findingsReportPageCount = forensic.pageCount;
+    findingsReportExportId = putAnnotatedEstimateExport(
+      forensic.bytes,
+      `forensic-estimate-analysis-${reportIdentity.artifactFilename}`,
+      [],
+      {
+        artifactVersion: reportIdentity.artifactVersion,
+        reportType: reportIdentity.reportType,
+      }
+    );
+  }
+
   const includeUnanchored = unmatched.length > 0 && request.includeUnanchoredAppendix !== false;
-  if (findingDetails.length > 0 || includeUnanchored) {
+  // Legacy findings-card report. Retained only for reports with no structured
+  // delta to reconcile (nothing for the forensic document to be about); a run
+  // that produced the forensic report must not also emit this one, or the
+  // consolidation to two documents is undone.
+  if (!forensicInput && (findingDetails.length > 0 || includeUnanchored)) {
     const findingsDoc = await PDFDocument.create();
     const findingsFont = await findingsDoc.embedFont(StandardFonts.Helvetica);
     const findingsBoldFont = await findingsDoc.embedFont(StandardFonts.HelveticaBold);
@@ -3219,6 +3290,29 @@ export function buildRequiredEstimatorDeltaFindings(
 
   return {
     findings,
+    // Built here because this is the only scope holding both documents' parsed
+    // totals blocks; the PDF assembly downstream cannot reach the delta engine.
+    forensic: {
+      reconciliation: buildForensicReconciliation({
+        higherTotals: deltaMatch?.higherTotalsSummary ?? null,
+        lowerTotals: deltaMatch?.lowerTotalsSummary ?? null,
+      }),
+      higherLineCount: deltaMatch ? deltaMatch.matchedPairCount + deltaMatch.missingOperationCount : null,
+      lowerLineCount: deltaMatch ? deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length : null,
+      // Only confirmed omissions. An OCR-unverified line is not evidence the
+      // comparison lacks the operation, so it must not be listed as one.
+      noCounterpartRows: (deltaMatch?.orderedDeltas ?? [])
+        .filter((delta) => delta.kind === "missing_operation" && !delta.ocrUncertain)
+        .slice(0, 300)
+        .map((delta) => ({
+          line: delta.higherRow.lineNumber,
+          description: [delta.higherRow.opCode, delta.higherRow.description]
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+          amount: delta.higherRow.price,
+        })),
+    },
     debug: {
       requiredDetectorFindingCount: findings.length,
       missingRequiredDetectors,

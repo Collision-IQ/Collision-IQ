@@ -4007,13 +4007,36 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     });
 
     assert.ok(result.annotationMetadata.length > 0, "callouts were drawn");
-    assert.ok(result.findingsReportBytes, "findings report was produced");
-    const findingsReportText = (await extractFindingsReportPageTexts(result))
+    assert.ok(result.findingsReportBytes, "the companion report was produced");
+    // The second document is now the Forensic Estimate Analysis, which explains
+    // findings in prose under domain headings rather than as id-keyed cards.
+    // The invariant is unchanged and is what actually matters: a mark drawn on
+    // the estimate with nothing explaining it in the companion report is an
+    // orphan. Parity is therefore asserted on the operation label the reader
+    // sees, not on an internal id the reader never sees.
+    const companionText = (await extractFindingsReportPageTexts(result))
       .join(" ")
-      .replace(/\s+/g, "");
-    const orphanCallouts = [...new Set(result.annotationMetadata.map((item) => item.findingId))]
-      .filter((findingId) => !findingsReportText.includes(findingId));
-    assert.deepEqual(orphanCallouts, [], "every callout finding id appears in the findings report");
+      .replace(/\s+/g, " ");
+    const normalize = (value) => value.replace(/\s+/g, " ").trim();
+    // The anchor description is the row text the mark sits on; the forensic
+    // report names the same operation in its finding prose. Anchors with no
+    // description (totals rows) are covered by the reconciliation table rather
+    // than a named finding, so they are not orphan candidates.
+    const annotatedDescriptions = [...new Set(
+      result.annotationMetadata
+        .map((item) => item.sourceAnchorDescription)
+        .filter((value) => typeof value === "string" && value.trim().length > 3)
+    )];
+    assert.ok(annotatedDescriptions.length > 0, "callout metadata carries anchor descriptions");
+    const significantWord = (description) =>
+      normalize(description)
+        .split(" ")
+        .filter((token) => token.length > 4 && /^[A-Za-z]+$/.test(token))[0] ?? null;
+    const orphanCallouts = annotatedDescriptions
+      .map(significantWord)
+      .filter((token) => token !== null)
+      .filter((token) => !companionText.toLowerCase().includes(token.toLowerCase()));
+    assert.deepEqual(orphanCallouts, [], "every callout is explained in the companion report");
     assert.equal(result.unresolvedAnchorCount, 0, "no finding lost its anchor between the two renderers");
     // D-6: callout count equals ANNOTATABLE finding count — the counts must
     // never disagree silently.

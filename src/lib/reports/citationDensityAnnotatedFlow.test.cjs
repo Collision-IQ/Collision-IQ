@@ -178,7 +178,7 @@ run("chat intent routes annotated citation density carrier estimate requests to 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /\/api\/reports\/citation-density\/annotated-estimate/);
   assert.doesNotMatch(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
-  assert.match(chatSource, /Download Delta Citation Density Report/);
+  assert.match(chatSource, /Download Citation Density Report/);
   assert.match(chatSource, /activeCaseId,/);
   assert.match(chatSource, /artifactIds: attachmentsRef\.current\.map/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
@@ -225,7 +225,7 @@ run("chat intent routes annotate both estimates requests to both-target export",
 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /outputs\?: Array/);
-  assert.match(chatSource, /Download Delta Citation Density Report/);
+  assert.match(chatSource, /Download Citation Density Report/);
   assert.match(chatSource, /output\.estimateRole/);
 });
 
@@ -240,11 +240,11 @@ run("export card primary Citation Density action calls annotated route, not stan
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
   const selectorIndex = source.indexOf("<CitationDensityTargetSelector");
-  const deltaCardIndex = source.indexOf("Delta Citation Density Report", selectorIndex);
+  const deltaCardIndex = source.indexOf("Citation Density Report", selectorIndex);
   const snapshotCardIndex = source.indexOf("1-Page Snapshot");
 
-  assert.match(source, /Download Delta Citation Density Report/);
-  assert.match(source, /Email Delta Citation Density Report/);
+  assert.match(source, /Download Citation Density Report/);
+  assert.match(source, /Email Citation Density Report/);
   assert.match(source, /Delta Citation Density Report/);
   assert.doesNotMatch(source, /<FileText[\s\S]{0,300}Citation Density Gap Report/);
   assert.doesNotMatch(source, /Download summary report/);
@@ -269,22 +269,23 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
 });
 
-run("OEM Citation Density replaces Policy & Rights primary report card", () => {
+run("exactly ONE Citation Density card exists; the OEM card is retired", () => {
+  // The product used to offer two Citation Density cards that between them
+  // emitted four PDFs per review (two annotated estimates, two findings
+  // reports). It now offers ONE card producing exactly two documents: the
+  // annotated delta estimate and the Forensic Estimate Analysis. This test is
+  // the guard against the second card creeping back.
   const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
   const flowCopy = fs.readFileSync(path.join(process.cwd(), "src/components/StructuredAnalysisCanvas.tsx"), "utf8");
-  const oemRouteSource = fs.readFileSync(
-    path.join(process.cwd(), "src/app/api/reports/oem-citation-density/annotated-estimate/route.ts"),
-    "utf8"
-  );
 
-  assert.match(pageSource, /OEM Citation Density Report/);
-  assert.match(pageSource, /Download OEM Citation Density Report/);
-  assert.match(pageSource, /Email OEM Citation Density Report/);
-  assert.match(pageSource, /"\/api\/reports\/oem-citation-density\/annotated-estimate"/);
+  assert.doesNotMatch(pageSource, /Download OEM Citation Density Report/);
+  assert.doesNotMatch(pageSource, /Email OEM Citation Density Report/);
+  assert.doesNotMatch(pageSource, /title="OEM Citation Density Report"/);
+  assert.doesNotMatch(pageSource, /label: "OEM Citation Density"/);
+  // The surviving card is named without the "Delta" qualifier.
+  assert.match(pageSource, /Download Citation Density Report/);
   assert.doesNotMatch(pageSource, /<FileText[\s\S]{0,300}Policy & Rights Review/);
   assert.doesNotMatch(flowCopy, /Policy & Rights Review/);
-  assert.match(oemRouteSource, /OEM_CITATION_DENSITY_ARTIFACT_VERSION/);
-  assert.match(oemRouteSource, /buildOemCitationDensityFindings/);
 });
 
 run("Citation Density viewer uses server-generated PDF and converts PDF coordinates", () => {
