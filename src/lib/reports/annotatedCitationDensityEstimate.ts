@@ -2295,17 +2295,21 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             `Comparison estimate labor coverage is ${Math.round(hoursCoverage.coverage * 100)}% — ${hoursCoverage.parsedHours} of the ${hoursCoverage.printedHours} hours its own totals block prints were parsed. Absence findings are suppressed: a line this pass could not read is not a line the carrier omitted.`
           );
         }
-        if (competingLabel === null) {
-          // Fail loud, print nothing. Every callout in this layer names the
-          // comparison document; with no resolved identity there is no honest
-          // way to word one, and a role-word fallback is what shipped the
-          // "MISSED on SHOP" defect.
+        // EXPORT BOUNDARY decides how much identity the marks need. Redacted
+        // output (production's default) never prints the carrier's name — every
+        // callout says "the comparison estimate" — so an unresolved identity
+        // costs nothing there and must not suppress the layer. Only the
+        // unredacted path actually prints the resolved name, and only there is
+        // "no honest way to word the callout" a real state: a role-word
+        // fallback is what shipped the "MISSED on SHOP" defect.
+        const labelForMarks = sourcePagesRedacted ? "the comparison estimate" : competingLabel;
+        if (labelForMarks === null) {
           const identityNote =
             "Comparison document identity did not resolve to an organization name — delta value marks suppressed rather than labelled with a role word.";
           warnings.push(identityNote);
           valueLayerSuppressionNote = valueLayerSuppressionNote ?? identityNote;
         }
-        if (competingLabel !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
+        if (labelForMarks !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
             pages: [...pageGeometries.values()],
@@ -2316,7 +2320,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             // straight back into a redacted document. The role is what the
             // reader needs ("the comparison estimate"); the identity is not.
             occupiedRegions: await getImageRegions(),
-            competingLabel: sourcePagesRedacted ? "the comparison estimate" : competingLabel,
+            competingLabel: labelForMarks,
             measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
           });
           const costInk = rgb(0.72, 0.12, 0.1);
