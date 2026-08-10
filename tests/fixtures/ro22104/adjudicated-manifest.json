@@ -1,0 +1,382 @@
+{
+  "ro": "22104",
+  "subject": {
+    "fileName": "Shop 22104 7-28-26.pdf",
+    "grossTotal": 19657.22,
+    "laborHours": 58.9,
+    "paintHours": 26.8,
+    "bodyPaintRate": 75,
+    "paintMaterialsRate": 60
+  },
+  "comparison": {
+    "fileName": "SOR-1 22104.pdf",
+    "grossTotal": 14854.6,
+    "laborHours": 43.5,
+    "paintHours": 21.2,
+    "bodyPaintRate": 62,
+    "paintMaterialsRate": 40
+  },
+  "grossGap": 4802.62,
+  "provenance": "Hand-adjudicated external gap review supplied 2026-08-10. Expected findings for the annotated delta report; grades coverage, does not gate CI (source PDFs are not in the repo).",
+  "reconciliationCautions": [
+    "Lower-only or offsetting items (R&I fuel door, R&I outside tailgate handle 0.3, R&I RT tail lamp 0.3, generic corrosion protection $12, flex additive $8, D&R battery 0.5, clean-for-delivery $15) must not be characterized as omissions from the lower appraisal.",
+    "The lower appraisal carries a combined 2.5 paint-hour Clear Coat line; individual shop clear-coat lines are allocation differences, not automatically additive omissions.",
+    "The shop duplicates LT striker and muffler-nut charges near its end; duplicates must be verified before asserting the full shop total as owed."
+  ],
+  "items": [
+    {
+      "line": 8,
+      "anchor": "Step pad hinge",
+      "category": "Omitted",
+      "note": "Not listed on lower appraisal: step pad hinge, part 82215289AH, $0.01 and 0.3 body hr."
+    },
+    {
+      "line": 9,
+      "anchor": "Set up vehicle on frame bench",
+      "category": "Allowance",
+      "note": "Shop allows 3.0 hr for full-frame bench setup; lower appraisal's Setup & Measure is 2.0 hr total."
+    },
+    {
+      "line": 10,
+      "anchor": "Measure-Diagnostic prior to pull",
+      "category": "Omitted",
+      "note": "Separate pre-pull diagnostic measurement, 1.0 hr, is not listed on the lower appraisal."
+    },
+    {
+      "line": 14,
+      "anchor": "Muffler clamp",
+      "category": "Price",
+      "note": "Shop uses superseding/alternate part 68334692AB at $204.00; lower uses 68334692AA at $192.00. Difference: $12.00."
+    },
+    {
+      "line": 25,
+      "anchor": "Windshield RAM",
+      "category": "Allowance",
+      "note": "Shop provides 0.5 hr plus $7.08 trim tape for windshield masking. Lower combines windshield/back glass rope tape at 0.6 hr and $10.00."
+    },
+    {
+      "line": 28,
+      "anchor": "LT Uniside panel",
+      "category": "Allowance",
+      "note": "Shop blend allowance is 4.0 paint hr; lower allows 3.3 paint hr. Difference: 0.7 paint hr."
+    },
+    {
+      "line": 29,
+      "anchor": "LT Roof molding",
+      "category": "Omitted",
+      "note": "R&I LT roof molding, 0.3 body hr, is absent from lower appraisal."
+    },
+    {
+      "line": 31,
+      "anchor": "Mask for primer",
+      "category": "Omitted",
+      "note": "Primer masking, $5.00 and 0.3 body hr, is not itemized on lower appraisal."
+    },
+    {
+      "line": 32,
+      "anchor": "Cavity Wax Plus",
+      "category": "Omitted",
+      "note": "Cavity wax, $15.40 and 0.2 body hr, is not itemized on lower appraisal."
+    },
+    {
+      "line": 34,
+      "anchor": "LT Door shell",
+      "category": "Omitted",
+      "note": "Blend LT rear door shell, 2.0 paint hr, is absent from lower appraisal."
+    },
+    {
+      "line": 35,
+      "anchor": "LT Surround w'strip",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I surround weatherstrip, 0.5 body hr."
+    },
+    {
+      "line": 36,
+      "anchor": "LT Belt w'strip",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I belt weatherstrip, 0.3 body hr."
+    },
+    {
+      "line": 37,
+      "anchor": "LT Upper molding",
+      "category": "Omitted",
+      "note": "Rear-door molding absent: part 68348685AG, $32.65 and 0.3 body hr."
+    },
+    {
+      "line": 38,
+      "anchor": "LT Rear molding",
+      "category": "Omitted",
+      "note": "Rear-door molding absent: part 68348689AG, $58.75 and 0.3 body hr."
+    },
+    {
+      "line": 39,
+      "anchor": "LT Applique black",
+      "category": "Omitted",
+      "note": "Non-reusable applique absent: part 68292931AD, $68.50 and 0.3 body hr."
+    },
+    {
+      "line": 40,
+      "anchor": "LT Door glass",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I glass, 0.6 body hr."
+    },
+    {
+      "line": 41,
+      "anchor": "LT Run w'strip",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I run weatherstrip, 0.2 body hr."
+    },
+    {
+      "line": 43,
+      "anchor": "LT Handle, outside",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I outside handle, 0.3 body hr."
+    },
+    {
+      "line": 44,
+      "anchor": "LT Window molding",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I window molding, 0.3 body hr."
+    },
+    {
+      "line": 45,
+      "anchor": "LT R&I trim panel",
+      "category": "Omitted",
+      "note": "Rear-door access operation absent: R&I trim panel, 0.5 body hr."
+    },
+    {
+      "line": 47,
+      "anchor": "Back glass RAM",
+      "category": "Allowance",
+      "note": "Shop provides 0.5 hr plus $7.08 trim tape for back-glass masking; lower combines both glass areas at 0.6 hr and $10.00."
+    },
+    {
+      "line": 54,
+      "anchor": "RT Side panel w/o flares",
+      "category": "Allowance",
+      "note": "Shop blend allowance is 2.0 paint hr; lower allows 1.6 paint hr. Difference: 0.4 paint hr."
+    },
+    {
+      "line": 57,
+      "anchor": "Closure panel",
+      "category": "Omitted",
+      "note": "Replacement closure panel, part 68298538AF, $46.10 and 0.5 body hr, is absent from lower appraisal."
+    },
+    {
+      "line": 58,
+      "anchor": "LT Inner panel",
+      "category": "Allowance",
+      "note": "Shop repair allowance is 2.0 body/1.2 paint hr; lower allows 1.0 body/0.5 paint hr. Difference: +1.0 body and +0.7 paint hr."
+    },
+    {
+      "line": 61,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Separate 0.1 paint hr clear-coat allowance associated with outer wheelhouse is not individually listed lower."
+    },
+    {
+      "line": 63,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Separate 0.1 paint hr clear-coat allowance associated with closure panel is not individually listed lower."
+    },
+    {
+      "line": 66,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Separate 0.1 paint hr clear-coat allowance associated with outer pillar is not individually listed lower."
+    },
+    {
+      "line": 67,
+      "anchor": "LT Hinge reinf",
+      "category": "Changed operation",
+      "note": "Shop replaces reinforcement (part 68399187AD, $189.00, 1.5 body/0.5 paint); lower repairs it at 1.0 body/0.5 paint. Net shop difference: $189.00 and 0.5 body hr."
+    },
+    {
+      "line": 75,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Shop includes 0.1 paint hr for fuel-door clear coat; lower does not separately show it."
+    },
+    {
+      "line": 84,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Shop includes 0.6 paint hr for tailgate clear coat; lower uses a combined 2.5 paint-hr clear-coat line, so allocation requires reconciliation rather than treating it as a pure omission."
+    },
+    {
+      "line": 103,
+      "anchor": "Mask for primer",
+      "category": "Omitted",
+      "note": "Second primer-masking allowance, $5.00 and 0.3 body hr, is not itemized lower."
+    },
+    {
+      "line": 104,
+      "anchor": "Cavity Wax Plus",
+      "category": "Omitted",
+      "note": "Second cavity-wax allowance, $15.40 and 0.2 body hr, is not itemized lower."
+    },
+    {
+      "line": 105,
+      "anchor": "Clean up seam sealers",
+      "category": "Omitted",
+      "note": "Cleanup of seam sealers/adhesives, $2.50 and 0.5 body hr, is absent lower."
+    },
+    {
+      "line": 106,
+      "anchor": "Impact Resistant Structural",
+      "category": "Omitted",
+      "note": "Structural adhesive 3M 07333, $156.63, is absent lower."
+    },
+    {
+      "line": 107,
+      "anchor": "Heavy-Bodied Seam Sealer",
+      "category": "Omitted",
+      "note": "Heavy-bodied seam sealer 3M 08308, $86.06, is absent lower."
+    },
+    {
+      "line": 108,
+      "anchor": "Controlled-Flow Seam Sealer",
+      "category": "Omitted",
+      "note": "Controlled-flow seam sealer 3M 08329, $91.63, is absent lower."
+    },
+    {
+      "line": 109,
+      "anchor": "Urethane Seam Sealer",
+      "category": "Omitted",
+      "note": "Urethane seam sealer 3M 08365, $48.60, is absent lower."
+    },
+    {
+      "line": 110,
+      "anchor": "Static Mixing Nozzle",
+      "category": "Omitted",
+      "note": "Static mixing nozzle 3M 08194, $4.64, is absent lower."
+    },
+    {
+      "line": 111,
+      "anchor": "Threaded Cartridge Nozzle",
+      "category": "Omitted",
+      "note": "Three cartridge nozzles, $9.33, are absent lower."
+    },
+    {
+      "line": 112,
+      "anchor": "Acid brush",
+      "category": "Omitted",
+      "note": "Four acid brushes, $4.40, are absent lower."
+    },
+    {
+      "line": 113,
+      "anchor": "Weld-Thru Coating",
+      "category": "Omitted",
+      "note": "Weld-through coating, $13.31 and 0.2 body hr, is absent lower (lower has only a generic $12 corrosion-protection line)."
+    },
+    {
+      "line": 114,
+      "anchor": "Mask inner structure",
+      "category": "Omitted",
+      "note": "Mask inner structure for refinish, $5.00 and 0.5 body hr, is absent lower."
+    },
+    {
+      "line": 115,
+      "anchor": "Cover to protect",
+      "category": "Omitted",
+      "note": "Protect vehicle during cutting/grinding/welding, 1.0 body hr, is absent lower."
+    },
+    {
+      "line": 116,
+      "anchor": "Welding & spark Deflection",
+      "category": "Omitted",
+      "note": "Welding/spark deflection paper, $21.24, is absent lower."
+    },
+    {
+      "line": 117,
+      "anchor": "Set up welder",
+      "category": "Omitted",
+      "note": "Welder setup, 0.4 body hr, is absent lower."
+    },
+    {
+      "line": 118,
+      "anchor": "Set back wiring",
+      "category": "Omitted",
+      "note": "Set back wiring, 1.0 body hr, is absent lower; lower's generic wiring line is only 0.5 hr and is also used for connector protection."
+    },
+    {
+      "line": 123,
+      "anchor": "Set back, secure Protect wiring",
+      "category": "Allowance",
+      "note": "Shop has a rear-lamp-area wiring protection line, $2.50 and 0.3 hr; lower has one generic $2.50/0.5 hr line for the claim."
+    },
+    {
+      "line": 128,
+      "anchor": "Add for Clear Coat",
+      "category": "Allowance",
+      "note": "Shop separately allows 0.3 paint hr for bumper clear coat; lower uses a combined clear-coat line."
+    },
+    {
+      "line": 133,
+      "anchor": "RT Extension panel",
+      "category": "Omitted",
+      "note": "RT bumper extension panel, part 68404388AB, $40.45, is absent lower."
+    },
+    {
+      "line": 139,
+      "anchor": "Park sensor bezel",
+      "category": "Omitted",
+      "note": "Two park-sensor bezels, $10.10, are absent lower."
+    },
+    {
+      "line": 140,
+      "anchor": "Set back, secure Protect wiring",
+      "category": "Allowance",
+      "note": "Shop has a second bumper-area wiring protection line, $2.50 and 0.3 hr; lower has one generic $2.50/0.5 hr line for the claim."
+    },
+    {
+      "line": 141,
+      "anchor": "Test fit-Rear bumper",
+      "category": "Omitted",
+      "note": "Structural-impact bumper test fit, 1.0 body hr, is absent lower."
+    },
+    {
+      "line": 143,
+      "anchor": "Pre-repair scan",
+      "category": "Omitted",
+      "note": "Pre-repair scan sublet, $201.00, is absent lower."
+    },
+    {
+      "line": 145,
+      "anchor": "In-proc repair scan",
+      "category": "Omitted",
+      "note": "In-process scan ($0.01 placeholder) is absent lower."
+    },
+    {
+      "line": 146,
+      "anchor": "Seat belt dynamic",
+      "category": "Omitted",
+      "note": "Seat-belt dynamic function test ($0.01 placeholder) is absent lower."
+    },
+    {
+      "line": 147,
+      "anchor": "Post-repair scan",
+      "category": "Omitted",
+      "note": "Post-repair scan sublet, $201.00, is absent lower."
+    },
+    {
+      "line": 152,
+      "anchor": "Mask jambs",
+      "category": "Allowance",
+      "note": "Shop allows five panels: $15.00 and 1.5 body hr; lower allows $3.00 and 0.2 hr. Difference: $12.00 and 1.3 body hr."
+    },
+    {
+      "line": 154,
+      "anchor": "Finish sand & polish",
+      "category": "Allowance",
+      "note": "Shop allows 3.0 paint hr (0.5 x 6 panels); lower denib allowance is 1.5 paint hr. Difference: 1.5 paint hr."
+    },
+    {
+      "line": 156,
+      "anchor": "Hazardous waste",
+      "category": "Price",
+      "note": "Shop charge is $5.00; lower charge is $3.00. Difference: $2.00."
+    }
+  ]
+}
