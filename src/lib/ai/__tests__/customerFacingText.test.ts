@@ -33,3 +33,21 @@ describe("toCustomerFacingInline", () => {
     expect(toCustomerFacingInline("Generated August 9, 2026")).toBe("Generated August 9, 2026");
   });
 });
+
+describe("numbers survive prose beautification", () => {
+  it("never splits a thousands-separated money value", () => {
+    // "$3,652.71. That" once shipped as "$3,652. 71. That": a comma-spacing
+    // rule broke the thousands separator, and the sentence-gluing rule then
+    // read the decimal point as a sentence boundary.
+    expect(toCustomerFacingText("the insurance company came in at $3,652.71. That is a gap.")).toContain(
+      "$3,652.71."
+    );
+  });
+
+  it("does not break a paragraph at an abbreviation", async () => {
+    const { normalizeNarrativeProse } = await import("../narrativeNormalization");
+    const long =
+      "The dollar gap comes down to four things: the hourly labor rate ($75 vs. $60), one part priced as aftermarket instead of genuine Honda, less paint and blend time on the insurer's version, and small material cost differences. Both include the before-and-after computer scans, a seat weight sensor calibration, power window setup, a system report, a test fit of the new bumper, and a final road test. That is the reassurance that matters most here.";
+    expect(normalizeNarrativeProse(long, "REPORT")).not.toMatch(/vs\.\n/);
+  });
+});

@@ -177,7 +177,13 @@ function capitalizeSentenceStart(value: string): string {
 function splitLongParagraph(value: string): string {
   if (value.length <= 360 || value.includes("\n- ")) return value;
 
-  const sentences = value.split(/(?<=[.!?])\s+/).filter(Boolean);
+  // Not every period ends a sentence: "($75 vs. $60)" split here once shipped
+  // a customer report with a paragraph break in the middle of the comparison.
+  // No split after common abbreviations, and none before a "$" or a lowercase
+  // continuation — real sentences don't start that way.
+  const sentences = value
+    .split(/(?<=[.!?])(?<!\b(?:vs|etc|inc|no|approx|e\.g|i\.e)\.)\s+(?![a-z$(])/i)
+    .filter(Boolean);
   if (sentences.length < 2) return value;
 
   const paragraphs: string[] = [];

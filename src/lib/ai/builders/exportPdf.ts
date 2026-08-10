@@ -172,27 +172,27 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
     ...input,
     header: {
       ...input.header,
-      title: sanitizeReportText(redactDownloadContent(input.header.title)),
+      title: sanitizeReportInline(redactDownloadContent(input.header.title)),
       subtitle: sanitizeReportText(redactDownloadContent(input.header.subtitle)),
-      generatedLabel: sanitizeReportText(redactDownloadContent(input.header.generatedLabel)),
+      generatedLabel: sanitizeReportInline(redactDownloadContent(input.header.generatedLabel)),
     },
     summary: input.summary.map((item) => ({
-      label: sanitizeReportText(item.label),
-      value: sanitizeReportText(redactDownloadContent(item.value)),
+      label: sanitizeReportInline(item.label),
+      value: sanitizeReportInline(redactDownloadContent(item.value)),
     })),
     sections: input.sections.map((section) => ({
       ...section,
-      title: sanitizeReportText(redactDownloadContent(section.title)),
+      title: sanitizeReportInline(redactDownloadContent(section.title)),
       body: section.body ? sanitizeReportText(redactDownloadContent(section.body)) : undefined,
       bullets: section.bullets?.map((bullet) => sanitizeReportText(redactDownloadContent(bullet))),
       comparisonRows: section.comparisonRows?.map((row) => ({
         ...row,
-        label: sanitizeReportText(redactDownloadContent(row.label)),
-        leftLabel: sanitizeReportText(redactDownloadContent(row.leftLabel)),
-        leftValue: sanitizeReportText(redactDownloadContent(row.leftValue)),
-        rightLabel: sanitizeReportText(redactDownloadContent(row.rightLabel)),
-        rightValue: sanitizeReportText(redactDownloadContent(row.rightValue)),
-        delta: row.delta ? sanitizeReportText(redactDownloadContent(row.delta)) : undefined,
+        label: sanitizeReportInline(redactDownloadContent(row.label)),
+        leftLabel: sanitizeReportInline(redactDownloadContent(row.leftLabel)),
+        leftValue: sanitizeReportInline(redactDownloadContent(row.leftValue)),
+        rightLabel: sanitizeReportInline(redactDownloadContent(row.rightLabel)),
+        rightValue: sanitizeReportInline(redactDownloadContent(row.rightValue)),
+        delta: row.delta ? sanitizeReportInline(redactDownloadContent(row.delta)) : undefined,
         note: row.note ? sanitizeReportText(redactDownloadContent(row.note)) : undefined,
       })),
     })),
@@ -200,12 +200,42 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
   };
 }
 
+/**
+ * Prose fields: scrub, then narrative-normalize PER PARAGRAPH — the "\s{2,}"
+ * collapse in the scrub chain must not fuse deliberately separated paragraphs,
+ * and the normalizer's terminal punctuation belongs on sentences only.
+ */
 export function sanitizeReportText(value: string): string {
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => sanitizeReportParagraph(paragraph))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Grid fields — labels, dollar values, titles, the generated-date line. Same
+ * scrub as prose, WITHOUT narrative normalization: "Vehicle" and "$4,959.35"
+ * are not sentences, and the normalizer was printing them as "VEHICLE." and
+ * "$4,959.35." on every tile of the customer report.
+ */
+export function sanitizeReportInline(value: string): string {
+  const normalized = cleanUserFacingPresentationText(sanitizeUserFacingEvidenceText(value), {
+    preserveMarkdown: false,
+  });
+  return cleanUserFacingPresentationText(scrubReportFragments(normalized), { preserveMarkdown: false });
+}
+
+function sanitizeReportParagraph(value: string): string {
   const normalized = cleanUserFacingPresentationText(sanitizeUserFacingEvidenceText(value), {
     preserveMarkdown: false,
   });
 
-  return cleanUserFacingPresentationText(normalizeNarrativeProse(normalized
+  return cleanUserFacingPresentationText(normalizeNarrativeProse(scrubReportFragments(normalized), "REPORT"), { preserveMarkdown: false });
+}
+
+function scrubReportFragments(normalized: string): string {
+  return normalized
     .replace(/\bCCC(?:\s+Secure\s+Share)?\s+confirms\s+this\s+operation\s+is\s+required\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
     .replace(/\bCCC\s+Secure\s+Share\s+documentation\s+this\s+estimate\s+line\s+was\s+present\s+in\s+the\s+structured\s+estimate\s+data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
     .replace(/\bCCC\s+Secure\s+Share\s+may\s+identify\s+estimate\s+differences\s+that\s+need\s+citations,\s+but\s+it\s+cannot\s+supply\s+the\s+required\s+citation\s+authority\.?/gi, "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.")
@@ -245,7 +275,7 @@ export function sanitizeReportText(value: string): string {
     .replace(/(?:[,;]\s*){2,}/g, "; ")
     .replace(/\s*[-,;:]\s*$/g, "")
     .replace(/\s{2,}/g, " ")
-    .trim(), "REPORT"), { preserveMarkdown: false });
+    .trim();
 }
 
 export function createPdfPageLayout(doc: Pick<jsPDF, "internal">): PdfPageLayout {
@@ -417,13 +447,18 @@ function drawBrandedHeader(
   setPdfFont(doc, "bold");
   doc.setFontSize(18);
   doc.setTextColor(28, 28, 30);
-  doc.text(params.title, params.x, titleY);
+  // Wrapped: a title addressed to the owner ("Your 2020 Honda Civic Coupe EX:
+  // What's Going On With Your Repair") is longer than one 18pt line, and an
+  // unwrapped draw ran it off the page edge.
+  const titleLines = doc.splitTextToSize(params.title, params.width);
+  doc.text(titleLines, params.x, titleY, { lineHeightFactor: 1.1 });
+  const titleBlockHeight = (titleLines.length - 1) * 7;
 
   setPdfFont(doc);
   doc.setFontSize(10);
   doc.setTextColor(82, 86, 92);
   const subtitleLines = doc.splitTextToSize(params.subtitle, params.width);
-  doc.text(subtitleLines, params.x, titleY + 6);
+  doc.text(subtitleLines, params.x, titleY + titleBlockHeight + 6);
 
   doc.setFontSize(8.5);
   doc.setTextColor(125, 129, 134);
@@ -431,7 +466,7 @@ function drawBrandedHeader(
 
   doc.setDrawColor(198, 90, 42);
   doc.setLineWidth(0.9);
-  const dividerY = titleY + 6 + subtitleLines.length * LINE_HEIGHT + 3;
+  const dividerY = titleY + titleBlockHeight + 6 + subtitleLines.length * LINE_HEIGHT + 3;
   doc.line(params.x, dividerY, params.x + params.width, dividerY);
 
   return dividerY;
