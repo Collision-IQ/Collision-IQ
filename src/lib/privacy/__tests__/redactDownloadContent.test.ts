@@ -21,7 +21,7 @@
  * being fixed, so both directions are guarded below.
  */
 import { describe, it, expect } from "vitest";
-import { redactDownloadContent } from "../redactDownloadContent";
+import { maskVinForExport, redactDownloadContent } from "../redactDownloadContent";
 
 describe("prose survives — the label words are ordinary English", () => {
   it("does not eat the sentence stating the gap (Test 6)", () => {
@@ -146,5 +146,28 @@ describe("a sentence boundary is not a label separator", () => {
     const out = redactDownloadContent("Owner: MARCOLINO, JOSHUA");
     expect(out).toContain("[REDACTED_PERSON]");
     expect(out).not.toContain("MARCOLINO");
+  });
+});
+
+describe("VIN last-eight masking is shape-based in labeled contexts", () => {
+  // The prose scanner validates the ISO check digit so it never mangles part
+  // numbers — but a value the document itself labels "VIN" is a VIN even when
+  // validation fails (an OCR misread, a synthetic record). One shipped
+  // unmasked exactly that way on the customer report's VIN tile.
+  it("masks a labeled VIN that fails the check digit", () => {
+    const out = redactDownloadContent("VIN: 2HGFC3B36LH123456");
+    expect(out).toContain("2HGFC3B36********");
+    expect(out).not.toContain("LH123456");
+  });
+
+  it("masks a valid labeled VIN the same way", () => {
+    const out = redactDownloadContent("VIN: JTHD81F29P5050559");
+    expect(out).toContain("JTHD81F29********");
+    expect(out).not.toContain("P5050559");
+  });
+
+  it("maskVinForExport leaves non-VIN-shaped identifiers alone", () => {
+    expect(maskVinForExport("01228348600000080")).toBe("01228348600000080");
+    expect(maskVinForExport("ABCDEFGHJKLMNPRST")).toBe("ABCDEFGHJKLMNPRST");
   });
 });

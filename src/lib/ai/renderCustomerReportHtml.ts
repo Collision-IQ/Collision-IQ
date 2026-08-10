@@ -1,4 +1,5 @@
 import type { CustomerReport } from "./generateCustomerReport";
+import { maskVinForExport } from "@/lib/privacy/redactDownloadContent";
 import {
   sanitizeCustomerReportForRender,
   toCustomerFacingList,
@@ -175,7 +176,7 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
 
     <div class="meta">
       <div class="meta-item"><span class="meta-label">Vehicle</span>${escapeHtml(input.vehicle)}</div>
-      <div class="meta-item"><span class="meta-label">VIN</span>${escapeHtml(input.vin ?? "Not provided")}</div>
+      <div class="meta-item"><span class="meta-label">VIN</span>${escapeHtml(input.vin ? maskVinForExport(input.vin) : "Not provided")}</div>
       <div class="meta-item"><span class="meta-label">Insurer</span>${escapeHtml(input.insurer ?? "Not provided")}</div>
       <div class="meta-item"><span class="meta-label">Mileage</span>${escapeHtml(input.mileage ?? "Not provided")}</div>
       <div class="meta-item"><span class="meta-label">Estimate Total</span>${escapeHtml(input.estimateTotal ?? "Not provided")}</div>

@@ -178,7 +178,7 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
     },
     summary: input.summary.map((item) => ({
       label: sanitizeReportInline(item.label),
-      value: sanitizeReportInline(redactDownloadContent(item.value)),
+      value: sanitizeReportInline(redactLabeledExportValue(item.label, item.value)),
     })),
     sections: input.sections.map((section) => ({
       ...section,
@@ -198,6 +198,19 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
     })),
     footer: input.footer.map((line) => sanitizeReportText(redactDownloadContent(line))),
   };
+}
+
+/**
+ * Grid values are redacted WITH their label, so the label-aware rules (VIN
+ * last-eight masking, claim/policy scrubbing) see the same context the tile
+ * gives the reader. A bare "2HGFC3B36LH123456" is not recognisable as a VIN
+ * to the prose scanner — the tile labelled "VIN" is what makes it one, and a
+ * VIN tile shipped unmasked exactly that way.
+ */
+function redactLabeledExportValue(label: string, value: string): string {
+  const prefix = `${label.trim()}: `;
+  const redacted = redactDownloadContent(`${prefix}${value}`);
+  return redacted.startsWith(prefix) ? redacted.slice(prefix.length) : redacted;
 }
 
 /**

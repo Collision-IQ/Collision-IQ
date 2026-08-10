@@ -146,10 +146,27 @@ const LABEL_RULES: LabelRule[] = [
 	{
 		labels: ["vin", "vehicle vin"],
 		replacementToken: "VIN",
-		valueTransformer: (value) => maskVinInText(value),
+		valueTransformer: (value) => maskVinForExport(value),
 		allowPeriodSeparator: true,
 	},
 ];
+
+/**
+ * VIN masking for a LABELED context — a value the document itself calls a VIN.
+ * Shape-based, not check-digit-based: the check digit protects the prose
+ * scanner from mangling part numbers, but here the label already established
+ * what the value is, and a VIN that fails validation (an OCR misread, a
+ * typo'd record) still identifies the vehicle and must not leave the system
+ * intact. The last eight never print; the first nine identify the model year
+ * and plant without identifying the vehicle.
+ */
+export function maskVinForExport(value: string): string {
+	return value.replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, (token) =>
+		HAS_DIGIT.test(token) && /[A-HJ-NPR-Z]/.test(token)
+			? token.slice(0, VIN_VISIBLE_PREFIX) + "*".repeat(17 - VIN_VISIBLE_PREFIX)
+			: token
+	);
+}
 
 export function redactDownloadContent(text: string): string {
 	if (!text) return "";
