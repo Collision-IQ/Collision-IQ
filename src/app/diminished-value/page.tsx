@@ -627,9 +627,9 @@ function DiminishedValueFlow() {
           </p>
           <ul className="mb-6 list-inside list-disc space-y-1 text-sm text-muted-foreground">
             <li>Market Value Report (ACV) with three live dealer comps, mileage-adjusted at $0.07/mile</li>
+            <li>Every comp linked to its live listing so you and the carrier can verify it</li>
             <li>Diminished value calculation with the insurer 17c cross-check</li>
-            <li>Carrier-ready demand letter on the Collision Academy template</li>
-            <li>Licensed-appraiser review before you send</li>
+            <li>Carrier-ready demand letter, issued in your own name, on the Collision Academy template</li>
           </ul>
           <div className="flex justify-end gap-3">
             <button
@@ -821,9 +821,10 @@ export default function DiminishedValuePage() {
         </h1>
         <p className="text-sm leading-6 text-muted-foreground">
           Upload your repair estimate and get a carrier-ready diminished value package: a Market
-          Value Report built from live dealer comparables, the diminished value calculation with the
-          insurer&apos;s own 17c framework cross-checked, and a demand letter on the Collision
-          Academy template — reviewed by a licensed appraiser before you send it.
+          Value Report built from live dealer comparables — each one linked to its listing for
+          independent review — the diminished value calculation with the insurer&apos;s own 17c
+          framework cross-checked, and a demand letter issued in your own name on the Collision
+          Academy template.
         </p>
       </section>
 

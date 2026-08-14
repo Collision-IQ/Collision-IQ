@@ -5,7 +5,7 @@
 //      Diminished Value calculation page with the 17c cross-check.
 //   2. Diminished Value demand letter — Collision Academy letterhead, claim
 //      block, the demand math spelled out, appraisal fee as an additional
-//      indirect loss, 15-day terms, licensed-appraiser signature.
+//      indirect loss, 15-day terms, signed by the claimant themselves.
 //
 // Every figure comes verbatim from the stored DvResult — these renderers
 // format, they never calculate. Projected values are labeled as projected.
@@ -19,12 +19,18 @@ const CONTENT_WIDTH = PAGE.width - PAGE.marginX * 2;
 
 const BRAND = {
   companyName: "Collision Academy",
-  logoPath: "/brand/logos/logo-horizontal.png",
-  appraiser: "Vinny Menichetti",
-  licenseNumber: "739698",
-  phone: "267-983-8615",
-  emailLine: "Vinny@Collision.Academy (no .com)",
+  // Stacked badge mark — the documents carry the brand, never an individual's
+  // name, license, or contact details.
+  logoPath: "/brand/logos/badge.png",
 };
+
+// Personal/claim data provenance — printed on every generated document.
+const DISCLAIMER =
+  "Owner, claim, and vehicle identifying information appearing in this document was supplied by the " +
+  "requesting party and is reproduced solely for that party's own use in presenting their claim; " +
+  "Collision Academy has not independently verified owner-supplied information and makes no " +
+  "representation regarding it. Market values are drawn from the retail listings cited herein as of " +
+  "the date of access; each listing remains subject to change or removal by its publisher.";
 
 const INK: [number, number, number] = [40, 42, 46];
 const MUTED: [number, number, number] = [110, 114, 120];
@@ -78,7 +84,13 @@ async function loadLogoDataUrl(path: string): Promise<string | null> {
   }
 }
 
-function drawLogo(doc: jsPDF, logo: string | null, x: number, y: number): number {
+function drawLogo(
+  doc: jsPDF,
+  logo: string | null,
+  x: number,
+  y: number,
+  width = 22
+): number {
   if (!logo) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -89,13 +101,25 @@ function drawLogo(doc: jsPDF, logo: string | null, x: number, y: number): number
   }
   try {
     const props = doc.getImageProperties(logo);
-    const width = 42;
     const height = (props.height / props.width) * width;
     doc.addImage(logo, "PNG", x, y, width, height);
     return y + height + 2;
   } catch {
     return y + 10;
   }
+}
+
+function drawDisclaimer(doc: jsPDF, y: number): number {
+  doc.setDrawColor(...RULE);
+  doc.setLineWidth(0.3);
+  doc.line(PAGE.marginX, y, PAGE.width - PAGE.marginX, y);
+  y += 3.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.4);
+  doc.setTextColor(...MUTED);
+  const lines = doc.splitTextToSize(pdfSafe(DISCLAIMER), CONTENT_WIDTH);
+  doc.text(lines, PAGE.marginX, y);
+  return y + lines.length * 3.1 + 2;
 }
 
 function sectionRule(doc: jsPDF, y: number): number {
@@ -197,7 +221,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
   y = sectionHeading(doc, "Dealer Comps:", y);
   const compColWidth = CONTENT_WIDTH / 3;
   const comps = calc.adjustments;
-  const boxHeight = 58;
+  const boxHeight = 62;
   doc.setDrawColor(...RULE);
   doc.setLineWidth(0.4);
   for (let i = 0; i < 3; i += 1) {
@@ -248,12 +272,22 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     cy += 3.8;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.2);
+    if (comp.vin) {
+      doc.setTextColor(...INK);
+      doc.text(`VIN: ${comp.vin}`, x + 2.5, cy);
+      cy += 3.4;
+    }
     doc.setTextColor(...MUTED);
     doc.text(
       `${comp.source} · ${comp.dateAccessed}${comp.trimMatch !== "exact" ? " · adjacent trim" : ""}`,
       x + 2.5,
       cy
     );
+    cy += 3.6;
+    if (comp.url) {
+      doc.setTextColor(60, 90, 170);
+      doc.textWithLink("View listing online", x + 2.5, cy, { url: comp.url });
+    }
   }
   y += boxHeight + 6;
 
@@ -355,6 +389,35 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     }
   }
 
+  // Every comp cited must be independently reviewable: full clickable links.
+  const linkedComps = [...result.compResearch.clean, ...result.compResearch.oneLoss].filter(
+    (comp) => comp.url
+  );
+  if (linkedComps.length) {
+    y = ensureSpace(doc, y + 2, 16 + linkedComps.length * 8);
+    y = sectionHeading(doc, "Comparable Listing Links (for independent review):", y);
+    for (const [index, comp] of linkedComps.entries()) {
+      y = ensureSpace(doc, y, 10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.2);
+      doc.setTextColor(...INK);
+      doc.text(
+        pdfSafe(
+          `Comp ${index + 1} — ${comp.source} · ${usd(comp.askingPrice)}${comp.vin ? ` · VIN ${comp.vin}` : ""}${comp.tier === "one_loss" ? " · loss-history comp" : ""}`
+        ),
+        PAGE.marginX,
+        y
+      );
+      y += 3.6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.4);
+      doc.setTextColor(60, 90, 170);
+      const displayUrl = comp.url!.length > 118 ? `${comp.url!.slice(0, 115)}...` : comp.url!;
+      doc.textWithLink(displayUrl, PAGE.marginX, y, { url: comp.url! });
+      y += 4.6;
+    }
+  }
+
   y = ensureSpace(doc, y + 2, 42);
   y = sectionHeading(doc, "Open Items Before Submission:", y);
   for (const item of result.openItems) {
@@ -362,25 +425,21 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     y = paragraph(doc, `• ${item}`, y, { size: 9 });
   }
 
-  y = ensureSpace(doc, y + 4, 30);
-  doc.setDrawColor(...RULE);
-  doc.line(PAGE.marginX, y, PAGE.marginX + 70, y);
-  y += 4.5;
+  y = ensureSpace(doc, y + 4, 34);
+  const preparedLineX = logo ? PAGE.marginX + 20 : PAGE.marginX;
+  const closingBadgeBottom = logo ? drawLogo(doc, logo, PAGE.marginX, y, 16) : y;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9.5);
-  doc.setTextColor(...INK);
-  doc.text(BRAND.appraiser, PAGE.marginX, y);
-  y += 4.5;
-  doc.text(`License # ${BRAND.licenseNumber}`, PAGE.marginX, y);
-  y += 4.5;
+  doc.setFontSize(9);
   doc.setTextColor(...MUTED);
   doc.text(
     pdfSafe(
-      `Prepared with Collision iQ on ${result.generatedAt.slice(0, 10)} — subject to licensed appraiser review.`
+      `Prepared through Collision iQ, a ${BRAND.companyName} service, on ${result.generatedAt.slice(0, 10)}.`
     ),
-    PAGE.marginX,
-    y
+    preparedLineX,
+    y + 6
   );
+  y = Math.max(closingBadgeBottom, y + 10) + 2;
+  drawDisclaimer(doc, y);
 
   return doc.output("blob");
 }
@@ -402,14 +461,16 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
   if (logo) {
     try {
       const props = doc.getImageProperties(logo);
-      const width = 40;
+      const width = 22;
       const height = (props.height / props.width) * width;
       doc.addImage(logo, "PNG", PAGE.width - PAGE.marginX - width, y, width, height);
+      y = Math.max(y + height + 4, y + 24);
     } catch {
-      // letter still renders without the mark
+      y += 24;
     }
+  } else {
+    y += 24;
   }
-  y += 24;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
@@ -473,25 +534,26 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
 
   y = paragraph(
     doc,
-    "Please send payment within 15 days of receipt of this notice. The claim should be easy to resolve, and we look " +
+    "Please send payment within 15 days of receipt of this notice. The claim should be easy to resolve, and I look " +
       "forward to a prompt resolution. If there is any delay in the processing of the settlement, please contact " +
-      "myself and/or the vehicle owner.",
+      "me directly.",
     y
   );
 
+  // The letter is issued in the claimant's own name — no individual appraiser
+  // identity or contact details appear on generated documents.
   y += 4;
   y = paragraph(doc, "Sincerely,", y);
-  y += 6;
+  y += 8;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
-  doc.text(BRAND.appraiser, PAGE.marginX, y);
+  doc.setTextColor(...INK);
+  doc.text(claimant, PAGE.marginX, y);
   y += 5.4;
-  doc.text(`License # ${BRAND.licenseNumber}`, PAGE.marginX, y);
-  y += 5.4;
-  doc.text(BRAND.phone, PAGE.marginX, y);
-  y += 5.4;
-  doc.setTextColor(60, 90, 170);
-  doc.text(BRAND.emailLine, PAGE.marginX, y);
+  doc.setTextColor(...MUTED);
+  doc.text("Vehicle Owner / Claimant", PAGE.marginX, y);
+
+  drawDisclaimer(doc, PAGE.height - PAGE.bottom - 18);
 
   return doc.output("blob");
 }

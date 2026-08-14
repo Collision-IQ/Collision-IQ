@@ -107,14 +107,62 @@ function extractPhone(text: string): string | undefined {
 const NON_LISTING_URL = /\/(parts|reviews?|recalls?|news|blog|research|specs|owners|forum)\b/i;
 const BRANDED_TITLE = /\b(salvage|rebuilt|branded\s+title|flood|lemon|total\s+loss\s+title|fire\s+damage)\b/i;
 
+/**
+ * A comp the report cites must be a SINGLE listing an adjuster can open —
+ * search-index and city-inventory pages parse a price that belongs to no
+ * particular vehicle and die the moment inventory rotates. Each major site
+ * has a recognizable detail-page URL shape; anything else on that site is
+ * treated as an index page and rejected.
+ */
+function isDetailPageUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  let hostname: string;
+  let path: string;
+  try {
+    const parsed = new URL(url);
+    hostname = parsed.hostname.replace(/^www\./, "");
+    path = parsed.pathname + parsed.hash;
+  } catch {
+    return false;
+  }
+
+  const rules: Array<{ host: RegExp; detail: RegExp }> = [
+    { host: /(^|\.)carfax\.com$/, detail: /\/vehicle\//i },
+    { host: /(^|\.)cargurus\.com$/, detail: /viewdetails|#listing=/i },
+    { host: /(^|\.)cars\.com$/, detail: /\/vehicledetail\//i },
+    { host: /(^|\.)autotrader\.com$/, detail: /\/cars-for-sale\/vehicle\/|vehicledetails/i },
+    { host: /(^|\.)truecar\.com$/, detail: /\/listing\//i },
+    { host: /(^|\.)edmunds\.com$/, detail: /\/vin\//i },
+    { host: /(^|\.)carvana\.com$/, detail: /\/vehicle\//i },
+    { host: /(^|\.)carmax\.com$/, detail: /\/car\//i },
+  ];
+  const rule = rules.find((entry) => entry.host.test(hostname));
+  if (rule) return rule.detail.test(path);
+
+  // Unknown site: reject obvious search/index shapes, otherwise allow — the
+  // title/year/model gate still applies.
+  return !/search|results|for-sale\/?$|_w\d+|\/inventory\/?$/i.test(path);
+}
+
+/** 17-char VIN in the URL or listing text — detail pages routinely carry it,
+ *  and a VIN-bearing comp is verifiable by anyone reviewing the report. */
+function extractCompVin(url: string | undefined, text: string): string | undefined {
+  const haystack = `${url ?? ""} ${text}`.toUpperCase();
+  return /(?:^|[^A-Z0-9])([A-HJ-NPR-Z0-9]{17})(?:[^A-Z0-9]|$)/.exec(haystack)?.[1];
+}
+
 function isLikelyListing(entry: { title: string; link?: string; snippet: string }, vehicle: DvVehicle): boolean {
   const text = `${entry.title} ${entry.snippet}`;
   if (entry.link && NON_LISTING_URL.test(entry.link)) return false;
+  if (!isDetailPageUrl(entry.link)) return false;
   if (BRANDED_TITLE.test(text)) return false;
-  if (vehicle.model && !new RegExp(vehicle.model.replace(/[^A-Za-z0-9- ]/g, ""), "i").test(text)) {
-    return false;
+  // Year and model must appear in the TITLE itself — a snippet mentioning the
+  // year can belong to a different unit on the same page.
+  if (vehicle.model) {
+    const modelPattern = new RegExp(vehicle.model.replace(/[^A-Za-z0-9- ]/g, ""), "i");
+    if (!modelPattern.test(entry.title)) return false;
   }
-  if (vehicle.year && !text.includes(String(vehicle.year))) return false;
+  if (vehicle.year && !entry.title.includes(String(vehicle.year))) return false;
   return true;
 }
 
@@ -169,6 +217,7 @@ function toComp(params: {
     title: entry.title.trim().slice(0, 160),
     dealer: extractDealerName(entry.title),
     phone: extractPhone(entry.snippet),
+    vin: extractCompVin(entry.link, text),
     askingPrice,
     mileage: extractListingMileage(text),
     url: entry.link,
@@ -211,12 +260,16 @@ function vehicleQueryIdentity(vehicle: DvVehicle, withTrim: boolean): string {
 function buildCleanQueries(vehicle: DvVehicle, zip: string): string[] {
   const trimIdentity = vehicleQueryIdentity(vehicle, true);
   const modelIdentity = vehicleQueryIdentity(vehicle, false);
+  // Detail-page-targeted queries first: the URL filter only accepts single
+  // listings, so aim the search engine at each site's detail-page path shape.
   return [
+    `site:cars.com/vehicledetail ${trimIdentity}`,
+    `site:carfax.com/vehicle ${trimIdentity}`,
+    `site:truecar.com/used-cars-for-sale/listing ${trimIdentity}`,
+    `site:edmunds.com ${trimIdentity} VIN`,
     `${trimIdentity} for sale near ${zip}`,
     `${trimIdentity} for sale within ${CLEAN_RADIUS_MILES} miles of ${zip}`,
-    `site:cars.com ${trimIdentity} for sale ${zip}`,
     `site:cargurus.com ${trimIdentity} for sale ${zip}`,
-    `site:truecar.com ${modelIdentity} for sale ${zip}`,
     `${modelIdentity} for sale near ${zip}`,
   ];
 }
@@ -228,7 +281,7 @@ function buildOneLossQueries(vehicle: DvVehicle, zip: string): Array<{ query: st
     { query: `used ${modelIdentity} "1 accident" for sale near ${zip}`, scope: "radius" },
     { query: `used ${modelIdentity} "accident reported" for sale`, scope: "nationwide" },
     { query: `used ${modelIdentity} "1 accident" for sale`, scope: "nationwide" },
-    { query: `site:carfax.com/cars-for-sale used ${modelIdentity} accident`, scope: "nationwide" },
+    { query: `site:carfax.com/vehicle ${modelIdentity} "accident"`, scope: "nationwide" },
     { query: `site:cargurus.com used ${modelIdentity} "accident reported"`, scope: "nationwide" },
   ];
 }
