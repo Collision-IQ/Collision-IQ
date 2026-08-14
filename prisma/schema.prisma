@@ -687,6 +687,29 @@ model CollisionBenchmarkRun {
   @@index([kind, startedAt])
 }
 
+// Paid self-service ACV + Diminished Value generator.
+// One row per DV request; the lifecycle is draft → paid → processing → ready
+// (or failed). Payment is verified against the Stripe Checkout session before
+// generation may run; the session id is unique so a session can never unlock
+// two requests.
+model DvValuationRequest {
+  id              String    @id @default(cuid())
+  userId          String
+  status          String    @default("draft")
+  attachmentId    String?
+  extraction      Json?
+  intake          Json?
+  result          Json?
+  stripeSessionId String?   @unique
+  paidAt          DateTime?
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
 model CollisionBenchmarkResult {
   id         String                @id @default(cuid())
   runId      String

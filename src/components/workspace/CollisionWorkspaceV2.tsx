@@ -115,6 +115,10 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
+  // Paid pay-per-report flow, deliberately a separate route (not a workspace
+  // view): it has its own payment gate and must stay usable without an
+  // analysis session.
+  { id: "dvgenerator", label: "Value IQ (ACV + DV)", icon: FileText, href: "/diminished-value" },
   { id: "history", label: "History", icon: BookOpen, view: "reports" },
   // Toolbox = saved CHATS, deliberately kept, reopenable with their files.
   // History above it is saved ANALYSES. Adjacent because both are "things I
@@ -134,6 +138,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   evidence: "nav-evidence",
   vehicle: "nav-my-vehicle",
   scaniq: "nav-scan-iq",
+  dvgenerator: "nav-dv-generator",
   history: "nav-history",
   toolbox: "nav-toolbox",
   knowledge: "nav-knowledge-base",

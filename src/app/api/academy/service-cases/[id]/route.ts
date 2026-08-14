@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
 
 const ALLOWED_STATUSES = [
   "PENDING_INTAKE",
@@ -18,6 +19,20 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Status and internal notes are back-office fields; payment gates elsewhere
+  // key off case status, so writes are platform-admin only.
+  try {
+    const viewer = await requireCurrentUser();
+    if (!viewer.isPlatformAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    }
+    throw error;
+  }
+
   const body = await req.json().catch(() => null);
   const { id } = await params;
 

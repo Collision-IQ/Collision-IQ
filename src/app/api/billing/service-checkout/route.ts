@@ -67,6 +67,7 @@ async function resolveParams(
   customerName: string | null;
   customerEmail: string | null;
   customerPhone: string | null;
+  dvRequestId: string | null;
 }> {
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -81,6 +82,7 @@ async function resolveParams(
       customerName?: string;
       customerEmail?: string;
       customerPhone?: string;
+      dvRequestId?: string;
     } | null;
     const rawClaimId = body?.claimId?.trim() ?? null;
     return {
@@ -94,6 +96,7 @@ async function resolveParams(
       customerName: body?.customerName?.trim() ?? null,
       customerEmail: body?.customerEmail?.trim() ?? null,
       customerPhone: body?.customerPhone?.trim() ?? null,
+      dvRequestId: body?.dvRequestId?.trim() ?? null,
     };
   }
   const formData = await req.formData();
@@ -129,6 +132,9 @@ async function resolveParams(
       : null,
     customerPhone: typeof formData.get("customerPhone") === "string"
       ? (formData.get("customerPhone") as string).trim()
+      : null,
+    dvRequestId: typeof formData.get("dvRequestId") === "string"
+      ? (formData.get("dvRequestId") as string).trim()
       : null,
   };
 }
@@ -218,6 +224,7 @@ export async function POST(req: Request) {
     customerName,
     customerEmail,
     customerPhone,
+    dvRequestId,
   } = await resolveParams(req);
 
   if (!serviceType) {
@@ -226,6 +233,25 @@ export async function POST(req: Request) {
 
   if (!isServiceType(serviceType)) {
     return NextResponse.json({ error: "Invalid service type" }, { status: 400 });
+  }
+
+  // A DV-generator checkout must reference a draft request the signed-in user
+  // owns — the session's metadata is what later unlocks generation, so the
+  // link is verified before Stripe ever sees it.
+  if (dvRequestId) {
+    if (serviceType !== "academy_diminished_value" && serviceType !== "academy_acv_review") {
+      return NextResponse.json(
+        { error: "dvRequestId is only valid for the diminished value / ACV services." },
+        { status: 400 }
+      );
+    }
+    const dvRequest = await prisma.dvValuationRequest.findUnique({
+      where: { id: dvRequestId },
+      select: { userId: true },
+    });
+    if (!dvRequest || dvRequest.userId !== dbUser.id) {
+      return NextResponse.json({ error: "DV request not found" }, { status: 404 });
+    }
   }
 
   const stableClaimId = claimId ? toStableClaimId(claimId) : null;
@@ -254,16 +280,25 @@ export async function POST(req: Request) {
     );
   }
 
-  const successUrl = new URL("/service-cases", appBaseUrl);
-  successUrl.searchParams.set("checkout", "success");
-  successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+  // Stripe substitutes only the literal "{CHECKOUT_SESSION_ID}" token, so the
+  // DV success URL is assembled as a raw string — URLSearchParams would
+  // percent-encode the braces and the page would receive the placeholder.
+  const legacySuccessUrl = new URL("/service-cases", appBaseUrl);
+  legacySuccessUrl.searchParams.set("checkout", "success");
+  legacySuccessUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+  const successUrl = dvRequestId
+    ? `${appBaseUrl}/diminished-value?checkout=success&request=${encodeURIComponent(dvRequestId)}&session_id={CHECKOUT_SESSION_ID}`
+    : legacySuccessUrl.toString();
 
   const cancelUrl =
     resolveSafeReturnUrl({
       rawReturnUrl: returnUrl,
       appBaseUrl,
       requestUrl: req.url,
-    }) ?? new URL("/the-academy?checkout=cancelled", appBaseUrl).toString();
+    }) ??
+    (dvRequestId
+      ? new URL(`/diminished-value?checkout=cancelled&request=${dvRequestId}`, appBaseUrl).toString()
+      : new URL("/the-academy?checkout=cancelled", appBaseUrl).toString());
 
   const academyUrl = new URL("/the-academy", appBaseUrl);
 
@@ -315,6 +350,7 @@ export async function POST(req: Request) {
       customerName: toMetadataValue(customerName),
       customerEmail: toMetadataValue(customerEmail),
       customerPhone: toMetadataValue(customerPhone),
+      dvRequestId: toMetadataValue(dvRequestId),
     };
 
     console.info("[service-checkout] creating Stripe Checkout session", {
