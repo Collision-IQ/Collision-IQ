@@ -174,6 +174,36 @@ function ensureSpace(doc: jsPDF, y: number, needed: number): number {
   return PAGE.top + 6;
 }
 
+/**
+ * Best-effort "open in a new window/tab" for the document's link annotations.
+ * The PDF NewWindow flag is honored by compliant desktop viewers; in-browser
+ * viewers decide tab behavior themselves (Ctrl+click always forces a new
+ * tab). pdf-lib loads on demand so the page bundle stays light, and any
+ * failure returns the original document — the flag is never worth blocking
+ * delivery over.
+ */
+async function markLinksOpenInNewWindow(blob: Blob): Promise<Blob> {
+  try {
+    const { PDFDocument, PDFName, PDFDict, PDFBool } = await import("pdf-lib");
+    const pdf = await PDFDocument.load(await blob.arrayBuffer());
+    for (const page of pdf.getPages()) {
+      const annots = page.node.Annots();
+      if (!annots) continue;
+      for (let i = 0; i < annots.size(); i += 1) {
+        const annot = annots.lookupMaybe(i, PDFDict);
+        const action = annot?.lookupMaybe(PDFName.of("A"), PDFDict);
+        if (action?.has(PDFName.of("URI"))) {
+          action.set(PDFName.of("NewWindow"), PDFBool.True);
+        }
+      }
+    }
+    const bytes = await pdf.save();
+    return new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
+  } catch {
+    return blob;
+  }
+}
+
 // ── Market Value Report (ACV) ────────────────────────────────────────────────
 
 export async function buildMarketValueReportBlob(data: DvReportData): Promise<Blob> {
@@ -441,7 +471,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
   y = Math.max(closingBadgeBottom, y + 10) + 2;
   drawDisclaimer(doc, y);
 
-  return doc.output("blob");
+  return markLinksOpenInNewWindow(doc.output("blob"));
 }
 
 // ── Demand letter ────────────────────────────────────────────────────────────
@@ -498,17 +528,23 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
   y = paragraph(doc, "To whom it may concern;", y);
   y += 1;
 
+  // The letter is written and signed by the vehicle owner, so it speaks in
+  // the owner's first person throughout.
+  const atFaultParty =
+    intake.claimPosture === "third_party" ? "your insured" : "the at-fault party";
+
   y = paragraph(
     doc,
-    `As you know, on ${intake.lossDate || "the date of loss"} the ${vehicleLabel} was damaged in an automobile ` +
-      `collision. The evidence clearly shows there was direct and proximate cause of damage to the ${vehicleLabel}.`,
+    `On ${intake.lossDate || "the date of loss"} my ${vehicleLabel} was damaged in an automobile collision. ` +
+      `The evidence clearly shows there was direct and proximate cause of damage to my vehicle.`,
     y
   );
 
   y = paragraph(
     doc,
-    "Due to the accident, the vehicle now has a lower resale value due to the loss record by VIN. Enclosed find a " +
-      `diminished value appraisal done by ${BRAND.companyName} indicating the vehicle has decreased in value.`,
+    "Due to the accident, my vehicle now has a lower resale value because of the loss record carried on its VIN. " +
+      `Enclosed please find a diminished value appraisal prepared through ${BRAND.companyName}'s Collision iQ ` +
+      "valuation service, indicating the vehicle has decreased in value.",
     y
   );
 
@@ -517,10 +553,10 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
     : "";
   y = paragraph(
     doc,
-    `I hereby request reimbursement for the vehicle's diminished value in the amount of ${usd(calc.totalDemand)} ` +
+    `I hereby request reimbursement for my vehicle's diminished value in the amount of ${usd(calc.totalDemand)} ` +
       `(ACV amount ${usd(calc.preLossAcv)} − post-loss value ${usd(calc.postLoss.value)} = ${usd(calc.diminishedValue)} ` +
       `+ ${usd(calc.appraisalFee)} appraisal fee = ${usd(calc.totalDemand)}; the appraisal fee is included as it is an ` +
-      `additional indirect loss the owner had to endure due to the actions of the insured).` +
+      `additional indirect loss I had to endure due to the actions of ${atFaultParty}).` +
       projectedNote,
     y,
     { bold: true }
@@ -528,7 +564,7 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
 
   y = paragraph(
     doc,
-    "The vehicle owner/claimant is reasonable and wants nothing more than to be indemnified for their loss.",
+    "As the vehicle owner, I am reasonable and want nothing more than to be made whole for my loss.",
     y
   );
 
