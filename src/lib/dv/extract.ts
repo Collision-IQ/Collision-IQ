@@ -29,6 +29,11 @@ function extractOwnerDisplayName(text: string): string | undefined {
   )[0];
   const cleaned = cut
     .replace(/[^A-Za-z,'\-\s.]/g, " ")
+    // CCC welds the next label straight onto the name ("Patrick LavinOwner"):
+    // split the lower→upper seam, then drop a trailing label token.
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]{2,})([A-Z][a-z])/g, "$1 $2")
+    .replace(/\s+(?:Owner|Insured|Claimant|Customer)\s*$/i, "")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[,\s]+$/, "");

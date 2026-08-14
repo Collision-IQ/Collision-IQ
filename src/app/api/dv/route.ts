@@ -60,6 +60,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     request,
+    viewer: { isPlatformAdmin: viewer.isPlatformAdmin },
     intakeDefaults: {
       lossDate: extraction.lossDate ?? "",
       zip: extraction.ownerZip ?? "",

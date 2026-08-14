@@ -89,6 +89,7 @@ function DiminishedValueFlow() {
   const { getToken, isLoaded, userId } = useAuth();
 
   const [step, setStep] = useState<WizardStep>("upload");
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [request, setRequest] = useState<DvRequestView | null>(null);
   const [intakeForm, setIntakeForm] = useState<IntakeForm>(EMPTY_INTAKE);
   const [busy, setBusy] = useState(false);
@@ -184,6 +185,7 @@ function DiminishedValueFlow() {
         const res = await fetch(`/api/dv/${requestId}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error ?? "Request not found.");
+        if (data.viewer?.isPlatformAdmin) setIsPlatformAdmin(true);
         applyRequest(data.request as DvRequestView);
       } catch (resumeError) {
         setError(resumeError instanceof Error ? resumeError.message : "Could not resume.");
@@ -288,6 +290,7 @@ function DiminishedValueFlow() {
         throw new Error(dvData?.error ?? "The estimate could not be read.");
       }
 
+      if (dvData.viewer?.isPlatformAdmin) setIsPlatformAdmin(true);
       const created = dvData.request as DvRequestView;
       const defaults = dvData.intakeDefaults as {
         lossDate: string; zip: string; state: string; taxRatePct: number; appraisalFee: number;
@@ -655,6 +658,22 @@ function DiminishedValueFlow() {
                 onClick={() => void runGeneration(request.id)}
               >
                 Generate now
+              </button>
+            </div>
+          )}
+          {isPlatformAdmin && request && !request.paidAt && (
+            // Visible only when the server reported platform-admin; the
+            // generate route independently re-checks admin before waiving
+            // payment, so this button is a shortcut, not the gate.
+            <div className="mt-4 rounded-lg border border-dashed border-[var(--accent)] px-4 py-3 text-sm">
+              <span className="font-semibold">Admin test mode:</span> generate without paying.{" "}
+              <button
+                type="button"
+                className="font-semibold text-[var(--accent)] underline decoration-dotted"
+                disabled={busy}
+                onClick={() => void runGeneration(request.id)}
+              >
+                Skip payment &amp; generate
               </button>
             </div>
           )}

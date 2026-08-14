@@ -89,7 +89,10 @@ export async function GET(
   if (!request) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  return NextResponse.json({ request });
+  return NextResponse.json({
+    request,
+    viewer: { isPlatformAdmin: viewer.isPlatformAdmin },
+  });
 }
 
 export async function PATCH(
