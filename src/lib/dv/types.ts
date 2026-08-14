@@ -84,6 +84,9 @@ export type DvTrimMatch = "exact" | "adjacent" | "model";
 
 export type DvComp = {
   tier: DvCompTier;
+  /** "detail" = a single-vehicle listing page; "index" = a live inventory or
+   *  search page whose parsed price still needs its specific ad snapshotted. */
+  listingQuality?: "detail" | "index";
   title: string;
   dealer?: string;
   phone?: string;

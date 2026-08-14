@@ -154,15 +154,14 @@ function extractCompVin(url: string | undefined, text: string): string | undefin
 function isLikelyListing(entry: { title: string; link?: string; snippet: string }, vehicle: DvVehicle): boolean {
   const text = `${entry.title} ${entry.snippet}`;
   if (entry.link && NON_LISTING_URL.test(entry.link)) return false;
-  if (!isDetailPageUrl(entry.link)) return false;
   if (BRANDED_TITLE.test(text)) return false;
-  // Year and model must appear in the TITLE itself — a snippet mentioning the
-  // year can belong to a different unit on the same page.
+  // The model must appear in the TITLE itself; the year may sit in the
+  // snippet (several sites omit it from index-page titles).
   if (vehicle.model) {
     const modelPattern = new RegExp(vehicle.model.replace(/[^A-Za-z0-9- ]/g, ""), "i");
     if (!modelPattern.test(entry.title)) return false;
   }
-  if (vehicle.year && !entry.title.includes(String(vehicle.year))) return false;
+  if (vehicle.year && !text.includes(String(vehicle.year))) return false;
   return true;
 }
 
@@ -214,6 +213,7 @@ function toComp(params: {
 
   return {
     tier: params.tier,
+    listingQuality: isDetailPageUrl(entry.link) ? "detail" : "index",
     title: entry.title.trim().slice(0, 160),
     dealer: extractDealerName(entry.title),
     phone: extractPhone(entry.snippet),
@@ -240,11 +240,15 @@ function dedupeComps(comps: DvComp[]): DvComp[] {
   return result;
 }
 
-/** Exact-trim comps sort first; ties break toward listings with mileage
- *  (adjustable) over those without. */
+/** Single-vehicle detail pages always outrank inventory/index pages; within a
+ *  quality band, exact-trim comps sort first, then listings with a readable
+ *  (adjustable) mileage. */
 function sortCleanComps(comps: DvComp[]): DvComp[] {
   const rank: Record<DvTrimMatch, number> = { exact: 0, adjacent: 1, model: 2 };
   return [...comps].sort((left, right) => {
+    const byQuality =
+      Number(left.listingQuality !== "detail") - Number(right.listingQuality !== "detail");
+    if (byQuality !== 0) return byQuality;
     const byTrim = rank[left.trimMatch] - rank[right.trimMatch];
     if (byTrim !== 0) return byTrim;
     return Number(right.mileage !== undefined) - Number(left.mileage !== undefined);
@@ -309,7 +313,9 @@ export async function runDvCompResearch(params: {
   const sweep: DvSweepRecord[] = [];
 
   try {
-    // Tier 1 — clean comps for the pre-loss ACV.
+    // Tier 1 — clean comps for the pre-loss ACV. Keep searching until three
+    // single-vehicle DETAIL listings are in hand; index-page comps accumulate
+    // as fallback fill rather than stopping the sweep early.
     const clean: DvComp[] = [];
     for (const query of buildCleanQueries(params.vehicle, params.zip)) {
       const outcome = await runSerperSearch(query, apiKey);
@@ -320,10 +326,22 @@ export async function runDvCompResearch(params: {
         )
         .filter((comp): comp is DvComp => Boolean(comp));
       clean.push(...comps);
-      if (dedupeComps(clean).length >= 3) break;
+      const detailCount = dedupeComps(clean).filter(
+        (comp) => comp.listingQuality === "detail"
+      ).length;
+      if (detailCount >= 3) break;
     }
 
     const cleanSelected = sortCleanComps(dedupeComps(clean)).slice(0, 3);
+    const indexCompCount = cleanSelected.filter(
+      (comp) => comp.listingQuality !== "detail"
+    ).length;
+    if (indexCompCount > 0) {
+      notes.push(
+        `${indexCompCount} comp(s) cite a live dealer inventory page rather than a single-vehicle listing; ` +
+          "open the linked page and snapshot the specific matching ad before the packet is submitted."
+      );
+    }
     if (cleanSelected.length === 0) {
       return {
         status: "insufficient_clean_comps",
