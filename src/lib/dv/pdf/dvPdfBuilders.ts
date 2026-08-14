@@ -48,8 +48,17 @@ function num(value: number | undefined): string {
 function signed(value: number): string {
   const formatted = usd(Math.abs(value));
   if (value > 0) return `+${formatted}`;
-  if (value < 0) return `−${formatted}`;
+  if (value < 0) return `-${formatted}`;
   return formatted;
+}
+
+/** jsPDF's built-in fonts are WinAnsi — U+2212/en/em dashes and curly quotes
+ *  fall back to garbage glyphs and break line metrics. Normalize to ASCII. */
+function pdfSafe(text: string): string {
+  return text
+    .replace(/[−–—]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"');
 }
 
 async function loadLogoDataUrl(path: string): Promise<string | null> {
@@ -130,7 +139,7 @@ function paragraph(
   doc.setFont("helvetica", options?.bold ? "bold" : "normal");
   doc.setFontSize(options?.size ?? 10.5);
   doc.setTextColor(...(options?.color ?? INK));
-  const lines = doc.splitTextToSize(text, CONTENT_WIDTH);
+  const lines = doc.splitTextToSize(pdfSafe(text), CONTENT_WIDTH);
   doc.text(lines, PAGE.marginX, y);
   return y + lines.length * ((options?.size ?? 10.5) * 0.42) + 3;
 }
@@ -150,12 +159,13 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
   const logo = await loadLogoDataUrl(BRAND.logoPath);
 
   let y = PAGE.top;
-  drawLogo(doc, logo, PAGE.marginX, y);
+  const logoBottom = drawLogo(doc, logo, PAGE.marginX, y);
   doc.setFont("times", "bold");
   doc.setFontSize(16);
   doc.setTextColor(...INK);
   doc.text("Market Value Report (ACV)", PAGE.width / 2 + 18, y + 8, { align: "center" });
-  y += 20;
+  // The first rule must clear whichever is taller: the logo or the title band.
+  y = Math.max(logoBottom + 4, y + 20);
 
   // General information
   y = sectionHeading(doc, "General Information:", y);
@@ -274,12 +284,12 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
   // ── Page 2: Diminished Value calculation ──
   doc.addPage();
   y = PAGE.top;
-  drawLogo(doc, logo, PAGE.marginX, y);
+  const page2LogoBottom = drawLogo(doc, logo, PAGE.marginX, y);
   doc.setFont("times", "bold");
   doc.setFontSize(16);
   doc.setTextColor(...INK);
   doc.text("Diminished Value Calculation", PAGE.width / 2 + 18, y + 8, { align: "center" });
-  y += 20;
+  y = Math.max(page2LogoBottom + 4, y + 20);
 
   y = sectionHeading(doc, "Valuation Summary:", y);
   const dvRow = (label: string, value: string, bold = false, red = false) => {
@@ -365,7 +375,9 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
   y += 4.5;
   doc.setTextColor(...MUTED);
   doc.text(
-    `Prepared with Collision iQ on ${result.generatedAt.slice(0, 10)} — subject to licensed appraiser review.`,
+    pdfSafe(
+      `Prepared with Collision iQ on ${result.generatedAt.slice(0, 10)} — subject to licensed appraiser review.`
+    ),
     PAGE.marginX,
     y
   );
