@@ -315,6 +315,19 @@ function DiminishedValueFlow() {
 
   async function handleIntakeSubmit() {
     if (!request) return;
+    // Validate up front with a visible message — a silently disabled button
+    // reads as broken when a required field is empty.
+    const missing: string[] = [];
+    if (!intakeForm.lossDate) missing.push("the date of loss (estimates often omit it)");
+    if (!/^\d{5}$/.test(intakeForm.zip.trim())) missing.push("a 5-digit registered ZIP");
+    if (!intakeForm.mileage || !(Number(intakeForm.mileage) > 0)) missing.push("the mileage");
+    if (!intakeForm.repairTotal || !(Number(intakeForm.repairTotal) > 0)) {
+      missing.push("the repair total");
+    }
+    if (missing.length) {
+      setError(`Before continuing to payment, please provide ${missing.join(", ")}.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     setBusyLabel("Saving your answers…");
@@ -606,8 +619,8 @@ function DiminishedValueFlow() {
             </button>
             <button
               type="button"
-              className="ci-btn ci-btn-primary"
-              disabled={busy || !intakeForm.lossDate || !intakeForm.zip}
+              className="ci-btn ci-btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busy}
               onClick={() => void handleIntakeSubmit()}
             >
               Continue to payment
