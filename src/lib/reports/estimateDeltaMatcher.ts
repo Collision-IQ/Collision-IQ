@@ -1560,7 +1560,14 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
     // numbers with NEGATIVE hours, and Added items repeat rows already parsed.
     // Treating recap rows as line items creates false deltas (an R&I at -0.5
     // paired against the counterpart's +0.5).
-    if (rows.length > 0 && /^supplement\s*summary$/i.test(line)) break;
+    // R25 (Test 99 item 4): the header line may carry a page continuation or
+    // supplement ordinal ("SUPPLEMENT SUMMARY CONTINUED", "SUPPLEMENT
+    // SUMMARY 1") — anchoring on the prefix keeps every variant out. The
+    // changelog's Deleted-Items reversals carry the ORIGINAL part numbers, so
+    // one surviving recap row can out-rank the true current-state line in
+    // part-number matching (RO 22140: a superseded sunroof row fabricated a
+    // $3,402.86 gap against its own replacement).
+    if (rows.length > 0 && /^supplement\s*summary\b/i.test(line)) break;
     if (isSectionHeader(line)) {
       section = line.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
       continue;
@@ -1862,6 +1869,16 @@ function findBestLowerMatch(
     if (used.has(index)) continue;
     const lowerRow = lowerRows[index];
     if (options?.candidateFilter && !options.candidateFilter(lowerRow)) continue;
+    // R25 defense-in-depth: a NEGATIVE-value row on the comparison side is a
+    // reversal or deduction (a Supplement Summary Deleted-Items row prints
+    // the superseded line with its sign flipped), never the current state of
+    // an operation. It may not serve as the comparison basis for a positive
+    // subject row — even when it carries the matching part number.
+    const lowerNegative =
+      (lowerRow.price ?? 0) < 0 || (lowerRow.labor ?? 0) < 0 || (lowerRow.paint ?? 0) < 0;
+    const higherNegative =
+      (higherRow.price ?? 0) < 0 || (higherRow.labor ?? 0) < 0 || (higherRow.paint ?? 0) < 0;
+    if (lowerNegative && !higherNegative) continue;
     let score = 0;
     let basis: EstimateLineItemDelta["matchBasis"] = "none";
     let exact = false;

@@ -29,7 +29,8 @@
   },
 
   "roles": {
-    "targetSelection": "lower_grand_total",
+    "targetSelection": "higher_grand_total",
+    "targetSelectionNote": "Annotate the HIGHER-grand-total estimate; the lower estimate is the source of the stamped comparison values. Authoritative per SKILL.md §2 and the owner-approved production behavior. The previous value 'lower_grand_total' was stale, contradicted every code layer and the skill spec, and misled the Test 99 audit into flagging compliant target selection as a defect (D4).",
     "costMayInferRole": false
   },
 

@@ -14,6 +14,7 @@
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
+import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import {
   describeReconciliation,
   type ForensicReconciliation,
@@ -355,6 +356,10 @@ export type ForensicReportInput = {
    *  tiering. Classified here so the report states its own evidence quality. */
   retrievedSources: Array<{ title: string; url?: string; locator?: string; uploadedEvidence?: boolean }>;
   generatedAt: string;
+  /** Apply the export redaction policy to prose and document names (Test 99
+   *  item 6 — the annotated PDF redacts the insurer while this report's prose
+   *  named USAA and printed carrier-bearing filenames verbatim). Defaults on. */
+  redactSensitive?: boolean;
 };
 
 /**
@@ -369,6 +374,55 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   bytes: Uint8Array;
   pageCount: number;
 }> {
+  // Item 6: one redaction policy for BOTH deliverables of a run. The raster
+  // pass blacks the insurer out of the annotated PDF; this report must not
+  // reintroduce it through prose or carrier-bearing filenames. Names and
+  // finding prose pass through the same export policy the identity rows use.
+  const scrub =
+    input.redactSensitive !== false
+      ? (value: string): string => redactDownloadContent(value)
+      : (value: string): string => value;
+
+  // R05 (Test 99 item 3): a finding card with NO line anchor, NO dollar
+  // figure, and NO hour figure is unresolved template output, not evidence —
+  // "Hidden Mounting Geometry Teardown Growth" shipped exactly that shape on
+  // two unrelated claims. Such cards are dropped before render; a finding
+  // that cannot say where, how much, or how long has nothing to assert.
+  input = {
+    ...input,
+    higherDocumentName: scrub(input.higherDocumentName),
+    lowerDocumentName: scrub(input.lowerDocumentName),
+    limitations: input.limitations.map(scrub),
+    findings: input.findings
+      .filter((finding) => {
+        const hasAnchor = Boolean(
+          finding.shopEvidence?.lineNumber ||
+            finding.carrierEvidence?.lineNumber ||
+            finding.shopAnchor ||
+            finding.carrierAnchor ||
+            finding.sourcePageLine
+        );
+        const hasDollar =
+          typeof finding.impact?.dollarImpact === "number" ||
+          typeof finding.shopEvidence?.amount === "number" ||
+          typeof finding.carrierEvidence?.amount === "number";
+        const hasHours =
+          typeof finding.impact?.laborHoursImpact === "number" ||
+          typeof finding.shopEvidence?.laborHours === "number" ||
+          typeof finding.carrierEvidence?.laborHours === "number";
+        return hasAnchor || hasDollar || hasHours;
+      })
+      .map((finding) => ({
+        ...finding,
+        operationLabel: scrub(finding.operationLabel),
+        currentSupportSummary: finding.currentSupportSummary
+          ? scrub(finding.currentSupportSummary)
+          : finding.currentSupportSummary,
+        counterpartSummary: finding.counterpartSummary
+          ? scrub(finding.counterpartSummary)
+          : finding.counterpartSummary,
+      })),
+  };
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);

@@ -104,6 +104,11 @@ interface BundleFinding {
   source_labor?: number;
   member_ops?: string[];
   authority?: { title?: string; retrieved?: boolean; domain?: string } | null;
+  /** R23 — side qualifier so LT/RT twins do not read as one contradiction. */
+  side?: string;
+  /** R25 — which structural region of the comparison document the source line
+   *  came from ("estimate_body" | "changelog" | "supplement_summary"). */
+  source_section?: string;
 }
 
 interface BundleAnnotation {
@@ -521,6 +526,47 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
     const members = finding.member_ops;
     if (members && new Set(members).size > 1) {
       fail("R21", `finding ${finding.id}: group mixes canonical ops ${JSON.stringify([...new Set(members)].sort())} — a group is one operation, aggregated`);
+    }
+  }
+
+  // R23 — missing_operation and counterpart_only are DISJOINT claims (Test 99
+  // item 1). The same canonical operation asserted "missing from the source"
+  // by one finding and "present only on the source" by another is a
+  // self-contradiction an adjuster disproves by reading their own document.
+  // The matcher auto-demotes these (r23DemotedCount); a bundle that still
+  // carries the contradiction shipped without that enforcement.
+  {
+    const missingOps = new Map<string, string>();
+    for (const finding of findings) {
+      if (finding.type !== "missing_operation") continue;
+      const key = finding.canonical_op ?? null;
+      if (key) missingOps.set(`${key}::${finding.side ?? ""}`, finding.id);
+    }
+    for (const finding of findings) {
+      if (finding.type !== "counterpart_only") continue;
+      const key = finding.canonical_op ?? null;
+      if (!key) continue;
+      const clash = missingOps.get(`${key}::${finding.side ?? ""}`);
+      if (clash) {
+        fail(
+          "R23",
+          `findings ${clash} and ${finding.id} assert canonical op ${JSON.stringify(key)} is both missing from and present only on the comparison document — withdraw both and record the pair as a match`
+        );
+      }
+    }
+  }
+
+  // R25 — a finding's comparison-side line may never resolve to a supplement
+  // changelog row (Test 99 item 4). A SUPPLEMENT SUMMARY Changed/Deleted/Added
+  // row is the document's own history, printed with reversed signs and
+  // superseded part numbers; citing one as current comparison data fabricates
+  // a delta against a line the document itself says no longer exists.
+  for (const finding of findings) {
+    if (finding.source_section && /^(changelog|supplement[_ ]summary)$/i.test(finding.source_section)) {
+      fail(
+        "R25",
+        `finding ${finding.id}: comparison-side line resolves to a ${finding.source_section} row — changelog rows are supplement history, never current comparison data`
+      );
     }
   }
 

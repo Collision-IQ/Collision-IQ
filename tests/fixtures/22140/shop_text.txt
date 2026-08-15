@@ -1,0 +1,365 @@
+
+
+conestogacollision.com
+Workfile ID:
+Federal ID:
+0dc834cc
+27-0822500
+1 Example St, Berwyn, PA 19312
+Phone: (610) 644-1000
+FAX: (610) 644-1007
+Preliminary Estimate
+RO Number: 22140
+Written By: VINCENT MENICHETTI, 739698
+Adjuster: NAME, ADJUSTER, (000) 000-0000 Business
+Insured:DOE, JANEPolicy #:Claim #:000000000000000000000
+Type of Loss:   ComprehensiveDate of Loss:Days to Repair:0
+Point of Impact: 13 Rollover
+Owner:Inspection Location:Insurance Company:
+DOE, JANEconestogacollision.comUSAA
+1 OLD FENCE LANE1 Example St
+NEWARK, DE 19072Berwyn, PA 19312
+(000) 000-0000 CellRepair Facility
+(610) 644-1000 Business
+VEHICLE
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+VIN:    7SYEE3YB4SG000000Interior Color:Mileage In:  19,313Vehicle Out:
+License:Exterior Color:Mileage Out:
+State:Production Date:Condition:Job #:
+TRANSMISSIONAir ConditioningRADIOBlind Spot Detection
+Automatic TransmissionIntermittent WipersAM RadioHeads Up Display
+4 Wheel DriveTilt WheelFM RadioLane Departure Warning
+POWERCruise ControlStereoROOF
+Power SteeringRear DefoggerSearch/SeekSkyview Roof
+Power BrakesKeyless EntryAuxiliary Audio ConnectionSEATS
+Power WindowsAlarmPremium RadioBucket Seats
+Power LocksMessage CenterSatellite RadioReclining/Lounge Seats
+Power MirrorsSteering Wheel Touch ControlsSAFETYHeated Seats
+Heated MirrorsTelescopic WheelDrivers Side Air BagRear Heated Seats
+Power Driver SeatHeated Steering WheelPassenger Air BagWHEELS
+Power Passenger SeatClimate ControlAnti-Lock Brakes (4)20" Or Larger Wheels
+Memory PackageDual Air Condition4 Wheel Disc BrakesPAINT
+DECORNavigation SystemTraction ControlClear Coat Paint
+Dual MirrorsBackup CameraStability ControlOTHER
+Tinted GlassParking SensorsFront Side Impact Air BagsRear Spoiler
+Console/StorageSurround View CameraHead/Curtain Air BagsSignal Integrated Mirrors
+Overhead ConsoleRemote StarterCommunications SystemTRUCK
+Wood Interior TrimIntelligent CruiseHands Free DevicePower Trunk/Liftgate
+Get live updates at www.carwise.com/e/5pk7Tv
+8/14/2026 12:45:25 PM300060Page 1
+CONESTOGA
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+CONVENIENCEHome LinkXenon or L.E.D. Headlamps
+8/14/2026 12:45:25 PM300060Page 2
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+LineOperDescriptionPart NumberQty   Extended
+Price $
+LaborPaint
+1UPDATE NOTES
+2   #****Work Authorization
+Secured****
+1
+3FRONT BUMPER & GRILLE
+4O/H bumper assy5.8
+5R&I  R&I bumper coverIncl.
+6   *Rpr  Bumper cover primed1.02.4
+7Add for Clear Coat1.0
+8   *Blnd  Upper panel1.8
+9R&I  Upper panelIncl.
+10Repl Emblem upper40007887165.430.20.2
+11Add for Clear Coat0.1
+12Repl Emblem lower40008296165.430.20.2
+13Add for Clear Coat0.1
+14R&I  RT Outer bracketIncl.
+15R&I  LT Outer bracketIncl.
+16#Repl  Energy absorber32227660158.130.2
+17R&I  Upper grille midnightIncl.
+18#Flex additive (Per flexible panel)112.00T
+19#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+20#Test fit-Front bumper11.0
+Note: Hood and bumper are misaligned, test fit prior to refinish to ensure mounting areas are unaltered to ensure
+porper gap tolerance and to avoid damage to newly painted components
+21FRONT LAMPS
+22*R&I  RT Headlamp assy w/o cornering
+lamp
+0.4
+23*R&I  LT Headlamp assy w/o cornering
+lamp
+0.4
+24Repl Aim headlamps10.5
+25R&I  RT Side marker lampIncl.
+26R&I  LT Side marker lampIncl.
+27#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+28HOOD
+29*Rpr  Hood (ALU)4.02.8
+30Add for Clear Coat1.1
+31R&I  R&I hood assy0.7
+Note: Hood removal is required to inspect the mount areas due to misalignment of the hood as repair/refinish
+cannot be performed on the vehicle at this time until gap correction is performed
+32R&I  Front cover0.2
+33R&I  Rear cover0.2
+34R&I  Compartment0.4
+35#Mask for primer15.00T0.3
+36#Cavity Wax Plus-3M 08852-Per 5115.40T0.2
+8/14/2026 12:45:25 PM300060Page 3
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+Ounces
+37#Feather/Prime/Block12.0
+38#Test fit-Hood11.0
+Note: Test fit required pre-refinish to ensure hood lines up and latches correctly prior to final refinish to avoid
+damage to newly painted components
+39FENDER
+40*Rpr  RT Fender (ALU)1.02.0
+41Overlap Major Adj. Panel-0.4
+42Add for Clear Coat0.3
+43*Rpr  LT Fender (ALU)2.02.0
+44Overlap Major Adj. Panel-0.4
+45Add for Clear Coat0.3
+46R&I  RT Fender liner0.4
+47R&I  LT Fender liner0.4
+48R&I  RT Flare0.6
+49R&I  LT Flare0.6
+50#Mask for primer15.00T0.3
+51#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+52ELECTRICAL
+53*Rpr  Batterym0.3M
+Note: D&R 12 Volt and isolate terminal end
+54Repl High voltage system
+deactivate/activate
+1m1.4M
+55#Reset operator preferences10.3
+Note: Return vehicle settings (seat position, mirror position, volume, etc.) to owners preference for safety
+56WHEELS
+57*R&I  RT/Front R&I wheelm0.2M
+Note: Time adjusted to account for disassembly & reassembly (0.1 x 2)
+58*R&I  LT/Front R&I wheelm0.2M
+Note: Time adjusted to account for disassembly & reassembly (0.1 x 2)
+59#Lift & support vehicle10.5
+60WINDSHIELD
+61Repl Windshield Polestar w/head-up
+display
+3224474112,350.433.6
+62R&I  Mirror insideIncl.
+63R&I  Humidity sensorm0.2M
+64R&I  Cameram0.2M
+65#Clean up urethane12.00T0.2
+66#BetaSeal Express Urethane137.00T
+67#BetaPrime 5504G All-in-One
+Primer
+19.16T
+68#Threaded Cartridge Nozzle-3M
+08187
+13.11T
+69#Acid brush11.10T
+70COWL
+71R&I  Cowl grille0.7
+8/14/2026 12:45:25 PM300060Page 4
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+72INSTRUMENT PANEL
+73*R&I  Lower cover charcoal0.5
+Note: Required for access to headliner harness disconnect
+74*R&I  Glove box assy charcoal0.2
+Note: Required for access to headliner harness disconnect
+75RESTRAINT SYSTEMS
+76R&I  Knee air bag to CH 30447m0.4M
+77ROOF
+78*Repl  Sunroof glass Polestar to CH 11953240728311,701.430.0
+79#Subl  Roof glass R&R labor1469.00T
+80R&I  R&I headliner3.4
+81PILLARS, ROCKER & FLOOR
+82*Rpr  LT Aperture panel (HSS)s5.04.4
+83Overlap Major Non-Adj. Panel-0.2
+84*Add for Clear Coat0.8
+85#Partial refinish w/full clear1-1.3
+86R&I  RT Rocker molding0.9
+87R&I  LT Rocker molding0.9
+88R&I  LT W/S pillar trimIncl.
+89R&I  LT Cowl trimIncl.
+90R&I  LT Upr ctr plr trim charcoalIncl.
+91R&I  LT Lwr ctr plr trim0.2
+92R&I  LT Front sill plate0.2
+93R&I  LT Rear sill plate0.2
+94#Mask for primer15.00T0.3
+95#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+96#Feather/Prime/Block11.0
+97#Clean adhesive13.00T0.3
+98#Mask door openings15.00T1.0
+99#Cover to protect interior during
+repair
+15.00T0.5
+100FRONT DOOR
+101*Blnd  RT Door shell (HSS)2.4
+102R&I  LT R&I door assy1.0
+103R&I  LT Surround w'stripIncl.
+104Repl  RT Front seal322820021137.79
+105R&I  RT Corner cover0.3
+106R&I  RT Trim molding0.4
+107R&I  RT Belt molding0.3
+108Repl  Decal 360kW to CH 28374 white62274268110.960.2
+109R&I  RT R&I mirror0.5
+110Repl  RT Front cover32314298136.80
+111R&I  RT Door glass Polestar0.5
+112*R&I  RT Run channel0.2
+113R&I  RT Regulator module0.3
+8/14/2026 12:45:25 PM300060Page 5
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+114R&I  RT Handle, outside primed0.4
+115R&I  RT R&I trim panel0.5
+116R&I  RT Interior lampm0.2
+117R&I  RT Window trim0.3
+118REAR DOOR
+119*Rpr  RT Door shell (HSS)1.02.4
+120Overlap Major Non-Adj. Panel-0.2
+121*Add for Clear Coat0.4
+122R&I  LT R&I door assy1.0
+123R&I  LT W'strip on bodyIncl.
+124R&I  RT Front seal0.4
+125R&I  RT Rear seal0.4
+126R&I  RT Trim molding0.4
+127Repl  LT Trim molding324173601255.590.4
+128R&I  RT Belt molding0.3
+129R&I  RT Flare0.6
+130Repl  LT Flare322961501134.230.6
+131R&I  RT Door glass Polestar w/o deep
+tint
+0.5
+132R&I  RT Run channel0.2
+133R&I  RT Regulator modulem0.3
+134R&I  RT Handle, outside primed0.4
+135R&I  RT R&I trim panel0.6
+136R&I  LT R&I trim panel0.6
+137R&I  RT Window trim0.3
+138R&I  LT Window trim0.3
+139#Mask for primer15.00T0.3
+140#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.13T0.2
+141QUARTER PANEL
+142*Rpr  RT Quarter panel (HSS)1.00.0
+Note: Buff scuff mark below quarter glass
+143*Rpr  LT Quarter panel (HSS)1.00.0
+Note: Buff scuff in quarter & fuel door
+144*Subl  LT Quarter glass Polestar w/o
+dark tint
+187.10T
+145R&I  LT Trim molding0.3
+146R&I  LT Lock pillar trim0.2
+147R&I  LT Upper trim0.5
+148R&I  LT Lower trim0.5
+149VEHICLE DIAGNOSTICS
+150*Subl  Pre-repair scan +34%1201.00T m
+151#Subl  In-proc repair scan +34%1174.20T
+152#Subl  Transport vehicle to & from
+sublet +34%
+1871.00T
+153*Subl  Post-repair scan +34%1294.80T m
+154#Rpr  Final road test for safety & quality0.5
+8/14/2026 12:45:25 PM300060Page 6
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+check
+155MISCELLANEOUS OPERATIONS
+156#Pre wash vehicle15.00T0.5
+157#Interior Protection kit13.220.1
+158#Mask for refinishing110.00T0.5
+159#Mask jambs (0.3 Hours and $3.00
+per panel)
+13.00T0.3
+160#Tint color10.5
+161#Finish sand & polish (0.5 Refinish
+per panel)
+10.5
+162#Clean vehicle for delivery15.00T0.5
+163#Maintain HV battery state of
+charge
+15.00T0.5
+164#Hazardous waste removal15.00T
+165#Solid waste removal15.00T
+SUBTOTALS7,118.2465.126.2
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts4,906.54
+Body Labor62.2 hrs@$ 90.00 /hr5,598.00
+Paint Labor26.2 hrs@$ 90.00 /hr2,358.00
+Mechanical Labor2.9 hrs@$ 175.00 /hr507.50
+Paint Supplies26.2 hrs@$ 60.00 /hr1,572.00
+Miscellaneous2,211.70
+Subtotal17,153.74
+Sales Tax$ 17,153.74@6.0000 %1,029.22
+Grand Total18,182.96
+This estimate is based on our initial visual inspection. Ocassionally, addtional worn and/or damaged parts are
+discovered upon commencement of repairs. This estimate cannot allow for such contingencies. All part prices are
+subject to invoice. All damaged parts will discarded unless we are otherwise notified prior to disposal.
+ANY PERSON WHO KNOWINGLY, AND WITH INTENT TO INJURE, DEFRAUD OR DECEIVE ANY INSURER, FILES A
+STATEMENT OF CLAIM CONTAINING ANY FALSE, INCOMPLETE OR MISLEADING INFORMATION IS GUILTY OF A
+FELONY.
+8/14/2026 12:45:25 PM300060Page 7
+
+Preliminary Estimate
+RO Number: 22140
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide ERP9902, CCC Data Date 08/10/2026, and potentially other
+third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for the
+vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM parts
+are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM (Alternative
+OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM vehicle
+dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or labor data
+provided by third party sources of data may have been modified or may have come from an alternate data source.
+Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category.
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category.
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel.
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part.
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet.
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+8/14/2026 12:45:25 PM300060Page 8

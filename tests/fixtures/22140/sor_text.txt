@@ -1,0 +1,663 @@
+
+
+UNITED SERVICES AUTOMOBILE ASSOCIATION
+USAA 1006 - DE
+Please Visit Us at USAA.com
+P.O. Box 33490
+San Antonio, TX 78265
+Phone:  (800) 531-8722
+Claim #:
+Workfile ID:
+000000000000000000000
+5c69c1a4
+Supplement of Record 1 Summary
+Written By: ADJUSTER NAME, License Number: 271128, 7/28/2026 3:12:59 PM
+Insured:JANE DOEOwner Policy #:000000000 Claim #:000000000000000000000
+Type of Loss:ComprehensiveDate of Loss:07/11/2026 02:40 PMDays to Repair:22
+Point of Impact:16 Non-CollisionDeductible:500.00
+Owner (Insured):Inspection Location:Appraiser Information:Repair Facility:
+JANE DOE
+1 OLD FENCE LN
+ANYTOWN, DE 19700
+(000) 000-0000 Evening
+owner@example.com
+960 LANCASTER AVE
+BERWYN, PA 19312
+Virtual
+(610) 644-1000 Business
+adjuster@example.com
+(000) 000-0000
+CONESTOGA COLLISION
+960 LANCASTER AVE
+BERWYN, PA 19312
+(610) 644-1000 Business
+VEHICLE
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+VIN: 7SYEE3YB4SG000000Production Date: 08/2024Interior Color: 
+License: PC53386Odometer: 19294Exterior Color: 717 Space Pearl
+Meta
+State: DECondition: Good
+TRANSMISSIONAir ConditioningRADIOBlind Spot Detection
+Automatic TransmissionIntermittent WipersAM RadioHeads Up Display
+4 Wheel DriveTilt WheelFM RadioLane Departure Warning
+POWERCruise ControlStereoROOF
+Power SteeringRear DefoggerSearch/SeekSkyview Roof
+Power BrakesKeyless EntryAuxiliary Audio ConnectionSEATS
+Power WindowsAlarmPremium RadioBucket Seats
+Power LocksMessage CenterSatellite RadioReclining/Lounge Seats
+Power MirrorsSteering Wheel Touch ControlsSAFETYHeated Seats
+Heated MirrorsTelescopic WheelDrivers Side Air BagRear Heated Seats
+Power Driver SeatHeated Steering WheelPassenger Air BagWHEELS
+Power Passenger SeatClimate ControlAnti-Lock Brakes (4)20" Or Larger Wheels
+Memory PackageDual Air Condition4 Wheel Disc BrakesPAINT
+DECORNavigation SystemTraction ControlClear Coat Paint
+Dual MirrorsBackup CameraStability ControlOTHER
+Tinted GlassParking SensorsFront Side Impact Air BagsRear Spoiler
+Console/StorageSurround View CameraHead/Curtain Air BagsSignal Integrated Mirrors
+Overhead ConsoleRemote StarterCommunications SystemTRUCK
+Wood Interior TrimIntelligent CruiseHands Free DevicePower Trunk/Liftgate
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 1
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+CONVENIENCEHome LinkXenon or L.E.D. Headlamps
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 2
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+1#S01For Supplements Use CCC1
+2#S01Estimate Share - Questions1
+3#S01Call CCC 800.637.85111
+4#S01Non CCC Users Contact1
+5#S01Appraiser Via Email or Phone1
+6#S01Shops can use the following link
+to check payment status:
+1
+7#S01https://www.usaa.com/insurance
+/partner-claim-details
+1
+8FRONT BUMPER & GRILLE
+9S01R&IR&I bumper cover400160992.4
+10*<>S01RprBumper cover primed400160991.0
+2.4
+11S01R&IUpper panel400128910.2
+12*S01BlndUpper panel400128910.9
+13S01ReplEmblem upper40007887165.430.20.2
+14S01ReplEmblem lower40008296165.430.20.2
+15S01R&IRT Outer bracket323413880.2
+16S01R&ILT Outer bracket323413870.2
+17S01R&IUpper grille midnight400112230.6
+18FRONT LAMPS
+19*S01R&IRT Headlamp assy w/o cornering
+lamp
+322938520.4
+20*S01R&ILT Headlamp assy w/o cornering
+lamp
+322938510.4
+21S01ReplAim headlamps10.5
+22S01R&IRT Side marker lamp321339010.3
+23S01R&ILT Side marker lamp321339000.3
+24HOOD
+25S01R&IFront cover323946480.2
+26S01R&IR&I hood assy324097550.7
+NOTE: Hood removal is required to inspect the mount areas due to misalignment of the hood as repair/refinish
+cannot be performed on the vehicle at this time until gap correction is performed
+27*S01RprHood (ALU)324097554.0
+2.8
+28S01Overlap Major Non-Adj. Panel-0.2
+29S01R&IRear cover323946490.2
+30S01R&ICompartment323533390.4
+31FENDER
+32*S01RprRT Fender (ALU)324055321.0
+2.0
+33S01Overlap Major Adj. Panel-0.4
+34*S01RprLT Fender (ALU)324055312.0
+2.0
+35S01Overlap Major Adj. Panel-0.4
+36S01R&IRT Fender liner321305220.4
+37S01R&ILT Fender liner321305210.4
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 3
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+38S01R&IRT Flare322627740.6
+39S01R&ILT Flare322627730.6
+40ELECTRICAL
+41S01ReplHigh voltage system
+deactivate/activate
+1m1.4M
+42*S01R&IBattery32344582m0.3
+M
+NOTE: D&R 12 Volt and isolate terminal end
+43WINDSHIELD
+44S01ReplWindshield Polestar w/head-up
+display
+3224474112,350.433.6
+45#S01Urethane Kit120.00T  
+46S01R&IMirror inside32244679Incl.
+47S01R&IHumidity sensor32414900m0.2M
+48S01R&ICamera32134985m0.2M
+49COWL
+50S01R&ICowl grille321328170.7
+51INSTRUMENT PANEL
+52*S01R&ILower cover charcoal322772790.5
+NOTE: Required for access to headliner harness disconnect
+53*S01R&IGlove box assy charcoal322777400.2
+NOTE: Required for access to headliner harness disconnect
+54RESTRAINT SYSTEMS
+55S01R&IKnee air bag to CH 3044732136052m0.4M
+56ROOF
+57S01ReplSunroof glass Polestar to CH 11953223990511,582.740.7
+58#S01Urethane Kit120.00T  
+59S01R&IR&I headliner323714303.4
+60PILLARS, ROCKER & FLOOR
+61*S01RprLT Aperture panel (HSS)32310425s5.0
+3.1
+NOTE: Roof Rail
+PARTIAL REFINISH FULL CLEAR
+62S01Overlap Major Non-Adj. Panel-0.2
+63S01R&IRT Rocker molding324174830.9
+64S01R&ILT Rocker molding324174820.9
+65S01R&ILT W/S pillar trim32132279Incl.
+66S01R&ILT Cowl trim32132283Incl.
+67S01R&ILT Upr ctr plr trim charcoal32132287Incl.
+68S01R&ILT Lwr ctr plr trim321322910.2
+69S01R&ILT Front sill plate316847630.2
+70S01R&ILT Rear sill plate321322750.2
+71FRONT DOOR
+72*S01BlndRT Door shell (HSS)324502351.2
+73S01ReplRT Front seal322820021137.79
+74S01R&IRT Trim molding324173590.4
+75S01R&IRT Corner cover322623390.3
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 4
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+76S01R&IRT Belt molding322746640.3
+77S01R&IRT R&I mirror323147480.5
+78S01ReplRT Front cover32314298136.80
+79S01R&IRT Door glass Polestar324093530.5
+80*S01R&IRT Run channel322746600.2
+81S01R&IRT Regulator module323940060.3
+82S01R&IRT Handle, outside primed400197140.4
+83S01R&IRT R&I trim panel322820100.5
+84S01R&IRT Interior lamp32408677m0.2M
+85S01R&IRT Window trim322827630.3
+86REAR DOOR
+87ReplLT Trim molding324173601255.590.4
+88*S01RprRT Door shell (HSS)324502371.0
+2.4
+89S01Overlap Major Non-Adj. Panel-0.2
+90S01Clear Coat2.5
+91S01R&IRT Front seal322820040.4
+92S01R&IRT Rear seal322820020.4
+93S01R&IRT Trim molding324173610.4
+94S01R&IRT Flare322961510.6
+95S01ReplLT Flare322961501134.230.6
+96S01R&IRT Belt molding322746660.3
+97S01R&IRT Door glass Polestar w/o deep
+tint
+324093550.5
+98S01R&IRT Run channel322746620.2
+99S01R&IRT Regulator module32394008m0.3M
+100S01R&IRT Handle, outside primed400197540.4
+101S01R&IRT R&I trim panel322820120.6
+102S01R&ILT R&I trim panel322820110.6
+103S01R&IRT Window trim322747570.3
+104S01R&ILT Window trim322747560.3
+105QUARTER PANEL
+106*S01RprRT Quarter panel (HSS)323104281.0
+0.0
+NOTE: Buff scuff mark below quarter glass
+107*S01RprLT Quarter panel (HSS)323104271.00.0
+NOTE: Buff scuff in quarter & fuel door
+108MISCELLANEOUS OPERATIONS
+109#Cover Car15.00T  0.2
+110#Rope Glass1T  0.3
+NOTE: Windshield
+111#S01Flex Additive16.00T  
+112#S01RprSET BACK WIRING/CONNECTORS0.5
+113#S01RefnPrime and Block1.0
+114#S01Cavity Wax Plus-3M 08852115.400.2
+115#S01RprRESET ELECTRONICS0.3
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 5
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+116#S01Mask Jambs15.00T  0.3
+117#S01RprPre-repair Diagnostic Scan
+(Repair Facility)
+0.5M
+118#S01RprPost-repair Diagnostic Scan
+(Repair Facility)
+0.5M
+119#S01RefnColor Tint0.5
+120#S01RprDenib and Polish2.0
+121#S01RprMaintain HV battery state of
+charge
+0.5M
+122OTHER CHARGES
+123#E.P.C.13.50
+SUBTOTALS4,703.3454.919.8
+NOTES
+Estimate Notes: 
+Shop: Avoid delays! Get claim and payment info at www.usaa.com/bodyshop
+Original Assigned Date: 07/11/2026
+E01 Completed on Site: N
+Date E01 Inspected: 07/14/2026
+QRP Brochure provided to JANE DOE on 07/14/2026
+E01 and explanation of repairs provided to JANE DOE on 07/14/2026
+Authorization / Direction to Pay on File: Y/N
+*** ELECTRONIC SIGNATURE: This line will represent the electronic signature of this estimate by ADJUSTER NAME -- Pa. State License Number
+271128.
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts4,643.84
+Body Labor50.4 hrs@$ 90.00 /hr4,536.00
+Paint Labor19.8 hrs@$ 90.00 /hr1,782.00
+Mechanical Labor4.5 hrs@$ 175.00 /hr787.50
+Paint Supplies750.00
+Miscellaneous56.00
+Other Charges3.50
+Subtotal12,558.84
+Sales Tax$ 12,558.84@6.0000 %753.53
+Total Cost of Repairs13,312.37
+Deductible500.00
+Total Adjustments500.00
+Net Cost of Repairs12,812.37
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 6
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+SUPPLEMENT SUMMARY
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+Changed Items
+2*RprHood (ALU)32409755-0.5
+0.0
+NOTE: Buff/inspect
+27*S01RprHood (ALU)324097554.0
+2.8
+8*RprLT Aperture panel (HSS)32310425s-4.0
+-2.0
+NOTE: Roof Rail
+61*S01RprLT Aperture panel (HSS)32310425s5.03.1
+NOTE: Roof Rail
+PARTIAL REFINISH FULL CLEAR
+Deleted Items
+3WINDSHIELD
+4*RprWindshield Polestar w/head-up
+display
+32244741-0.5
+NOTE: Buff/Inspect
+5ROOF
+6ReplSunroof glass Polestar fm CH
+20154
+324072831-1,701.43-0.7
+9Add for Clear Coat-0.8
+Added Items
+1#S01For Supplements Use CCC1
+2#S01Estimate Share - Questions1
+3#S01Call CCC 800.637.85111
+4#S01Non CCC Users Contact1
+5#S01Appraiser Via Email or Phone1
+6#S01Shops can use the following link
+to check payment status:
+1
+7#S01https://www.usaa.com/insurance
+/partner-claim-details
+1
+8FRONT BUMPER & GRILLE
+9S01R&IR&I bumper cover400160992.4
+10*<>S01RprBumper cover primed400160991.02.4
+11S01R&IUpper panel400128910.2
+12*S01BlndUpper panel400128910.9
+13S01ReplEmblem upper40007887165.430.20.2
+14S01ReplEmblem lower40008296165.430.20.2
+15S01R&IRT Outer bracket323413880.2
+16S01R&ILT Outer bracket323413870.2
+17S01R&IUpper grille midnight400112230.6
+18FRONT LAMPS
+19*S01R&IRT Headlamp assy w/o cornering
+lamp
+322938520.4
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 7
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+20*S01R&ILT Headlamp assy w/o cornering
+lamp
+322938510.4
+21S01ReplAim headlamps10.5
+22S01R&IRT Side marker lamp321339010.3
+23S01R&ILT Side marker lamp321339000.3
+25S01R&IFront cover323946480.2
+26S01R&IR&I hood assy324097550.7
+NOTE: Hood removal is required to inspect the mount areas due to misalignment of the hood as repair/refinish
+cannot be performed on the vehicle at this time until gap correction is performed
+28S01Overlap Major Non-Adj. Panel-0.2
+29S01R&IRear cover323946490.2
+30S01R&ICompartment323533390.4
+31FENDER
+32*S01RprRT Fender (ALU)324055321.0
+2.0
+33S01Overlap Major Adj. Panel-0.4
+34*S01RprLT Fender (ALU)324055312.0
+2.0
+35S01Overlap Major Adj. Panel-0.4
+36S01R&IRT Fender liner321305220.4
+37S01R&ILT Fender liner321305210.4
+38S01R&IRT Flare322627740.6
+39S01R&ILT Flare322627730.6
+40ELECTRICAL
+41S01ReplHigh voltage system
+deactivate/activate
+1m1.4M
+42*S01R&IBattery32344582m0.3
+M
+NOTE: D&R 12 Volt and isolate terminal end
+43WINDSHIELD
+44S01ReplWindshield Polestar w/head-up
+display
+3224474112,350.433.6
+45#S01Urethane Kit120.00T  
+46S01R&IMirror inside32244679Incl.
+47S01R&IHumidity sensor32414900m0.2M
+48S01R&ICamera32134985m0.2M
+49COWL
+50S01R&ICowl grille321328170.7
+51INSTRUMENT PANEL
+52*S01R&ILower cover charcoal322772790.5
+NOTE: Required for access to headliner harness disconnect
+53*S01R&IGlove box assy charcoal322777400.2
+NOTE: Required for access to headliner harness disconnect
+54RESTRAINT SYSTEMS
+55S01R&IKnee air bag to CH 3044732136052m0.4M
+56ROOF
+57S01ReplSunroof glass Polestar to CH 11953223990511,582.740.7
+58#S01Urethane Kit120.00T  
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 8
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+59S01R&IR&I headliner323714303.4
+62S01Overlap Major Non-Adj. Panel-0.2
+63S01R&IRT Rocker molding324174830.9
+64S01R&ILT Rocker molding324174820.9
+65S01R&ILT W/S pillar trim32132279Incl.
+66S01R&ILT Cowl trim32132283Incl.
+67S01R&ILT Upr ctr plr trim charcoal32132287Incl.
+68S01R&ILT Lwr ctr plr trim321322910.2
+69S01R&ILT Front sill plate316847630.2
+70S01R&ILT Rear sill plate321322750.2
+71FRONT DOOR
+72*S01BlndRT Door shell (HSS)324502351.2
+73S01ReplRT Front seal322820021137.79
+74S01R&IRT Trim molding324173590.4
+75S01R&IRT Corner cover322623390.3
+76S01R&IRT Belt molding322746640.3
+77S01R&IRT R&I mirror323147480.5
+78S01ReplRT Front cover32314298136.80
+79S01R&IRT Door glass Polestar324093530.5
+80*S01R&IRT Run channel322746600.2
+81S01R&IRT Regulator module323940060.3
+82S01R&IRT Handle, outside primed400197140.4
+83S01R&IRT R&I trim panel322820100.5
+84S01R&IRT Interior lamp32408677m0.2M
+85S01R&IRT Window trim322827630.3
+88*S01RprRT Door shell (HSS)324502371.02.4
+89S01Overlap Major Non-Adj. Panel-0.2
+90S01Clear Coat2.5
+91S01R&IRT Front seal322820040.4
+92S01R&IRT Rear seal322820020.4
+93S01R&IRT Trim molding324173610.4
+94S01R&IRT Flare322961510.6
+95S01ReplLT Flare322961501134.230.6
+96S01R&IRT Belt molding322746660.3
+97S01R&IRT Door glass Polestar w/o deep
+tint
+324093550.5
+98S01R&IRT Run channel322746620.2
+99S01R&IRT Regulator module32394008m0.3M
+100S01R&IRT Handle, outside primed400197540.4
+101S01R&IRT R&I trim panel322820120.6
+102S01R&ILT R&I trim panel322820110.6
+103S01R&IRT Window trim322747570.3
+104S01R&ILT Window trim322747560.3
+105QUARTER PANEL
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 9
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+106*S01RprRT Quarter panel (HSS)323104281.0
+0.0
+NOTE: Buff scuff mark below quarter glass
+107*S01RprLT Quarter panel (HSS)323104271.0
+0.0
+NOTE: Buff scuff in quarter & fuel door
+111#S01Flex Additive16.00T  
+112#S01RprSET BACK WIRING/CONNECTORS0.5
+113#S01RefnPrime and Block1.0
+114#S01Cavity Wax Plus-3M 08852115.400.2
+115#S01RprRESET ELECTRONICS0.3
+116#S01Mask Jambs15.00T  0.3
+117#S01RprPre-repair Diagnostic Scan
+(Repair Facility)
+0.5M
+118#S01RprPost-repair Diagnostic Scan
+(Repair Facility)
+0.5M
+119#S01RefnColor Tint0.5
+120#S01RprDenib and Polish2.0
+121#S01RprMaintain HV battery state of
+charge
+0.5M
+SUBTOTALS2,737.8248.317.0
+NOTES
+Estimate Notes: 
+Shop: Avoid delays! Get claim and payment info at www.usaa.com/bodyshop
+Original Assigned Date: 07/11/2026
+E01 Completed on Site: N
+Date E01 Inspected: 07/14/2026
+QRP Brochure provided to JANE DOE on 07/14/2026
+E01 and explanation of repairs provided to JANE DOE on 07/14/2026
+Authorization / Direction to Pay on File: Y/N
+*** ELECTRONIC SIGNATURE: This line will represent the electronic signature of this estimate by ADJUSTER NAME -- Pa. State License Number
+271128.
+RATE CHANGES
+Body Labor(Est)6.6 hrs@$ 30.00 /hr(60.00to 90.00 )= 198.00
+Paint Labor(Est)2.8 hrs@$ 30.00 /hr(60.00to 90.00 )= 84.00
+Paint Supplies(Est)2.8 hrs@$ 3.00 /hr(40.00to 43.00 )= 8.40
+Sales Tax$ 2641.52-0.6250 %(6.6250 %to 6.0000 %)= -16.51
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 10
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+TOTALS SUMMARY
+CategoryBasisRateCost $
+Parts2,686.82
+Body Labor43.8 hrs@$ 90.00 /hr3,942.00
+Paint Labor17.0 hrs@$ 90.00 /hr1,530.00
+Mechanical Labor4.5 hrs@$ 175.00 /hr787.50
+Additional Supplement Labor282.00
+Paint Supplies17.0 hrs@$ 43.00 /hr731.00
+Additional Supplement Materials/Supplies-93.00
+Miscellaneous51.00
+Subtotal9,917.32
+Sales Tax$ 9,917.32@6.0000 %595.04
+Additional Supplement Taxes-16.51
+Total Supplement Amount10,495.85
+NET COST OF SUPPLEMENT10,495.85
+CUMULATIVE EFFECTS OF SUPPLEMENT(S)
+Estimate2,816.52Michael Jones
+Supplement S0110,495.85ADJUSTER NAME
+Workfile Total: $13,312.37
+TOTAL ADJUSTMENTS: $500.00
+NET COST OF REPAIRS: $12,812.37
+AVOID DELAYS BY GETTING CLAIM AND PAYMENT INFORMATION IN JUST A FEW CLICKS!
+VISIT: http://www.usaa.com/bodyshop
+MEMBER NUMBER: Use Policy Number
+LOSS NUMBER:  Use digits 16, 17, & 18 of the claim number  (Ex. 012345670000000[003]001)
+LOSS DATE: Use Date of Loss
+If you choose to repair your vehicle at a STARS facility, please visit the following link for information regarding the
+USAA STARS Limited Lifetime Warranty:
+https://content.usaa.com/mcontent/static_assets/Media/usaa-stars-limited-lifetime-warranty.pdf
+If you do not choose to repair your vehicle at a STARS facility, please note that USAA STARS Limited Lifetime
+Warranty will not apply to repairs to your vehicle.
+Please Present A Copy Of This Estimate To A Repair Facility Of Your Choice
+*USAA Subsidiaries include: United Services Automobile Association(USAA), USAA Casualty Insurance Company(CIC),
+USAA General Indemnity Company(GIC) USAA County Mutual Insurance(CMI) and Garrison Property Casualty
+Insurance Company. Garrison Property and Casualty Insurance Company, a subsidiary of USAA Casualty Insurance
+Company, is authorized to use the USAA logo, a registered trademark of United Services Automobile Association.
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 11
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+This is not an authorization to repair. Failing to present this estimate to the repairing garage before repair may result
+in additional expenses to you. A USAA appraiser must authorize any supplement to this estimate. Repairs to this
+vehicle may require specific welding equipment as recommended by the manufacturer.
+ANY PERSON WHO KNOWINGLY, AND WITH INTENT TO INJURE, DEFRAUD OR DECEIVE ANY INSURER, FILES A
+STATEMENT OF CLAIM CONTAINING ANY FALSE, INCOMPLETE OR MISLEADING INFORMATION IS GUILTY OF A
+FELONY.
+Estimate calculated using a preset user threshold amount for the paint and material cost.
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 12
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide ERP9902, CCC Data Date 07/17/2026, and potentially other
+third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for the
+vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM parts
+are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM (Alternative
+OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM vehicle
+dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or labor data
+provided by third party sources of data may have been modified or may have come from an alternate data source. 
+Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category. 
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category. 
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel. 
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part. 
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet. 
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 13
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+USAAs Quality Replacement Parts Program
+The following information summarizes USAAs Quality Replacement Parts program:
+USAA utilizes a Quality Replacement Parts (QRP) program to help manage repair costs while maintaining a high
+standard of quality and safety for vehicle repairs.  USAAs QRP program includes parts that are required to be
+equivalent in quality, safety, fit, and performance of the part(s) being replaced on your vehicle.  The application of
+USAAs QRP program will comply with all state/federal laws where applicable and may be superseded by
+policy/endorsement language when applicable.
+USAA provides a Limited Parts Warranty on Quality Replacement Parts that are authorized for use on USAA approved
+repair estimates and installed during vehicle repairs. USAAs warranty on sheet metal, and plastic QRP body parts is
+valid for the greater of the following time periods: (1) the remaining period of the Original Equipment Manufacturer
+(OEM) vehicle factory warranty; or (2) three years from the date of the repair completion.  USAAs warranty on
+mechanical and electrical QRP parts is valid for the greater of the following time periods: (1) the remaining period of
+the Original Equipment Manufacturer (OEM) vehicle factory warranty; or (2) the same warranty period that would be
+provided by the Original Equipment Manufacturer (OEM) for an equivalent OEM replacement part. 
+Excluded from USAAs QRP warranty are the following conditions: (1) normal wear and tear; (2) damage caused by
+accident and/or acts of nature; (3) intentional acts; (4) improper use or modification; (5) improper installation;
+and/or (6) improper maintenance of the vehicle.
+Any express warranty not provided herein is hereby excluded and disclaimed. Any implied warranties of
+merchantability and fitness for any particular purpose which may exist are expressly limited to the QRP warranty
+period(s) as cited above.  The USAA QRP warranty period(s) will comply with and be superseded by state/federal law
+where applicable.
+USAA shall not be liable to any person for any special, incidental, or consequential damages, whether arising out of
+breach of warranty, breach of contract or otherwise. Limitations or exclusions of liability may be superseded by
+state/federal law where applicable. 
+The following questions and answers may help you understand more about USAAs QRP program:
+Q.  What types of parts are utilized in the QRP Program?
+A.  In addition to the use of OEM parts in certain instances, the following types of parts may be utilized in the QRP
+Program:
+	New aftermarket parts: Parts provided by manufacturers and distributors other than the Original Equipment
+	Manufacturer.
+	Recycled parts:  Parts from a vehicle of the same make and model.
+	Reconditioned, remanufactured, and rebuilt parts:  Parts that are rebuilt or repaired to OEM specifications. 
+	Optional OEM parts:  New OEM or OEM equivalent parts provided by distributors other than the Original Equipment
+	Manufacturer. 
+Q. What assurances do I have that QRP parts are of high quality?
+A. USAAs QRP program maintains high standards to utilize parts that are equivalent in quality, safety, fit, and
+performance of the part(s) being replaced on your vehicle.  QRP parts carry an equal or better warranty when
+compared to OEM parts and are backed by USAAs Limited Parts Warranty. 
+Q. Do I have a choice of which parts are used to repair my vehicle?
+A. As the owner of the vehicle, you have the right to choose the types of parts that are utilized in the repairs to your
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 14
+
+Claim #:000000000000000000000
+Workfile ID:5c69c1a4
+Supplement of Record 1 Summary
+2025 POLE 3 Performance Launch Edition w/Long Range Dual Motor 4D UTV Electric- Electric 717 Space Pearl Meta 
+vehicle.  If you choose to utilize parts that differ from USAAs approved estimate, you will be responsible for any
+additional part costs and labor differences.  As well, USAAs Limited Parts Warranty will not be applicable to parts that
+deviate from USAAs approved estimate.  
+Q. Will using a non-OEM part void the warranty on my vehicle?
+A. QRP parts utilized in your vehicles repair carry an equal or better warranty when compared to OEM parts. 
+Additionally, QRP parts are backed by USAAs Limited Parts Warranty, which includes the duration of the OEM
+warranty period.
+Q.  If an issue arises with a QRP part utilized in the repair to my vehicle, what is the resolution process?
+A. If you experience a problem, contact your repair shop to discuss the concern.  The shop will assess the situation
+and can work directly with the QRP supplier and/or USAA where necessary to resolve the issue. 
+Q. What should I do if my repair shop refuses to use QRP parts?
+A. You have the right to choose where, how, and by whom your vehicle will be repaired.  Repair shops have the right
+to conduct business in accordance with their own practices, including charging more than a competitive cost for
+repairs.  Should you choose a repair shop that refuses to utilize the QRP parts listed on the USAA approved estimate,
+you will be responsible for any additional part costs and labor differences in the final repair bill.  As well, the USAA
+Limited Parts Warranty will not apply. 
+If you have questions about the program or warranty, log on to http://usaa.com or call 1-800-531-USAA (8722).
+7/28/2026 3:13:00 PM466412  |  1.9.09.09160Page 15

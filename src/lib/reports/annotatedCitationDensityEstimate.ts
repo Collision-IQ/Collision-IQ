@@ -3570,9 +3570,15 @@ export function buildRequiredEstimatorDeltaFindings(
       lowerLineCount: deltaMatch ? deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length : null,
       // Only confirmed omissions. An OCR-unverified line is not evidence the
       // comparison lacks the operation, so it must not be listed as one.
+      //
+      // Test 99 item 8: this array is the ONE source for both the headline
+      // sentence and Appendix A — the renderer counts THIS list, never the
+      // matcher's raw missingOperationCount (which includes OCR-uncertain
+      // rows), so the two customer-facing numbers cannot diverge. The
+      // previous silent .slice(0, 300) is gone: the full gated set ships,
+      // and Appendix A renders exactly what the headline counts.
       noCounterpartRows: (deltaMatch?.orderedDeltas ?? [])
         .filter((delta) => delta.kind === "missing_operation" && !delta.ocrUncertain)
-        .slice(0, 300)
         .map((delta) => ({
           line: delta.higherRow.lineNumber,
           description: [delta.higherRow.opCode, delta.higherRow.description]
@@ -4264,6 +4270,17 @@ function matchStructuredLineItemDeltas(
   /** P0-1 contradiction notices, surfaced on the pack so a withdrawn claim is
    * visible rather than silently absent. */
   const contradictionNotes: string[] = [];
+  // Test 99 item 5: the target/source choice is printed, not implicit — five
+  // consecutive audits have re-litigated it. The HIGHER-total estimate is the
+  // annotated target per the delta annotation rule (SKILL.md §2); both totals
+  // are cited so a reviewer can verify the direction in one glance.
+  if (sourceTotal !== null && comparisonTotal !== null) {
+    contradictionNotes.push(
+      `Target (annotated document): the higher-total estimate at $${sourceTotal.toFixed(2)}; ` +
+        `source (comparison values): the lower-total estimate at $${comparisonTotal.toFixed(2)}. ` +
+        `Per the delta annotation rule, the higher-grand-total estimate is always the annotated target.`
+    );
+  }
   if (lowerConfidence.band !== "high") {
     contradictionNotes.push(
       `Comparison estimate ${lowerConfidence.explanation}. Absence findings for sections the counterpart produced no rows for are marked unverified: a line this pass could not read is not a line the carrier omitted.`

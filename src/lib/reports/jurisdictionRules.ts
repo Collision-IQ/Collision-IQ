@@ -12,6 +12,12 @@ import type { EstimateTotalsSummary } from "./estimateDeltaMatcher";
  * another state.
  */
 export const PM_CAP_JURISDICTION_RULES: Record<string, string> = {
+  // U7 (Test 99 item 7): the general regulatory framework only. A SPECIFIC
+  // enforcement action (previously: a named market-conduct examination of a
+  // named carrier) may not appear in finding prose unless that document was
+  // actually retrieved for the run — naming an unretrieved authority is the
+  // exact failure R15/U7 exist to stop, and the named text also carried a
+  // carrier name past the redaction layer.
   PA:
     "PENNSYLVANIA — arbitrary P&M caps unsupported. No Pennsylvania statute or " +
     "regulation authorizes an insurer to arbitrarily cap paint-and-materials " +
@@ -19,10 +25,8 @@ export const PM_CAP_JURISDICTION_RULES: Record<string, string> = {
     "Appraisers) requires the appraisal to include all necessary " +
     "painting/refinishing and all work necessary to restore the vehicle to " +
     "pre-loss condition; 31 Pa. Code Ch. 146 (Unfair Claims Settlement " +
-    "Practices) requires payment of the reasonable cost of repair. See also " +
-    "the PA Insurance Dept. market-conduct examination of American Modern " +
-    "Select Ins. Co. (No. 17) regarding appraisals omitting necessary " +
-    "refinishing operations. Demand: (1) the calculation behind the cap, " +
+    "Practices) requires payment of the reasonable cost of repair. " +
+    "Demand: (1) the calculation behind the cap, " +
     "(2) the policy language authorizing it, (3) proof the capped amount pays " +
     "the reasonable cost, (4) paint-manufacturer/OEM documentation of " +
     "required materials.",
