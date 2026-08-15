@@ -253,6 +253,9 @@ export interface BucketContradiction {
   higherRow: EstimateDeltaRow;
   lowerRow: EstimateDeltaRow;
   reason: string;
+  /** R23: set when the matcher withdrew both claims and recorded the pair as
+   *  a plain match with no rendered annotation. */
+  demoted?: boolean;
 }
 
 export interface EstimateDeltaMatchResult {
@@ -267,6 +270,8 @@ export interface EstimateDeltaMatchResult {
    * carry the SECTION_MISSED status label.
    */
   missedSections: string[];
+  /** R23: count of `certain` contradictions auto-demoted to plain matches. */
+  r23DemotedCount?: number;
   /** Higher-estimate lines whose category is already present in the lower estimate. */
   expandedScopeCount: number;
   /** Unmatched lines suppressed as OCR-uncertain (present-but-poorly-parsed). */
@@ -2740,11 +2745,35 @@ export function matchEstimateLineItems(params: {
   // one PDF claimed each side had omitted it. An adjuster finds that in under
   // a minute, and it discredits every other finding in the document.
   //
-  // Reported rather than thrown: a contradiction must never reach a reader,
-  // but neither should a whole pack die at render time. The caller withdraws
-  // the affected claims and surfaces the vocabulary gap, which is the real
-  // defect — the fix is an alias in data/operationAliases.json.
+  // R23 (Test 99 item 1): `certain` contradictions are ENFORCED here, not
+  // merely reported. When the same operation is claimed missing on one side
+  // and present-but-unmatched on the other, both claims are withdrawn and the
+  // pair is recorded as a plain match with no rendered annotation — an
+  // adjuster can disprove the contradiction in under a minute by reading
+  // their own document, and it discredits every other finding.
+  // `suspected` contradictions remain report-only: nothing is withdrawn on
+  // wording overlap alone, and the durable fix is still an alias entry.
   const contradictions = findBucketContradictions(deltas, lowerOnlyRows);
+  let r23DemotedCount = 0;
+  for (const contradiction of contradictions) {
+    if (contradiction.confidence !== "certain") continue;
+    const deltaIndex = deltas.findIndex(
+      (delta) => delta.kind === "missing_operation" && delta.higherRow === contradiction.higherRow
+    );
+    if (deltaIndex === -1) continue;
+    deltas.splice(deltaIndex, 1);
+    missingOperationCount = Math.max(0, missingOperationCount - 1);
+    const lowerIndex = lowerOnlyRows.indexOf(contradiction.lowerRow);
+    if (lowerIndex !== -1) lowerOnlyRows.splice(lowerIndex, 1);
+    matchedPairs.push({
+      higherRow: contradiction.higherRow,
+      lowerRow: contradiction.lowerRow,
+      basis: "description",
+    });
+    matchedPairCount += 1;
+    contradiction.demoted = true;
+    r23DemotedCount += 1;
+  }
 
   return {
     deltas,
@@ -2760,6 +2789,7 @@ export function matchEstimateLineItems(params: {
     lowerRowReconciliation,
     missedSections,
     contradictions,
+    r23DemotedCount,
   };
 }
 
