@@ -73,6 +73,9 @@ const MAKE_ABBREVIATIONS: Record<string, string> = {
   VOLV: "Volvo",
   MERZ: "Mercedes-Benz",
   GENS: "Genesis",
+  // CCC prints Volkswagen as the marque's own two-letter mark, not a
+  // four-letter truncation ("2022 VW Atlas SEL 4MOTION" — RO 21897).
+  VW: "Volkswagen",
 };
 
 const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {
@@ -170,6 +173,10 @@ const WMI_MAP: Record<string, { make?: string; manufacturer: string; ambiguousMa
   "VSS": { make: "SEAT", manufacturer: "SEAT, S.A." },
   "WA1": { make: "Audi", manufacturer: "AUDI AG" },
   "WAU": { make: "Audi", manufacturer: "AUDI AG" },
+  // Volkswagen Group of America, Chattanooga: 1VW = passenger cars,
+  // 1V2 = SUVs/MPVs (Atlas — RO 21897 decoded year-only without these).
+  "1VW": { make: "Volkswagen", manufacturer: "Volkswagen Group of America" },
+  "1V2": { make: "Volkswagen", manufacturer: "Volkswagen Group of America" },
   "WBA": { make: "BMW", manufacturer: "Bayerische Motoren Werke AG" },
   "WBS": { make: "BMW", manufacturer: "Bayerische Motoren Werke AG" },
   "WDD": { make: "Mercedes-Benz", manufacturer: "Mercedes-Benz Group AG" },

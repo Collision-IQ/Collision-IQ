@@ -42,10 +42,20 @@ function extractOwnerDisplayName(text: string): string | undefined {
   return cleaned;
 }
 
+/** Loss date normalized to YYYY-MM-DD — the intake form's date input ignores
+ *  any other format, so an extracted "7/19/2026" must not reach it raw. */
 function extractLossDate(text: string): string | undefined {
   const match =
-    /(?:date\s+of\s+loss|loss\s+date)\s*[:#]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i.exec(text);
-  return match?.[1];
+    /(?:date\s+of\s+loss|loss\s+date)\s*[:#]?\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/i.exec(text);
+  if (!match) return undefined;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  let year = Number(match[3]);
+  if (year < 100) year += 2000;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1990 || year > 2100) {
+    return undefined;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function extractPointOfImpact(text: string): string | undefined {
@@ -65,7 +75,10 @@ function readSeveritySignals(text: string): DvSeveritySignals {
         facts.dimensionalVerification ||
         facts.clampZoneRepair
     ),
-    airbag: /\bair\s?bags?\b/i.test(text) && /deploy|replace|module/i.test(text),
+    // Operation rows ONLY (R&I/Repl/...): the equipment header lists
+    // "Drivers Side Air Bag" on every CCC estimate, which is not a
+    // deployment — hasLine's raw-line fallback would match it.
+    airbag: parsed.lines.some((line) => /air\s?bag/i.test(line.raw)),
     adasCalibration: Boolean(
       facts.radarCalibration || facts.cameraCalibration || facts.surroundCalibration
     ),

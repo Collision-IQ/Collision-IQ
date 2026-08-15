@@ -501,15 +501,19 @@ function extractEstimateTotal(
 
 function collectEstimateTotalCandidates(text: string) {
   const candidates: Array<{ value: number; score: number }> = [];
+  // Labels end with (?![a-z]) rather than \b: CCC welds the amount straight
+  // onto the label ("Grand Total14,938.25", "Total Cost of Repairs8,285.25"),
+  // and a digit after a letter is NOT a \b word boundary, so \b-terminated
+  // labels silently miss the glued form (RO 21897 lost its total to this).
   const patterns: Array<{ pattern: RegExp; score: number }> = [
-    { pattern: /\btotal cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 1000 },
-    { pattern: /\bgrand total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 940 },
-    { pattern: /\bestimate total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 920 },
-    { pattern: /\b(?:carrier|shop)\s+total(?:\s+(?:cost|repairs?))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 900 },
-    { pattern: /\btotal(?:\s+(?:repairs?|amount|cost))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 700 },
+    { pattern: /\btotal cost of repairs?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 1000 },
+    { pattern: /\bgrand total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 940 },
+    { pattern: /\bestimate total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 920 },
+    { pattern: /\b(?:carrier|shop)\s+total(?:\s+(?:cost|repairs?))?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 900 },
+    { pattern: /\btotal(?:\s+(?:repairs?|amount|cost))?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 700 },
     // Net cost of repairs is AFTER deductible — never the comparison/display
     // basis. Kept only as a last resort when no gross repair total is present.
-    { pattern: /\bnet cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 300 },
+    { pattern: /\bnet cost of repairs?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 300 },
   ];
 
   for (const { pattern, score } of patterns) {
