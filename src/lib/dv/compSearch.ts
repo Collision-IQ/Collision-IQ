@@ -172,17 +172,24 @@ function extractCompVin(url: string | undefined, text: string): string | undefin
   return /(?:^|[^A-Z0-9])([A-HJ-NPR-Z0-9]{17})(?:[^A-Z0-9]|$)/.exec(haystack)?.[1];
 }
 
+/** CCC glues engine designations onto the model ("Q5 45", "CR-V Hybrid"):
+ *  the FIRST token is the model the market searches by; the rest behaves
+ *  like trim and may be phrased in any order on a listing title. */
+function primaryModelToken(model: string | undefined): string | undefined {
+  const token = model?.split(/\s+/).filter(Boolean)[0];
+  return token ? token.replace(/[^A-Za-z0-9-]/g, "") : undefined;
+}
+
 function isLikelyListing(entry: { title: string; link?: string; snippet: string }, vehicle: DvVehicle): boolean {
   const text = `${entry.title} ${entry.snippet}`;
   if (entry.link && NON_LISTING_URL.test(entry.link)) return false;
   if (isResearchDomain(entry.link)) return false;
   if (BRANDED_TITLE.test(text)) return false;
-  // The model must appear in the TITLE itself; the year may sit in the
-  // snippet (several sites omit it from index-page titles).
-  if (vehicle.model) {
-    const modelPattern = new RegExp(vehicle.model.replace(/[^A-Za-z0-9- ]/g, ""), "i");
-    if (!modelPattern.test(entry.title)) return false;
-  }
+  // The PRIMARY model token must appear in the TITLE itself. Requiring the
+  // full glued model string ("Q5 45") rejected every real listing — titles
+  // phrase the designation in any order ("Q5 Premium 45 TFSI") or omit it.
+  const primary = primaryModelToken(vehicle.model);
+  if (primary && !new RegExp(`\\b${primary}\\b`, "i").test(entry.title)) return false;
   if (vehicle.year && !text.includes(String(vehicle.year))) return false;
   return true;
 }
@@ -278,7 +285,16 @@ function sortCleanComps(comps: DvComp[]): DvComp[] {
 }
 
 function vehicleQueryIdentity(vehicle: DvVehicle, withTrim: boolean): string {
-  return [vehicle.year, vehicle.make, vehicle.model, withTrim ? vehicle.trim : undefined]
+  // Search by the primary model token; the glued designation tail ("45")
+  // joins the trim side of the query where word order stops mattering.
+  const primary = primaryModelToken(vehicle.model) ?? vehicle.model;
+  const modelTail = vehicle.model?.split(/\s+/).slice(1).join(" ");
+  return [
+    vehicle.year,
+    vehicle.make,
+    primary,
+    withTrim ? [modelTail, vehicle.trim].filter(Boolean).join(" ") : undefined,
+  ]
     .filter(Boolean)
     .join(" ");
 }
