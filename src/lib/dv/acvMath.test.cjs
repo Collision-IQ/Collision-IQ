@@ -131,6 +131,34 @@ run("Civic file: supplied CarFax value drives the post-loss side verbatim", () =
   assert.equal(calc.totalDemand, 3808.39);
 });
 
+run("HARD RULE: a 1-loss comp set at/above the clean average is discarded", () => {
+  // A loss-history vehicle can never be worth as much as its clean twin.
+  // When the auto-derived 1-loss average meets or exceeds the clean-comp
+  // average, the set is bad data: fall back to projected stigma, never
+  // report zero/negative DV off it.
+  const oneLoss = [
+    { ...comp(39000, 1495), tier: "one_loss" },
+    { ...comp(40000, 1495), tier: "one_loss" },
+    { ...comp(41000, 1495), tier: "one_loss" },
+  ];
+  const calc = computeDvCalculation({
+    cleanComps: [comp(38000, 1495)],
+    oneLossComps: oneLoss,
+    subjectMileage: 1495,
+    taxRatePct: 6,
+    repairTotal: 10000,
+    severity: NO_SEVERITY,
+    appraisalFee: 350,
+  });
+  assert.equal(calc.postLoss.method, "projected_stigma");
+  assert.equal(calc.postLoss.projected, true);
+  assert.ok(calc.diminishedValue > 0, "DV must be positive after fallback");
+  assert.ok(
+    calc.postLoss.rationale.includes("discarded"),
+    "rationale must document the discarded 1-loss set"
+  );
+});
+
 run("three confirmed 1-loss comps price the post-loss market directly", () => {
   const oneLoss = [
     { ...comp(30000, 1495), tier: "one_loss" },

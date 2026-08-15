@@ -107,6 +107,27 @@ function extractPhone(text: string): string | undefined {
 const NON_LISTING_URL = /\/(parts|reviews?|recalls?|news|blog|research|specs|owners|forum)\b/i;
 const BRANDED_TITLE = /\b(salvage|rebuilt|branded\s+title|flood|lemon|total\s+loss\s+title|fire\s+damage)\b/i;
 
+// Valuation guides, magazines, and rankings sites publish PRICES without
+// selling CARS — a "comp" from any of these is not a retail listing and
+// poisons the average (live failure: kbb.com and caranddriver.com comps
+// pushed a Model X Plaid post-loss above its pre-loss ACV).
+const RESEARCH_DOMAINS =
+  /(^|\.)(kbb\.com|caranddriver\.com|motortrend\.com|jdpower\.com|nadaguides\.com|consumerreports\.org|usnews\.com|autoblog\.com|thecarconnection\.com|autoweek\.com|topspeed\.com|caredge\.com|iseecars\.com)$/i;
+
+function isResearchDomain(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return RESEARCH_DOMAINS.test(new URL(url).hostname.replace(/^www\./, ""));
+  } catch {
+    return false;
+  }
+}
+
+/** A clean comp must be like-kind-quality: an otherwise-identical vehicle
+ *  45,000+ miles away from the subject is a different market segment, and the
+ *  $0.07/mile adjustment stops being credible at that distance. */
+const CLEAN_COMP_MAX_MILEAGE_DELTA = 45000;
+
 /**
  * A comp the report cites must be a SINGLE listing an adjuster can open —
  * search-index and city-inventory pages parse a price that belongs to no
@@ -154,6 +175,7 @@ function extractCompVin(url: string | undefined, text: string): string | undefin
 function isLikelyListing(entry: { title: string; link?: string; snippet: string }, vehicle: DvVehicle): boolean {
   const text = `${entry.title} ${entry.snippet}`;
   if (entry.link && NON_LISTING_URL.test(entry.link)) return false;
+  if (isResearchDomain(entry.link)) return false;
   if (BRANDED_TITLE.test(text)) return false;
   // The model must appear in the TITLE itself; the year may sit in the
   // snippet (several sites omit it from index-page titles).
@@ -294,6 +316,8 @@ export async function runDvCompResearch(params: {
   vehicle: DvVehicle;
   zip: string;
   dateAccessed: string;
+  /** Subject odometer — clean comps beyond ±45k miles of it are rejected. */
+  subjectMileage?: number;
 }): Promise<DvCompResearch> {
   const apiKey = getSerperApiKey();
   if (!apiKey) {
@@ -324,7 +348,13 @@ export async function runDvCompResearch(params: {
         .map((entry) =>
           toComp({ entry, vehicle: params.vehicle, tier: "clean", dateAccessed: params.dateAccessed })
         )
-        .filter((comp): comp is DvComp => Boolean(comp));
+        .filter((comp): comp is DvComp => Boolean(comp))
+        .filter(
+          (comp) =>
+            typeof params.subjectMileage !== "number" ||
+            typeof comp.mileage !== "number" ||
+            Math.abs(comp.mileage - params.subjectMileage) <= CLEAN_COMP_MAX_MILEAGE_DELTA
+        );
       clean.push(...comps);
       const detailCount = dedupeComps(clean).filter(
         (comp) => comp.listingQuality === "detail"
@@ -367,6 +397,10 @@ export async function runDvCompResearch(params: {
     }
 
     // Tier 2 — confirmed 1-loss comps, radius first, then US-wide.
+    // Hard rule: a loss-history unit can never be worth as much as a clean
+    // one, so any "1-loss comp" priced at or above the highest clean asking
+    // price is a mis-parse or a different vehicle and is rejected outright.
+    const maxCleanAsking = Math.max(...cleanSelected.map((comp) => comp.askingPrice));
     const oneLoss: DvComp[] = [];
     for (const { query, scope } of buildOneLossQueries(params.vehicle, params.zip)) {
       const outcome = await runSerperSearch(query, apiKey);
@@ -375,7 +409,8 @@ export async function runDvCompResearch(params: {
         .map((entry) =>
           toComp({ entry, vehicle: params.vehicle, tier: "one_loss", dateAccessed: params.dateAccessed })
         )
-        .filter((comp): comp is DvComp => Boolean(comp));
+        .filter((comp): comp is DvComp => Boolean(comp))
+        .filter((comp) => comp.askingPrice < maxCleanAsking);
       oneLoss.push(...comps);
 
       sweep.push({

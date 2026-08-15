@@ -124,6 +124,7 @@ export async function POST(
       vehicle,
       zip: request.intake.zip,
       dateAccessed,
+      subjectMileage: mileage,
     });
 
     if (compResearch.status !== "completed") {

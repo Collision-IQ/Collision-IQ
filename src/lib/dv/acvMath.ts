@@ -147,27 +147,48 @@ export function computeDvCalculation(params: ComputeDvParams): DvCalculation {
   let stigmaPct: number | undefined;
   let rationale: string;
 
+  // HARD RULE (owner-directed, and basic vehicle-valuation science): a
+  // loss-history vehicle can NEVER be worth as much as its clean twin. An
+  // auto-derived 1-loss comp set whose average meets or exceeds the CLEAN
+  // comp average (pre-tax, apples-to-apples) is bad data, not a real market
+  // outcome, and is discarded in favor of the projected-stigma method. A
+  // user-supplied CarFax value is real per-VIN data and is never overridden.
+  const oneLossAdjustments =
+    params.oneLossComps.length >= 3
+      ? params.oneLossComps.map((comp) =>
+          adjustCompForMileage(comp, params.subjectMileage, perMileRate)
+        )
+      : null;
+  const oneLossAverage = oneLossAdjustments ? averageAdjusted(oneLossAdjustments) : null;
+  const oneLossUsable =
+    typeof oneLossAverage === "number" && oneLossAverage > 0 && oneLossAverage < average;
+
   if (typeof params.carfaxPostLossValue === "number" && params.carfaxPostLossValue > 0) {
     method = "carfax_hbv";
     postLossValue = roundCents(params.carfaxPostLossValue);
     rationale =
       "CarFax History-Based Value for this VIN after the loss record posted — the house-preferred post-loss input.";
-  } else if (params.oneLossComps.length >= 3) {
+  } else if (oneLossUsable && oneLossAverage !== null) {
     method = "one_loss_comps";
-    const oneLossAdjustments = params.oneLossComps.map((comp) =>
-      adjustCompForMileage(comp, params.subjectMileage, perMileRate)
-    );
-    postLossValue = averageAdjusted(oneLossAdjustments);
+    postLossValue = oneLossAverage;
     rationale = `Average of ${params.oneLossComps.length} mileage-adjusted comparable vehicles with a confirmed single loss record.`;
   } else {
     method = "projected_stigma";
     projected = true;
     stigmaPct = projectStigmaPct({ severityRatioPct, severity: params.severity });
     postLossValue = roundCents(preLossAcv * (1 - stigmaPct / 100));
+    const discardedNote =
+      oneLossAverage !== null && !oneLossUsable
+        ? ` The automated 1-loss comp set was discarded: its average (${oneLossAverage.toLocaleString(
+            "en-US",
+            { style: "currency", currency: "USD" }
+          )}) met or exceeded the clean-comp average, and a loss-history vehicle can never be worth as much as its clean counterpart.`
+        : "";
     rationale =
       `Projected ${stigmaPct}% market stigma pending the CarFax History-Based Value pull ` +
       `(severity ${severityRatioPct.toFixed(1)}% of pre-loss ACV; benchmarked against settled files at 4.7%–5.6% ` +
-      `and CARFAX published damage-impact research). Replace with the CarFax value once the loss posts to the VIN.`;
+      `and CARFAX published damage-impact research). Replace with the CarFax value once the loss posts to the VIN.` +
+      discardedNote;
   }
 
   const rawDv = roundCents(preLossAcv - postLossValue);
