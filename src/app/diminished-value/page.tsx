@@ -608,6 +608,12 @@ function DiminishedValueFlow() {
               />
             </label>
           </div>
+          <div className="mt-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
+            <span className="font-semibold">Check every field before continuing.</span> Your
+            valuation, comparable search, and demand letter are generated from the information
+            confirmed on this page — in particular the registered ZIP, mileage, and repair total.
+            Fees for completed reports are non-refundable.
+          </div>
           <div className="mt-6 flex justify-end gap-3">
             <button
               type="button"
@@ -644,6 +650,10 @@ function DiminishedValueFlow() {
             <li>Diminished value calculation with the insurer 17c cross-check</li>
             <li>Carrier-ready demand letter, issued in your own name, on the Collision Academy template</li>
           </ul>
+          <p className="mb-6 text-xs text-muted-foreground">
+            By paying you confirm the details entered on the previous step are accurate. The report
+            is generated from that information, and fees for completed reports are non-refundable.
+          </p>
           <div className="flex justify-end gap-3">
             <button
               type="button"

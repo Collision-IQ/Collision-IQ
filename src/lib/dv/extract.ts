@@ -11,11 +11,39 @@ import {
   decodeVinVehicleIdentity,
   mergeVehicleIdentity,
 } from "@/lib/ai/vehicleContext";
-import {
-  extractMarketPreviewState,
-  selectOwnerOrInsuredZip,
-} from "@/lib/ai/marketPreviewOwnerZip";
+import { extractMarketPreviewState } from "@/lib/ai/marketPreviewOwnerZip";
+import { resolveStateFromZip } from "@/lib/policyLegal/stateFromZip";
 import type { DvExtraction, DvSeveritySignals } from "./types";
+
+/**
+ * The comp search radius must center on the VEHICLE OWNER's ZIP (owner
+ * directive). The context-window scorer can be misled by third-party
+ * letterheads that happen to sit near an "Owner:" header in glued CCC text
+ * (RO 22194: an appraisal company's Phoenix ZIP outscored the owner's Berwyn
+ * one). So the owner's own address block wins outright: the first
+ * "City, ST 12345" following an Owner/Insured label. The comma+state prefix
+ * keeps street numbers and bare identifiers out.
+ */
+function zipAfterLabels(text: string, labels: RegExp): string | undefined {
+  for (const label of text.matchAll(labels)) {
+    const window = text.slice(label.index ?? 0, (label.index ?? 0) + 400);
+    for (const zipMatch of window.matchAll(/,\s*([A-Z]{2})\s*(\d{5})(?!\d)/g)) {
+      const zip = zipMatch[2];
+      if (resolveStateFromZip(zip)) return zip;
+    }
+  }
+  return undefined;
+}
+
+/** Owner-directed cascade: owner block → inspection location / repair
+ *  facility block → BLANK (the owner fills it in at intake). Never a
+ *  best-guess from arbitrary document context. */
+function extractOwnerBlockZip(text: string): string | undefined {
+  return (
+    zipAfterLabels(text, /\b(?:Owner|Insured)\s*:/gi) ??
+    zipAfterLabels(text, /\b(?:Inspection\s+Location|Repair\s+Facility)\s*:/gi)
+  );
+}
 
 /** CCC prints the owner as "LAST, FIRST" welded to the next label; keep the
  *  raw window up to the first label-looking token so the letter can show a
@@ -98,7 +126,10 @@ export function buildDvExtraction(params: {
   const decoded = vin ? decodeVinVehicleIdentity(vin) : undefined;
   const vehicle = mergeVehicleIdentity(facts.vehicle, decoded);
 
-  const ownerZip = selectOwnerOrInsuredZip(text);
+  // Owner block first; labeled facility blocks second; otherwise BLANK so the
+  // owner supplies it — a wrong ZIP sends the whole comp search to the wrong
+  // market (RO 22194: an AZ letterhead ZIP on a PA car).
+  const ownerZip = extractOwnerBlockZip(text);
   const state = extractMarketPreviewState(text, ownerZip);
 
   return {
