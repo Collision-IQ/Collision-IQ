@@ -8,6 +8,51 @@ import {
 
 const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Some estimate writers emit PDFs with a malformed cross-reference structure
+ * (no trailer dictionary) that strict pdf.js builds refuse with
+ * InvalidPDFException even though every object is intact — a live USAA SOR
+ * did exactly this. A pdf-lib load→save round-trip rewrites the document
+ * with a well-formed xref, after which parsing succeeds with identical text.
+ * Only on repeated failure does the upload fail, and then with a message a
+ * person can act on rather than a parser exception.
+ */
+async function parsePdfWithRepair(
+  buffer: Buffer,
+  filename?: string | null
+): Promise<{ text: string; numpages?: number }> {
+  try {
+    return await pdfParse(buffer);
+  } catch (firstError) {
+    try {
+      const { PDFDocument } = await import("pdf-lib");
+      const doc = await PDFDocument.load(buffer, {
+        ignoreEncryption: true,
+        throwOnInvalidObject: false,
+        updateMetadata: false,
+      });
+      const repaired = Buffer.from(await doc.save());
+      const result = await pdfParse(repaired);
+      console.info("[pdf-repair] structurally repaired PDF parsed successfully", {
+        filename: filename ?? null,
+        originalBytes: buffer.byteLength,
+        repairedBytes: repaired.byteLength,
+        pages: result.numpages,
+      });
+      return result;
+    } catch {
+      console.error("[pdf-repair] PDF unreadable even after structural repair", {
+        filename: filename ?? null,
+        sizeBytes: buffer.byteLength,
+        error: firstError instanceof Error ? firstError.message : String(firstError),
+      });
+      throw new Error(
+        `${filename ?? "This PDF"} could not be read — the file appears corrupted, password-protected, or uses an unsupported format. Re-download or re-export the PDF and upload it again.`
+      );
+    }
+  }
+}
+
 export async function extractPreviewDataFromBuffer(params: {
   buffer: Buffer;
   mimeType?: string | null;
@@ -37,7 +82,7 @@ export async function extractPreviewDataFromBuffer(params: {
   }
 
   if (mimeType === "application/pdf") {
-    const result = await pdfParse(params.buffer);
+    const result = await parsePdfWithRepair(params.buffer, params.filename);
     const text = result.text || "";
     const pageCount = typeof result.numpages === "number" ? result.numpages : undefined;
 

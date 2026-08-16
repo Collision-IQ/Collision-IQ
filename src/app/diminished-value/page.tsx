@@ -270,7 +270,11 @@ function DiminishedValueFlow() {
         });
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error ?? "Upload failed.");
+          // The per-file failure reason is written for people; the top-level
+          // error is a machine code (FILE_PROCESSING_FAILED) — never show it
+          // when a real explanation is available.
+          const reason = data?.failedUploads?.[0]?.reason;
+          throw new Error(reason ?? data?.error ?? "Upload failed.");
         }
         attachmentId = data?.files?.[0]?.id ?? null;
       }
