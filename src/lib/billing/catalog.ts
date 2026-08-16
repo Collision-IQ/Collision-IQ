@@ -66,6 +66,16 @@ export const BILLING_CATALOG = {
     serviceType: "DIMINISHED_VALUE",
     label: "Diminished Value",
   },
+  // Self-service ACV + Diminished Value generator (/diminished-value) —
+  // its own product and price, distinct from the human-performed
+  // academy_diminished_value service above.
+  value_iq: {
+    priceId: process.env.STRIPE_VALUE_IQ_PRICE_ID?.trim() || "",
+    mode: "payment",
+    lane: "service",
+    serviceType: "VALUE_IQ",
+    label: "Value IQ — ACV + Diminished Value Report",
+  },
   // ── Legacy / Technical Systems ────────────────────────────────────────
   executive_onboarding: {
     priceId:

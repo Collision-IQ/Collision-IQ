@@ -47,6 +47,11 @@ const SERVICE_PRICES = [
     stripePriceId: requiredEnv("STRIPE_PRICE_DIMINISHED_VALUE_ID"),
     label: "Diminished Value",
   },
+  {
+    serviceType: "value_iq",
+    stripePriceId: requiredEnv("STRIPE_VALUE_IQ_PRICE_ID"),
+    label: "Value IQ — ACV + Diminished Value Report",
+  },
 ];
 
 async function main() {

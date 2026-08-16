@@ -239,9 +239,13 @@ export async function POST(req: Request) {
   // owns — the session's metadata is what later unlocks generation, so the
   // link is verified before Stripe ever sees it.
   if (dvRequestId) {
-    if (serviceType !== "academy_diminished_value" && serviceType !== "academy_acv_review") {
+    if (
+      serviceType !== "value_iq" &&
+      serviceType !== "academy_diminished_value" &&
+      serviceType !== "academy_acv_review"
+    ) {
       return NextResponse.json(
-        { error: "dvRequestId is only valid for the diminished value / ACV services." },
+        { error: "dvRequestId is only valid for the Value IQ / diminished value / ACV services." },
         { status: 400 }
       );
     }

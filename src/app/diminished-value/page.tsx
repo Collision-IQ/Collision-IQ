@@ -378,7 +378,7 @@ function DiminishedValueFlow() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          serviceType: "academy_diminished_value",
+          serviceType: "value_iq",
           dvRequestId: request.id,
           sourcePage: "diminished-value",
           returnUrl: `/diminished-value?checkout=cancelled&request=${request.id}`,
