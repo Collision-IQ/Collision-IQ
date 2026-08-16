@@ -260,7 +260,17 @@ function toComp(params: {
   const askingPrice = extractAskingPrice(text);
   if (typeof askingPrice !== "number") return null;
 
-  if (params.tier === "clean" && ONE_LOSS_EVIDENCE.test(text)) return null;
+  // The clean tier prices the NO-LOSS market. Any accident mention at all
+  // disqualifies (owner rule: when a CarFax post-loss value is supplied, the
+  // pre-loss side must be a true clean ACV) — unless the mention is an
+  // explicit clean attestation ("no accidents", "clean CARFAX").
+  if (
+    params.tier === "clean" &&
+    /\baccidents?\b/i.test(text) &&
+    !CLEAN_EVIDENCE.test(text)
+  ) {
+    return null;
+  }
 
   let lossEvidence: string | undefined;
   if (params.tier === "one_loss") {
@@ -271,6 +281,7 @@ function toComp(params: {
 
   return {
     tier: params.tier,
+    cleanVerified: params.tier === "clean" ? CLEAN_EVIDENCE.test(text) : undefined,
     listingQuality: isDetailPageUrl(entry.link) ? "detail" : "index",
     title: entry.title.trim().slice(0, 160),
     dealer: extractDealerName(entry.title),
@@ -307,6 +318,8 @@ function sortCleanComps(comps: DvComp[]): DvComp[] {
     const byQuality =
       Number(left.listingQuality !== "detail") - Number(right.listingQuality !== "detail");
     if (byQuality !== 0) return byQuality;
+    const byVerified = Number(!left.cleanVerified) - Number(!right.cleanVerified);
+    if (byVerified !== 0) return byVerified;
     const byTrim = rank[left.trimMatch] - rank[right.trimMatch];
     if (byTrim !== 0) return byTrim;
     return Number(right.mileage !== undefined) - Number(left.mileage !== undefined);
@@ -363,6 +376,13 @@ export async function runDvCompResearch(params: {
   dateAccessed: string;
   /** Subject odometer — clean comps beyond ±45k miles of it are rejected. */
   subjectMileage?: number;
+  /**
+   * The owner-supplied CarFax post-loss value, when present. A CLEAN comp
+   * asking at or below the subject's post-loss value is not a clean unit —
+   * the CarFax figure already prices the loss in, so the clean market must
+   * sit strictly above it (owner rule).
+   */
+  cleanMinAsking?: number;
 }): Promise<DvCompResearch> {
   const apiKey = getSerperApiKey();
   if (!apiKey) {
@@ -399,6 +419,11 @@ export async function runDvCompResearch(params: {
             typeof params.subjectMileage !== "number" ||
             typeof comp.mileage !== "number" ||
             Math.abs(comp.mileage - params.subjectMileage) <= CLEAN_COMP_MAX_MILEAGE_DELTA
+        )
+        .filter(
+          (comp) =>
+            typeof params.cleanMinAsking !== "number" ||
+            comp.askingPrice > params.cleanMinAsking
         );
       clean.push(...comps);
       const detailCount = dedupeComps(clean).filter(
@@ -418,6 +443,10 @@ export async function runDvCompResearch(params: {
       );
     }
     if (cleanSelected.length === 0) {
+      const floorNote =
+        typeof params.cleanMinAsking === "number"
+          ? ` Because a CarFax post-loss value of $${params.cleanMinAsking.toLocaleString("en-US")} was supplied, only clean listings priced ABOVE that figure qualify (a "clean" unit asking less than the subject's post-loss value is not a clean comp). Verify the CarFax amount is the post-loss History-Based Value for this VIN, then try again.`
+          : "";
       return {
         status: "insufficient_clean_comps",
         tier: null,
@@ -427,8 +456,14 @@ export async function runDvCompResearch(params: {
         notes,
         failureReason:
           `No like-kind-quality listings with a usable asking price were found within ` +
-          `${CLEAN_RADIUS_MILES} miles of ZIP ${params.zip}. The pre-loss ACV cannot be computed without at least one comp.`,
+          `${CLEAN_RADIUS_MILES} miles of ZIP ${params.zip}. The pre-loss ACV cannot be computed without at least one comp.` +
+          floorNote,
       };
+    }
+    if (typeof params.cleanMinAsking === "number") {
+      notes.push(
+        `A CarFax post-loss value of $${params.cleanMinAsking.toLocaleString("en-US")} was supplied, so the clean comp set was restricted to listings priced above it — the pre-loss side must represent the no-loss market.`
+      );
     }
     if (cleanSelected.length < 3) {
       notes.push(

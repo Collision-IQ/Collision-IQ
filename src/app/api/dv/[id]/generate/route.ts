@@ -125,6 +125,7 @@ export async function POST(
       zip: request.intake.zip,
       dateAccessed,
       subjectMileage: mileage,
+      cleanMinAsking: request.intake.carfaxPostLossValue,
     });
 
     if (compResearch.status !== "completed") {

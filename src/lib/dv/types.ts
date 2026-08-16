@@ -87,6 +87,9 @@ export type DvComp = {
   /** "detail" = a single-vehicle listing page; "index" = a live inventory or
    *  search page whose parsed price still needs its specific ad snapshotted. */
   listingQuality?: "detail" | "index";
+  /** Clean tier only: the listing text itself attests a clean history
+   *  ("no accidents", "clean CARFAX"). Verified-clean comps rank first. */
+  cleanVerified?: boolean;
   title: string;
   dealer?: string;
   phone?: string;
