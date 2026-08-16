@@ -158,6 +158,14 @@ function DiminishedValueFlow() {
 
   const applyRequest = useCallback((next: DvRequestView) => {
     setRequest(next);
+    // Mode lives in the stored intake, not just component state — a resumed
+    // request (?request=, or a return from checkout) must come back in the
+    // mode it was created in, or a total-loss file would be treated as a
+    // diminished-value one.
+    const storedMode = next.intake?.mode ?? next.result?.mode;
+    if (storedMode === "total_loss" || storedMode === "diminished_value") {
+      setMode(storedMode);
+    }
     const extraction = next.extraction;
     setIntakeForm((prev) => ({
       ...prev,
@@ -499,7 +507,9 @@ function DiminishedValueFlow() {
                 index === stepIndex ? "font-semibold text-foreground" : "text-muted-foreground"
               }
             >
-              {entry.label}
+              {entry.key === "upload" && mode === "total_loss"
+                ? "Upload carrier valuation"
+                : entry.label}
             </span>
             {index < STEPS.length - 1 && (
               <span className="mx-1 hidden text-muted-foreground sm:inline">—</span>
@@ -699,33 +709,42 @@ function DiminishedValueFlow() {
                 className="w-full rounded-lg border border-border bg-background px-3 py-2"
               />
             </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">Repair total *</span>
-              <input
-                value={intakeForm.repairTotal}
-                onChange={(e) => setIntakeForm({ ...intakeForm, repairTotal: e.target.value })}
-                inputMode="decimal"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">CarFax post-loss value (optional)</span>
-              <input
-                value={intakeForm.carfaxPostLossValue}
-                onChange={(e) =>
-                  setIntakeForm({ ...intakeForm, carfaxPostLossValue: e.target.value })
-                }
-                inputMode="decimal"
-                placeholder="If you already pulled it"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2"
-              />
-            </label>
+            {/* Repair cost and the CarFax post-loss value belong to the
+                diminished-value packet only. A total loss is not repaired:
+                the appraised ACV is the product, and the dispute is against
+                the carrier's valuation. */}
+            {mode === "diminished_value" && (
+              <>
+                <label className="text-sm">
+                  <span className="mb-1 block font-medium">Repair total *</span>
+                  <input
+                    value={intakeForm.repairTotal}
+                    onChange={(e) => setIntakeForm({ ...intakeForm, repairTotal: e.target.value })}
+                    inputMode="decimal"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block font-medium">CarFax post-loss value (optional)</span>
+                  <input
+                    value={intakeForm.carfaxPostLossValue}
+                    onChange={(e) =>
+                      setIntakeForm({ ...intakeForm, carfaxPostLossValue: e.target.value })
+                    }
+                    inputMode="decimal"
+                    placeholder="If you already pulled it"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                  />
+                </label>
+              </>
+            )}
           </div>
           <div className="mt-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
             <span className="font-semibold">Check every field before continuing.</span> Your
             valuation, comparable search, and demand letter are generated from the information
-            confirmed on this page — in particular the registered ZIP, mileage, and repair total.
-            Fees for completed reports are non-refundable.
+            confirmed on this page — in particular the registered ZIP, mileage
+            {mode === "diminished_value" ? ", and repair total" : ", and date of loss"}. Fees for
+            completed reports are non-refundable.
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button
