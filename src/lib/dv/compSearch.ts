@@ -83,8 +83,15 @@ function extractHostname(url: string | undefined): string | undefined {
 }
 
 /** Listing pages carry an asking price; $1,000+ is always comma-formatted on
- *  the retail sites this searches. */
+ *  the retail sites this searches. Prose shorthand ("$25k") must resolve to
+ *  its real magnitude — grabbing a different stray number off the page turned
+ *  a $25,000 vehicle into a $2,500 comp on a live run. */
 function extractAskingPrice(text: string): number | undefined {
+  const kForm = /\$\s?(\d{1,3}(?:\.\d)?)\s?k\b/i.exec(text);
+  if (kForm) {
+    const value = Number(kForm[1]) * 1000;
+    if (Number.isFinite(value) && value >= 2000 && value <= 500000) return value;
+  }
   const matches = [...text.matchAll(/\$\s?(\d{1,3}(?:,\d{3})+|\d{4,6})(?!\d)/g)]
     .map((match) => Number(match[1].replace(/,/g, "")))
     .filter((value) => Number.isFinite(value) && value >= 2000 && value <= 500000);
@@ -114,13 +121,30 @@ const BRANDED_TITLE = /\b(salvage|rebuilt|branded\s+title|flood|lemon|total\s+lo
 const RESEARCH_DOMAINS =
   /(^|\.)(kbb\.com|caranddriver\.com|motortrend\.com|jdpower\.com|nadaguides\.com|consumerreports\.org|usnews\.com|autoblog\.com|thecarconnection\.com|autoweek\.com|topspeed\.com|caredge\.com|iseecars\.com)$/i;
 
-function isResearchDomain(url: string | undefined): boolean {
-  if (!url) return false;
+// Social/classified platforms are NEVER comps (owner's Step 3c source
+// registry): posts are login-gated, carry no VIN or dealer accountability,
+// state prices in shorthand prose, and cannot be cited to a carrier. A live
+// run pulled a "$25k" Facebook group post in as a $2,500 loss-history comp.
+const SOCIAL_CLASSIFIED_DOMAINS =
+  /(^|\.)(facebook\.com|instagram\.com|craigslist\.org|offerup\.com|ebay\.com|nextdoor\.com|reddit\.com|x\.com|twitter\.com|tiktok\.com|pinterest\.com)$/i;
+
+function hostnameOf(url: string | undefined): string | null {
+  if (!url) return null;
   try {
-    return RESEARCH_DOMAINS.test(new URL(url).hostname.replace(/^www\./, ""));
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isResearchDomain(url: string | undefined): boolean {
+  const hostname = hostnameOf(url);
+  return hostname !== null && RESEARCH_DOMAINS.test(hostname);
+}
+
+function isSocialClassifiedDomain(url: string | undefined): boolean {
+  const hostname = hostnameOf(url);
+  return hostname !== null && SOCIAL_CLASSIFIED_DOMAINS.test(hostname);
 }
 
 /** A clean comp must be like-kind-quality: an otherwise-identical vehicle
@@ -184,6 +208,7 @@ function isLikelyListing(entry: { title: string; link?: string; snippet: string 
   const text = `${entry.title} ${entry.snippet}`;
   if (entry.link && NON_LISTING_URL.test(entry.link)) return false;
   if (isResearchDomain(entry.link)) return false;
+  if (isSocialClassifiedDomain(entry.link)) return false;
   if (BRANDED_TITLE.test(text)) return false;
   // The PRIMARY model token must appear in the TITLE itself. Requiring the
   // full glued model string ("Q5 45") rejected every real listing — titles
@@ -219,6 +244,10 @@ function extractDealerName(title: string): string | undefined {
 const ONE_LOSS_EVIDENCE =
   /\b(1|one)\s+accident(?:\s+reported)?\b|\baccident\s+reported\b|\baccident\/damage\b|\bdamage\s+reported\b/i;
 const CLEAN_EVIDENCE = /\bno\s+accidents?\b|\baccident[-\s]free\b|\bclean\s+(?:carfax|history)\b/i;
+// A MULTI-loss unit is not LKQ to a 1-loss subject — "carfax shows two
+// accidents hence the low price" is disqualifying, not confirming.
+const MULTI_LOSS_EVIDENCE =
+  /\b(?:two|three|four|2|3|4|multiple|several)\s+accidents\b|\baccidents\s+reported\b/i;
 
 function toComp(params: {
   entry: { title: string; link?: string; snippet: string };
@@ -236,7 +265,7 @@ function toComp(params: {
   let lossEvidence: string | undefined;
   if (params.tier === "one_loss") {
     const evidence = ONE_LOSS_EVIDENCE.exec(text);
-    if (!evidence || CLEAN_EVIDENCE.test(text)) return null;
+    if (!evidence || CLEAN_EVIDENCE.test(text) || MULTI_LOSS_EVIDENCE.test(text)) return null;
     lossEvidence = evidence[0];
   }
 
@@ -416,7 +445,15 @@ export async function runDvCompResearch(params: {
     // Hard rule: a loss-history unit can never be worth as much as a clean
     // one, so any "1-loss comp" priced at or above the highest clean asking
     // price is a mis-parse or a different vehicle and is rejected outright.
+    // The mirror guard: a repaired 1-loss retail unit also never sells for a
+    // small fraction of the clean market — settled files run 4.7–18.4%
+    // stigma, so a "comp" under 40% of the clean average is a scam post,
+    // parts car, or mis-parse (live failure: a $2,500 Facebook comp against
+    // a $36k clean market inflated DV to 46% of ACV).
     const maxCleanAsking = Math.max(...cleanSelected.map((comp) => comp.askingPrice));
+    const cleanAverageAsking =
+      cleanSelected.reduce((sum, comp) => sum + comp.askingPrice, 0) / cleanSelected.length;
+    const minOneLossAsking = cleanAverageAsking * 0.4;
     const oneLoss: DvComp[] = [];
     for (const { query, scope } of buildOneLossQueries(params.vehicle, params.zip)) {
       const outcome = await runSerperSearch(query, apiKey);
@@ -426,7 +463,7 @@ export async function runDvCompResearch(params: {
           toComp({ entry, vehicle: params.vehicle, tier: "one_loss", dateAccessed: params.dateAccessed })
         )
         .filter((comp): comp is DvComp => Boolean(comp))
-        .filter((comp) => comp.askingPrice < maxCleanAsking);
+        .filter((comp) => comp.askingPrice < maxCleanAsking && comp.askingPrice >= minOneLossAsking);
       oneLoss.push(...comps);
 
       sweep.push({
