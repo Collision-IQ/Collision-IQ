@@ -58,6 +58,17 @@ function signed(value: number): string {
   return formatted;
 }
 
+/**
+ * Every report link routes through the outbound listing page, whose
+ * "Open listing in a new tab" button is honored by every browser — a plain
+ * URI link's target behavior is the PDF viewer's choice, and Chrome's viewer
+ * navigates the report tab away. The printed URL text remains the raw
+ * listing address for transparency; only the click destination changes.
+ */
+function listingHref(url: string): string {
+  return `https://www.collision-iq.ai/listing?u=${encodeURIComponent(url)}`;
+}
+
 /** jsPDF's built-in fonts are WinAnsi — U+2212/en/em dashes and curly quotes
  *  fall back to garbage glyphs and break line metrics. Normalize to ASCII. */
 function pdfSafe(text: string): string {
@@ -316,7 +327,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     cy += 3.6;
     if (comp.url) {
       doc.setTextColor(60, 90, 170);
-      doc.textWithLink("View listing online", x + 2.5, cy, { url: comp.url });
+      doc.textWithLink("View listing online", x + 2.5, cy, { url: listingHref(comp.url) });
     }
   }
   y += boxHeight + 6;
@@ -443,7 +454,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
       doc.setFontSize(7.4);
       doc.setTextColor(60, 90, 170);
       const displayUrl = comp.url!.length > 118 ? `${comp.url!.slice(0, 115)}...` : comp.url!;
-      doc.textWithLink(displayUrl, PAGE.marginX, y, { url: comp.url! });
+      doc.textWithLink(displayUrl, PAGE.marginX, y, { url: listingHref(comp.url!) });
       y += 4.6;
     }
   }

@@ -18,6 +18,8 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
+  RotateCcw,
+  Share2,
   ShieldCheck,
   Upload,
 } from "lucide-react";
@@ -76,6 +78,43 @@ function usd(value: number | undefined): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+/** Shops share this page with their customers — native share sheet where the
+ *  platform has one, clipboard copy elsewhere. */
+function ShareValueIqButton() {
+  const [copied, setCopied] = useState(false);
+  const shareUrl = "https://www.collision-iq.ai/diminished-value";
+
+  async function handleShare() {
+    const payload = {
+      title: "Collision iQ — Value IQ",
+      text: "Get a carrier-ready Actual Cash Value & Diminished Value report for your vehicle.",
+      url: shareUrl,
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(payload);
+        return;
+      }
+    } catch {
+      // fall through to clipboard (user may simply have dismissed the sheet)
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // last resort: nothing to do — the URL is in the address bar
+    }
+  }
+
+  return (
+    <button type="button" className="ci-btn ci-btn-ghost" onClick={() => void handleShare()}>
+      <Share2 className="mr-2 h-4 w-4" />
+      {copied ? "Link copied!" : "Share Value IQ with a customer"}
+    </button>
+  );
+}
+
 const STEPS: Array<{ key: WizardStep; label: string }> = [
   { key: "upload", label: "Upload estimate" },
   { key: "intake", label: "Confirm details" },
@@ -96,6 +135,21 @@ function DiminishedValueFlow() {
   const [busyLabel, setBusyLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const bootstrapped = useRef(false);
+
+  /** Owner requirement: a finished (or failed) report must be clearable so
+   *  the next customer can start and pay without reopening the site. */
+  function startNewReport() {
+    setRequest(null);
+    setIntakeForm(EMPTY_INTAKE);
+    setError(null);
+    setBusy(false);
+    setBusyLabel("");
+    setStep("upload");
+    bootstrapped.current = true; // never re-resume the cleared request from the URL
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", "/diminished-value");
+    }
+  }
 
   const applyRequest = useCallback((next: DvRequestView) => {
     setRequest(next);
@@ -444,7 +498,14 @@ function DiminishedValueFlow() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-          {error}
+          <p>{error}</p>
+          <button
+            type="button"
+            className="mt-2 font-semibold text-[var(--accent)] underline decoration-dotted"
+            onClick={startNewReport}
+          >
+            Start a new report
+          </button>
         </div>
       )}
       {busy && (
@@ -774,6 +835,10 @@ function DiminishedValueFlow() {
               >
                 Download Demand Letter
               </button>
+              <button type="button" className="ci-btn ci-btn-ghost" onClick={startNewReport}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Start a new report
+              </button>
             </div>
           </div>
 
@@ -847,12 +912,15 @@ export default function DiminishedValuePage() {
           Actual Cash Value &amp; Diminished Value Generator
         </h1>
         <p className="text-sm leading-6 text-muted-foreground">
-          Upload your repair estimate and get a carrier-ready diminished value package: a Market
-          Value Report built from live dealer comparables — each one linked to its listing for
-          independent review — the diminished value calculation with the insurer&apos;s own 17c
-          framework cross-checked, and a demand letter issued in your own name on the Collision
-          Academy template.
+          The diminished value report generated here is more accurate than the 17c formula
+          insurance carriers tend to run when left unchallenged. We provide a detailed report
+          using live comparable values to support the value of your vehicle both with and without
+          a recorded loss — every comp linked to its listing for independent review, with a
+          carrier-ready demand letter issued in your own name.
         </p>
+        <div className="mt-4">
+          <ShareValueIqButton />
+        </div>
       </section>
 
       <Suspense fallback={null}>
