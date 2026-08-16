@@ -11,6 +11,7 @@ import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import { buildDvExtraction } from "@/lib/dv/extract";
 import { createDvRequest, listDvRequests } from "@/lib/dv/store";
 import { defaultTaxRatePctForState } from "@/lib/dv/salesTax";
+import { getValueIqFee } from "@/lib/dv/valueIqPrice";
 
 export const runtime = "nodejs";
 
@@ -66,7 +67,9 @@ export async function POST(req: Request) {
       zip: extraction.ownerZip ?? "",
       state: extraction.state ?? "",
       taxRatePct: defaultTaxRatePctForState(extraction.state),
-      appraisalFee: 350,
+      // The demanded appraisal fee tracks the live Value IQ price — it is
+      // the indirect loss the owner actually paid for this report.
+      appraisalFee: await getValueIqFee(),
     },
   });
 }

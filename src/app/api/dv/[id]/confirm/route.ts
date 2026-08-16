@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
 import { getStripe } from "@/lib/billing/stripe";
-import { getDvRequest, markDvRequestPaid } from "@/lib/dv/store";
+import { getDvRequest, markDvRequestPaid, updateDvIntake } from "@/lib/dv/store";
 
 export const runtime = "nodejs";
 
@@ -73,6 +73,22 @@ export async function POST(
   const updated = await markDvRequestPaid({ id, stripeSessionId: session.id });
   if (!updated) {
     return NextResponse.json({ error: "Request not found" }, { status: 404 });
+  }
+
+  // The demanded appraisal fee is the indirect loss the owner ACTUALLY paid —
+  // snap it to the checkout session's charged amount so the letter and the
+  // receipt can never disagree, whatever the price was at purchase time.
+  const paidAmount =
+    typeof session.amount_total === "number" ? session.amount_total / 100 : null;
+  if (paidAmount && paidAmount > 0 && updated.intake) {
+    const synced = await updateDvIntake({
+      id,
+      userId: request.userId,
+      intake: { ...updated.intake, appraisalFee: paidAmount },
+    });
+    if (synced) {
+      return NextResponse.json({ request: synced });
+    }
   }
 
   return NextResponse.json({ request: updated });
