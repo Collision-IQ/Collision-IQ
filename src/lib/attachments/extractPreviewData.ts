@@ -17,40 +17,109 @@ const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
  * Only on repeated failure does the upload fail, and then with a message a
  * person can act on rather than a parser exception.
  */
+/**
+ * Independent second parser lane: pdfjs-dist (legacy build), the same
+ * configuration the serverless OCR pipeline already runs in production.
+ * pdf-parse's bundled pdf.js can refuse a file this lane reads fine — the
+ * two must never share a failure mode.
+ */
+async function extractTextWithPdfjs(
+  buffer: Buffer
+): Promise<{ text: string; numpages: number }> {
+  const { ensurePdfJsNodePolyfills } = await import(
+    "@/lib/reports/citationDensityRowAnchors"
+  );
+  const polyfillError = await ensurePdfJsNodePolyfills([]);
+  if (polyfillError) throw new Error(polyfillError);
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    useSystemFonts: true,
+  } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
+
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const lines: string[] = [];
+    let line: string[] = [];
+    let lastY: number | null = null;
+    for (const item of content.items as Array<{ str?: string; transform?: number[] }>) {
+      const str = item.str ?? "";
+      const y = item.transform?.[5] ?? null;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2 && line.length) {
+        lines.push(line.join(""));
+        line = [];
+      }
+      if (str) line.push(str);
+      if (y !== null) lastY = y;
+    }
+    if (line.length) lines.push(line.join(""));
+    pages.push(lines.join("\n"));
+  }
+  return { text: pages.join("\n"), numpages: pdf.numPages };
+}
+
 async function parsePdfWithRepair(
   buffer: Buffer,
   filename?: string | null
 ): Promise<{ text: string; numpages?: number }> {
+  let firstError: unknown;
   try {
     return await pdfParse(buffer);
-  } catch (firstError) {
+  } catch (error) {
+    firstError = error;
+  }
+
+  // Two independent parsers × two byte versions (original, structurally
+  // repaired) before the upload is allowed to fail.
+  const attempts: Array<{ label: string; run: () => Promise<{ text: string; numpages?: number }> }> = [
+    { label: "pdfjs-original", run: () => extractTextWithPdfjs(buffer) },
+    {
+      label: "pdf-parse-repaired",
+      run: async () => pdfParse(await repairPdfBytes(buffer)),
+    },
+    {
+      label: "pdfjs-repaired",
+      run: async () => extractTextWithPdfjs(await repairPdfBytes(buffer)),
+    },
+  ];
+  for (const attempt of attempts) {
     try {
-      const { PDFDocument } = await import("pdf-lib");
-      const doc = await PDFDocument.load(buffer, {
-        ignoreEncryption: true,
-        throwOnInvalidObject: false,
-        updateMetadata: false,
-      });
-      const repaired = Buffer.from(await doc.save());
-      const result = await pdfParse(repaired);
-      console.info("[pdf-repair] structurally repaired PDF parsed successfully", {
-        filename: filename ?? null,
-        originalBytes: buffer.byteLength,
-        repairedBytes: repaired.byteLength,
-        pages: result.numpages,
-      });
-      return result;
+      const result = await attempt.run();
+      if (result.text.trim().length > 0 || (result.numpages ?? 0) > 0) {
+        console.info("[pdf-repair] fallback parser lane succeeded", {
+          lane: attempt.label,
+          filename: filename ?? null,
+          pages: result.numpages ?? null,
+          chars: result.text.length,
+        });
+        return result;
+      }
     } catch {
-      console.error("[pdf-repair] PDF unreadable even after structural repair", {
-        filename: filename ?? null,
-        sizeBytes: buffer.byteLength,
-        error: firstError instanceof Error ? firstError.message : String(firstError),
-      });
-      throw new Error(
-        `${filename ?? "This PDF"} could not be read — the file appears corrupted, password-protected, or uses an unsupported format. Re-download or re-export the PDF and upload it again.`
-      );
+      // next lane
     }
   }
+
+  console.error("[pdf-repair] PDF unreadable across all parser lanes", {
+    filename: filename ?? null,
+    sizeBytes: buffer.byteLength,
+    error: firstError instanceof Error ? firstError.message : String(firstError),
+  });
+  throw new Error(
+    `${filename ?? "This PDF"} could not be read — the file appears corrupted, password-protected, or uses an unsupported format. Re-download or re-export the PDF and upload it again.`
+  );
+}
+
+async function repairPdfBytes(buffer: Buffer): Promise<Buffer> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.load(buffer, {
+    ignoreEncryption: true,
+    throwOnInvalidObject: false,
+    updateMetadata: false,
+  });
+  return Buffer.from(await doc.save());
 }
 
 export async function extractPreviewDataFromBuffer(params: {
