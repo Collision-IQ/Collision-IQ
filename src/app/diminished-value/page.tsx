@@ -28,8 +28,12 @@ import { STANDARD_UPLOAD_ROUTE_MAX_BYTES } from "@/lib/uploadSafety/directUpload
 import {
   exportDemandLetterPdf,
   exportMarketValueReportPdf,
+  exportTotalLossDemandLetterPdf,
+  exportTotalLossReportPdf,
 } from "@/lib/dv/pdf/dvPdfBuilders";
 import type { DvExtraction, DvIntake, DvReportData, DvResult } from "@/lib/dv/types";
+
+type DvReportMode = "diminished_value" | "total_loss";
 
 type DvRequestView = {
   id: string;
@@ -128,6 +132,7 @@ function DiminishedValueFlow() {
   const { getToken, isLoaded, userId } = useAuth();
 
   const [step, setStep] = useState<WizardStep>("upload");
+  const [mode, setMode] = useState<DvReportMode>("diminished_value");
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [request, setRequest] = useState<DvRequestView | null>(null);
   const [intakeForm, setIntakeForm] = useState<IntakeForm>(EMPTY_INTAKE);
@@ -337,11 +342,13 @@ function DiminishedValueFlow() {
         throw new Error("Upload completed but no attachment id was returned.");
       }
 
-      setBusyLabel("Reading the estimate…");
+      setBusyLabel(
+        mode === "total_loss" ? "Reading the carrier's valuation…" : "Reading the estimate…"
+      );
       const dvRes = await fetch("/api/dv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attachmentId }),
+        body: JSON.stringify({ attachmentId, mode }),
       });
       const dvData = await dvRes.json().catch(() => null);
       if (!dvRes.ok) {
@@ -379,7 +386,11 @@ function DiminishedValueFlow() {
     if (!intakeForm.lossDate) missing.push("the date of loss (estimates often omit it)");
     if (!/^\d{5}$/.test(intakeForm.zip.trim())) missing.push("a 5-digit registered ZIP");
     if (!intakeForm.mileage || !(Number(intakeForm.mileage) > 0)) missing.push("the mileage");
-    if (!intakeForm.repairTotal || !(Number(intakeForm.repairTotal) > 0)) {
+    // A total loss has no repair total — the ACV is the product.
+    if (
+      mode === "diminished_value" &&
+      (!intakeForm.repairTotal || !(Number(intakeForm.repairTotal) > 0))
+    ) {
       missing.push("the repair total");
     }
     if (missing.length) {
@@ -394,6 +405,7 @@ function DiminishedValueFlow() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode,
           lossDate: intakeForm.lossDate,
           claimPosture: intakeForm.claimPosture,
           zip: intakeForm.zip,
@@ -536,12 +548,48 @@ function DiminishedValueFlow() {
         <div className="ci-card p-8">
           <div className="mb-4 flex items-center gap-3">
             <Upload className="h-5 w-5 text-[var(--accent)]" />
-            <h2 className="text-lg font-semibold">Upload your repair estimate</h2>
+            <h2 className="text-lg font-semibold">
+              {mode === "total_loss" ? "Upload the carrier's valuation report" : "Upload your repair estimate"}
+            </h2>
           </div>
+
+          {/* Two products, one flow: a repairable vehicle (diminished value)
+              or a totalled one (value dispute against the carrier's ACV). */}
+          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setMode("diminished_value")}
+              className={`rounded-xl border p-4 text-left transition ${
+                mode === "diminished_value"
+                  ? "border-[var(--accent)] bg-[var(--accent)]/10"
+                  : "border-border hover:border-[var(--accent)]"
+              }`}
+            >
+              <span className="block text-sm font-semibold">My car was repaired</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Diminished value — what the loss record costs you at resale.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("total_loss")}
+              className={`rounded-xl border p-4 text-left transition ${
+                mode === "total_loss"
+                  ? "border-[var(--accent)] bg-[var(--accent)]/10"
+                  : "border-border hover:border-[var(--accent)]"
+              }`}
+            >
+              <span className="block text-sm font-semibold">My car was totalled</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Value dispute — challenge the carrier&apos;s actual cash value offer.
+              </span>
+            </button>
+          </div>
+
           <p className="mb-5 text-sm text-muted-foreground">
-            Upload the estimate PDF from your repair shop or insurer (CCC ONE and similar formats
-            supported). The vehicle, VIN, mileage, insurer, claim number, and repair total are read
-            automatically — you confirm everything before anything is charged.
+            {mode === "total_loss"
+              ? "Upload the Market Valuation Report the carrier based its total-loss offer on (CCC ONE or Mitchell). We read its comparables, adjustments and value, then build an independent appraisal against it — including re-running the carrier's own comps at the industry mileage rate."
+              : "Upload the estimate PDF from your repair shop or insurer (CCC ONE and similar formats supported). The vehicle, VIN, mileage, insurer, claim number, and repair total are read automatically — you confirm everything before anything is charged."}
           </p>
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border px-6 py-12 text-center transition hover:border-[var(--accent)]">
             <FileText className="mb-3 h-8 w-8 text-muted-foreground" />
@@ -790,47 +838,86 @@ function DiminishedValueFlow() {
           <div className="ci-card p-8">
             <div className="mb-4 flex items-center gap-3">
               <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              <h2 className="text-lg font-semibold">Your diminished value package is ready</h2>
+              <h2 className="text-lg font-semibold">
+                {result.totalLoss
+                  ? "Your total-loss appraisal package is ready"
+                  : "Your diminished value package is ready"}
+              </h2>
             </div>
-            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <dt className="text-xs text-muted-foreground">Pre-loss ACV</dt>
-                <dd className="text-lg font-semibold">{usd(result.calculation.preLossAcv)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">
-                  Post-loss{result.calculation.postLoss.projected ? " (projected)" : ""}
-                </dt>
-                <dd className="text-lg font-semibold">{usd(result.calculation.postLoss.value)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Diminished value</dt>
-                <dd className="text-lg font-semibold">{usd(result.calculation.diminishedValue)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Total demand</dt>
-                <dd className="text-lg font-semibold text-[var(--accent)]">
-                  {usd(result.calculation.totalDemand)}
-                </dd>
-              </div>
-            </dl>
+            {result.totalLoss ? (
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Carrier&apos;s value (pre-tax)</dt>
+                  <dd className="text-lg font-semibold">
+                    {usd(result.totalLoss.carrier.adjustedVehicleValue ?? undefined)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Appraised ACV (pre-tax)</dt>
+                  <dd className="text-lg font-semibold">{usd(result.totalLoss.acv.preTaxAcv)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Shortfall</dt>
+                  <dd className="text-lg font-semibold">
+                    {usd(result.totalLoss.gap.shortfall ?? undefined)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Total demand</dt>
+                  <dd className="text-lg font-semibold text-[var(--accent)]">
+                    {usd(result.totalLoss.acv.demand)}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Pre-loss ACV</dt>
+                  <dd className="text-lg font-semibold">{usd(result.calculation.preLossAcv)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">
+                    Post-loss{result.calculation.postLoss.projected ? " (projected)" : ""}
+                  </dt>
+                  <dd className="text-lg font-semibold">{usd(result.calculation.postLoss.value)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Diminished value</dt>
+                  <dd className="text-lg font-semibold">{usd(result.calculation.diminishedValue)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Total demand</dt>
+                  <dd className="text-lg font-semibold text-[var(--accent)]">
+                    {usd(result.calculation.totalDemand)}
+                  </dd>
+                </div>
+              </dl>
+            )}
             <div className="mt-6 flex flex-wrap gap-3">
               <button
                 type="button"
                 className="ci-btn ci-btn-primary"
                 onClick={() => {
                   const data = reportData();
-                  if (data) void exportMarketValueReportPdf(data);
+                  if (!data) return;
+                  void (result.totalLoss
+                    ? exportTotalLossReportPdf(data)
+                    : exportMarketValueReportPdf(data));
                 }}
               >
-                Download Market Value Report (ACV)
+                {result.totalLoss
+                  ? "Download ACV Appraisal (Total Loss)"
+                  : "Download Market Value Report (ACV)"}
               </button>
               <button
                 type="button"
                 className="ci-btn ci-btn-primary"
                 onClick={() => {
                   const data = reportData();
-                  if (data) void exportDemandLetterPdf(data);
+                  if (!data) return;
+                  void (result.totalLoss
+                    ? exportTotalLossDemandLetterPdf(data)
+                    : exportDemandLetterPdf(data));
                 }}
               >
                 Download Demand Letter

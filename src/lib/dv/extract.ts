@@ -5,8 +5,9 @@
 import { extractEstimateFacts } from "@/lib/ai/extractors/extractEstimateFacts";
 import { parseEstimate } from "@/lib/ai/extractors/estimateExtractor";
 import { parseCccEstimateRows } from "@/lib/reports/estimateDeltaMatcher";
+import { parseCarrierValuation } from "./carrierValuation";
 import { buildFactsFromEstimate } from "@/lib/ai/extractors/buildFactsFromEstimate";
-import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
+import { findVin, readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import {
   buildVehicleLabel,
   decodeVinVehicleIdentity,
@@ -211,6 +212,83 @@ function readSeveritySignals(text: string): DvSeveritySignals {
         ? `${structuralRow.lineNumber != null ? `Line ${structuralRow.lineNumber}: ` : ""}${structuralRow.description.slice(0, 70)}`
         : undefined,
   };
+}
+
+/**
+ * Total-loss mode reads its intake from the CARRIER'S Market Valuation
+ * Report — the document being disputed — rather than a repair estimate. CCC
+ * prints owner, claim, VIN, year/make/model/trim and odometer with the label
+ * glued to the value ("Year2024", "Odometer2,371").
+ */
+export function buildTotalLossExtraction(params: {
+  text: string;
+  filename?: string;
+}): DvExtraction {
+  const text = params.text ?? "";
+  const carrier = parseCarrierValuation(text);
+  const labeled = (label: string, max = 48): string | undefined => {
+    const value = new RegExp(`${label}\\s*:?\\s*([^\\n]{1,${max}})`, "i").exec(text)?.[1]?.trim();
+    return value && value.length > 0 ? value : undefined;
+  };
+  // CCC prints the vehicle-detail fields as their own lines with the label
+  // glued to the value ("Year2024", "MakeBMW"). Anchor to line starts so
+  // body prose ("…mileage, and year)") cannot win the match.
+  const lineLabeled = (label: string, max = 48): string | undefined => {
+    const value = new RegExp(`^${label}\\s*:?\\s*([^\\n]{1,${max}})$`, "im")
+      .exec(text)?.[1]
+      ?.trim();
+    return value && value.length > 0 ? value : undefined;
+  };
+
+  const year = Number(/^Year\s*:?\s*((?:19|20)\d{2})\b/im.exec(text)?.[1]);
+  const vin = /\bVIN\s*:?\s*([A-HJ-NPR-Z0-9]{17})/i.exec(text)?.[1] ?? findVin(text) ?? undefined;
+  const decoded = vin ? decodeVinVehicleIdentity(vin) : undefined;
+  const make = lineLabeled("Make", 24) ?? decoded?.make;
+  const model = lineLabeled("Model", 32);
+  const trim = lineLabeled("Trim", 40);
+  const vehicle = {
+    year: Number.isFinite(year) && year > 1980 ? year : decoded?.year,
+    make,
+    model,
+    trim,
+    vin,
+    label: [Number.isFinite(year) ? year : decoded?.year, make, model, trim]
+      .filter(Boolean)
+      .join(" ") || undefined,
+  };
+
+  const zipFromLocation = /,\s*([A-Z]{2})\s+(\d{5})\b/.exec(labeled("Location", 60) ?? "");
+  const ownerZip = zipFromLocation?.[2] ?? extractOwnerBlockZip(text);
+
+  return {
+    vehicle,
+    mileage: carrier.odometer ?? undefined,
+    ownerName: labeled("\\bOwner", 48),
+    insurer: carrier.carrier || undefined,
+    claimNumber: carrier.claimRef || undefined,
+    roNumber: carrier.reportRef || undefined,
+    // A total loss has no repair total to demand against; the ACV is the
+    // product. Left undefined so the intake never asks for one.
+    repairTotal: undefined,
+    lossDate: normalizeLossDate(labeled("Loss Incident Date", 24) ?? labeled("Date of Loss", 24)),
+    ownerZip,
+    state: extractMarketPreviewState(text, ownerZip),
+    severity: {
+      structural: false,
+      airbag: false,
+      adasCalibration: false,
+    },
+    attachmentFilename: params.filename,
+  };
+}
+
+function normalizeLossDate(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const match = /(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/.exec(raw);
+  if (!match) return undefined;
+  let year = Number(match[3]);
+  if (year < 100) year += 2000;
+  return `${year}-${String(Number(match[1])).padStart(2, "0")}-${String(Number(match[2])).padStart(2, "0")}`;
 }
 
 export function buildDvExtraction(params: {

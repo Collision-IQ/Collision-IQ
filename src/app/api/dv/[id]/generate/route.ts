@@ -7,6 +7,13 @@ import { NextResponse } from "next/server";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
 import { runDvCompResearch } from "@/lib/dv/compSearch";
 import { computeDvCalculation } from "@/lib/dv/acvMath";
+import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import { parseCarrierValuation } from "@/lib/dv/carrierValuation";
+import {
+  buildTotalLossGap,
+  computeTotalLossAcv,
+  renderTotalLossLetterParagraphs,
+} from "@/lib/dv/totalLoss";
 import {
   claimDvRequestForProcessing,
   getDvRequest,
@@ -51,6 +58,23 @@ function buildOpenItems(params: {
     );
   }
   items.push("Enclose the CARFAX report, repair photos, and final invoice per the house packet format.");
+  return items;
+}
+
+function buildTotalLossOpenItems(totalLoss: DvResult["totalLoss"]): string[] {
+  const items = [
+    "Save each comparable listing to PDF now (links and inventory die fast) — they are Exhibits A1–A3 to this appraisal.",
+    "Enclose the carrier's own Market Valuation Report as an exhibit; the audit page cites it directly.",
+    "Confirm the loss date on this letter matches the carrier's report — CCC prints the REPORTED date beside the loss date and the two are often different.",
+  ];
+  if (totalLoss && totalLoss.carrier.comps.length === 0) {
+    items.push(
+      "The carrier's comparables could not be read from its report, so the 'carrier's own comps re-run' exhibit is omitted. Attach the report's comparable pages and re-run if that argument is wanted."
+    );
+  }
+  items.push(
+    "Sales tax, title and registration are excluded from this demand by design — they are added by the carrier on its settlement worksheet exactly as on the original offer."
+  );
   return items;
 }
 
@@ -101,9 +125,18 @@ export async function POST(
       { status: 422 }
     );
   }
-  if (typeof mileage !== "number" || typeof repairTotal !== "number") {
+  const mode = request.intake.mode ?? "diminished_value";
+  if (typeof mileage !== "number") {
     return NextResponse.json(
-      { error: "Mileage and repair total are required — confirm them on the intake step." },
+      { error: "Mileage is required — confirm it on the intake step." },
+      { status: 422 }
+    );
+  }
+  // A total loss has no repair total to demand against: the ACV is the
+  // product. Only the diminished-value packet needs one.
+  if (mode === "diminished_value" && typeof repairTotal !== "number") {
+    return NextResponse.json(
+      { error: "Repair total is required — confirm it on the intake step." },
       { status: 422 }
     );
   }
@@ -140,7 +173,7 @@ export async function POST(
       oneLossComps: compResearch.oneLoss,
       subjectMileage: mileage,
       taxRatePct: request.intake.taxRatePct,
-      repairTotal,
+      repairTotal: repairTotal ?? 0,
       severity: request.extraction?.severity ?? {
         structural: false,
         airbag: false,
@@ -150,14 +183,57 @@ export async function POST(
       carfaxPostLossValue: request.intake.carfaxPostLossValue,
     });
 
+    // ── Total-loss (value dispute) mode ──────────────────────────────────
+    let totalLoss: DvResult["totalLoss"];
+    if (mode === "total_loss") {
+      const [carrierAttachment] = await getUploadedAttachments(
+        [request.intake.carrierAttachmentId ?? request.attachmentId ?? ""],
+        { ownerUserId: request.userId }
+      );
+      const carrier = parseCarrierValuation(carrierAttachment?.text ?? "");
+      if (carrier.adjustedVehicleValue === null) {
+        const message =
+          "The carrier's valuation report could not be read well enough to reconcile against. Re-upload the CCC ONE or Mitchell Market Valuation Report the offer was based on.";
+        await markDvRequestFailed({ id, message });
+        return NextResponse.json({ error: message }, { status: 422 });
+      }
+
+      const acv = computeTotalLossAcv({
+        subjectOdometer: mileage,
+        comps: compResearch.clean,
+        taxRatePct: request.intake.taxRatePct,
+        appraisalFee: request.intake.appraisalFee,
+      });
+      const gap = buildTotalLossGap({ acv, carrier, subjectOdometer: mileage });
+      totalLoss = {
+        acv,
+        carrier,
+        gap,
+        letterParagraphs: renderTotalLossLetterParagraphs({
+          acv,
+          carrier,
+          gap,
+          vehicleLabel: vehicle.label ?? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+          lossDate: request.intake.lossDate,
+          carrierName:
+            request.intake.insurer ?? carrier.carrier ?? request.extraction?.insurer ?? "the carrier",
+        }),
+      };
+    }
+
     const result: DvResult = {
+      mode,
       compResearch,
       calculation,
-      openItems: buildOpenItems({
-        result: { compResearch, calculation },
-        lossDateProvided: Boolean(request.intake.lossDate),
-        claimPosture: request.intake.claimPosture,
-      }),
+      totalLoss,
+      openItems:
+        mode === "total_loss"
+          ? buildTotalLossOpenItems(totalLoss)
+          : buildOpenItems({
+              result: { compResearch, calculation },
+              lossDateProvided: Boolean(request.intake.lossDate),
+              claimPosture: request.intake.claimPosture,
+            }),
       generatedAt: new Date().toISOString(),
     };
 

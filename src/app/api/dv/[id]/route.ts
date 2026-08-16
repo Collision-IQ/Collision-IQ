@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
 import { getDvRequest, updateDvIntake } from "@/lib/dv/store";
-import type { DvClaimPosture, DvIntake } from "@/lib/dv/types";
+import { isDvReportMode, type DvClaimPosture, type DvIntake, type DvReportMode } from "@/lib/dv/types";
 
 export const runtime = "nodejs";
 
@@ -12,6 +12,8 @@ const CLAIM_POSTURES: readonly DvClaimPosture[] = ["third_party", "first_party",
 function parseIntake(body: unknown): { intake?: DvIntake; error?: string } {
   if (!body || typeof body !== "object") return { error: "Missing intake payload" };
   const raw = body as Record<string, unknown>;
+
+  const mode: DvReportMode = isDvReportMode(raw.mode) ? raw.mode : "diminished_value";
 
   const lossDate = typeof raw.lossDate === "string" ? raw.lossDate.trim() : "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(lossDate) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lossDate)) {
@@ -51,6 +53,7 @@ function parseIntake(body: unknown): { intake?: DvIntake; error?: string } {
 
   return {
     intake: {
+      mode,
       lossDate,
       claimPosture: claimPosture as DvClaimPosture,
       zip,

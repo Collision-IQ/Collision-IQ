@@ -8,7 +8,9 @@
 import { NextResponse } from "next/server";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
-import { buildDvExtraction } from "@/lib/dv/extract";
+import { buildDvExtraction, buildTotalLossExtraction } from "@/lib/dv/extract";
+import { parseCarrierValuation } from "@/lib/dv/carrierValuation";
+import { isDvReportMode, type DvReportMode } from "@/lib/dv/types";
 import { createDvRequest, listDvRequests } from "@/lib/dv/store";
 import { defaultTaxRatePctForState } from "@/lib/dv/salesTax";
 import { getValueIqFee } from "@/lib/dv/valueIqPrice";
@@ -26,8 +28,12 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const body = (await req.json().catch(() => null)) as { attachmentId?: string } | null;
+  const body = (await req.json().catch(() => null)) as {
+    attachmentId?: string;
+    mode?: string;
+  } | null;
   const attachmentId = body?.attachmentId?.trim();
+  const mode: DvReportMode = isDvReportMode(body?.mode) ? body.mode : "diminished_value";
   if (!attachmentId) {
     return NextResponse.json({ error: "Missing attachmentId" }, { status: 400 });
   }
@@ -48,10 +54,25 @@ export async function POST(req: Request) {
     );
   }
 
-  const extraction = buildDvExtraction({
-    text: attachment.text,
-    filename: attachment.filename,
-  });
+  if (mode === "total_loss") {
+    // The disputed document IS the upload. Refuse anything that is not a
+    // carrier valuation report rather than silently appraising an estimate.
+    const carrier = parseCarrierValuation(attachment.text);
+    if (carrier.vendor === "unknown" || carrier.adjustedVehicleValue === null) {
+      return NextResponse.json(
+        {
+          error:
+            "This does not read as a carrier Market Valuation Report. For a total-loss dispute, upload the CCC ONE or Mitchell valuation report the carrier based its offer on.",
+        },
+        { status: 422 }
+      );
+    }
+  }
+
+  const extraction =
+    mode === "total_loss"
+      ? buildTotalLossExtraction({ text: attachment.text, filename: attachment.filename })
+      : buildDvExtraction({ text: attachment.text, filename: attachment.filename });
 
   const request = await createDvRequest({
     userId: viewer.user.id,
@@ -63,6 +84,7 @@ export async function POST(req: Request) {
     request,
     viewer: { isPlatformAdmin: viewer.isPlatformAdmin },
     intakeDefaults: {
+      mode,
       lossDate: extraction.lossDate ?? "",
       zip: extraction.ownerZip ?? "",
       state: extraction.state ?? "",

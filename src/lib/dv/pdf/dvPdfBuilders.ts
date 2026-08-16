@@ -749,6 +749,420 @@ function finishDemandLetter(doc: jsPDF, y: number, claimant: string): Blob {
   return doc.output("blob");
 }
 
+// ── Total-loss (value dispute) documents ─────────────────────────────────────
+
+function moneyOrDash(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : usd(value);
+}
+
+export async function buildTotalLossReportBlob(data: DvReportData): Promise<Blob> {
+  const { extraction, intake, result } = data;
+  const tl = result.totalLoss;
+  if (!tl) throw new Error("This report has no total-loss result to render.");
+  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const logo = await loadLogoDataUrl(BRAND.logoPath);
+
+  // ── Page 1: the answer ──
+  let y = PAGE.top;
+  const logoBottom = drawLogo(doc, logo, PAGE.marginX, y);
+  doc.setFont("times", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text("Actual Cash Value Appraisal", PAGE.width / 2 + 18, y + 8, { align: "center" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text("Total-loss value dispute", PAGE.width / 2 + 18, y + 13, { align: "center" });
+  y = Math.max(logoBottom + 4, y + 22);
+
+  y = sectionHeading(doc, "Claim Information:", y);
+  const col2 = PAGE.marginX + CONTENT_WIDTH / 2;
+  labeledValue(doc, "Claim #:", intake.claimNumber ?? extraction.claimNumber ?? "—", PAGE.marginX, y, 26);
+  labeledValue(doc, "Vehicle Owner:", intake.ownerName ?? extraction.ownerName ?? "—", col2, y, 30);
+  y += 6;
+  labeledValue(doc, "Insurance:", intake.insurer ?? extraction.insurer ?? "—", PAGE.marginX, y, 26);
+  labeledValue(doc, "Date of Loss:", intake.lossDate || "—", col2, y, 30);
+  y += 6;
+  labeledValue(doc, "Vehicle:", extraction.vehicle.label ?? "—", PAGE.marginX, y, 26);
+  labeledValue(doc, "Odometer:", `${num(intake.mileage ?? extraction.mileage)} mi`, col2, y, 30);
+  y += 6;
+  labeledValue(doc, "VIN #:", extraction.vehicle.vin ?? "—", PAGE.marginX, y, 26);
+  labeledValue(doc, `${tl.gap.vendor} report:`, tl.carrier.reportRef || "—", col2, y, 30);
+  y += 10;
+
+  // Headline: carrier value → appraised ACV = shortfall
+  y = sectionHeading(doc, "Valuation Summary:", y);
+  const summaryRow = (label: string, value: string, bold = false, accent = false) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(10.5);
+    doc.setTextColor(...(accent ? ACCENT : INK));
+    doc.text(label, PAGE.marginX, y);
+    doc.text(value, PAGE.width - PAGE.marginX, y, { align: "right" });
+    y += 6;
+  };
+  summaryRow(
+    `Carrier's value (pre-tax) — ${tl.gap.vendor} report`,
+    moneyOrDash(tl.carrier.adjustedVehicleValue)
+  );
+  summaryRow(
+    `Appraised ACV (pre-tax) — ${tl.acv.adjustments.length} dealer comps, mileage-adjusted`,
+    usd(tl.acv.preTaxAcv)
+  );
+  summaryRow("Shortfall", moneyOrDash(tl.gap.shortfall), true, true);
+  y += 1;
+  y = paragraph(
+    doc,
+    `Amount demanded: appraised ACV ${usd(tl.acv.preTaxAcv)} + appraisal fee ${usd(tl.acv.appraisalFee)} = ` +
+      `${usd(tl.acv.demand)}. Sales tax and title/registration fees are to be added on the carrier's settlement ` +
+      `worksheet exactly as on the original offer` +
+      (tl.gap.shortfallPct !== null
+        ? ` — the carrier's value is ${(Math.abs(tl.gap.shortfallPct) * 100).toFixed(1)}% below this appraisal.`
+        : "."),
+    y,
+    { bold: true, size: 10 }
+  );
+
+  // Gap table
+  y = ensureSpace(doc, y + 2, 60);
+  y = sectionHeading(doc, "Carrier vs. appraisal, line by line (pre-tax):", y);
+  // Three right-aligned money columns, 32mm apart so nothing collides; the
+  // label wraps inside whatever is left.
+  const colDifference = PAGE.width - PAGE.marginX;
+  const colOurs = colDifference - 32;
+  const colCarrier = colOurs - 32;
+  const labelWidth = colCarrier - PAGE.marginX - 30;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...MUTED);
+  doc.text("COMPONENT", PAGE.marginX, y);
+  doc.text("CARRIER", colCarrier, y, { align: "right" });
+  doc.text("APPRAISAL", colOurs, y, { align: "right" });
+  doc.text("DIFFERENCE", colDifference, y, { align: "right" });
+  y += 3.6;
+  doc.setDrawColor(...RULE);
+  doc.line(PAGE.marginX, y, PAGE.width - PAGE.marginX, y);
+  y += 4;
+
+  for (const row of tl.gap.rows) {
+    y = ensureSpace(doc, y, 12);
+    doc.setFont("helvetica", row.total ? "bold" : "normal");
+    doc.setFontSize(8.6);
+    doc.setTextColor(...INK);
+    const labelLines = doc.splitTextToSize(row.label, labelWidth);
+    doc.text(labelLines, PAGE.marginX, y);
+    doc.text(moneyOrDash(row.carrier), colCarrier, y, { align: "right" });
+    doc.text(moneyOrDash(row.ours), colOurs, y, { align: "right" });
+    doc.text(moneyOrDash(row.difference), colDifference, y, { align: "right" });
+    y += labelLines.length * 3.6;
+    if (row.note) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.2);
+      doc.setTextColor(...MUTED);
+      const noteLines = doc.splitTextToSize(row.note, labelWidth);
+      doc.text(noteLines.slice(0, 2), PAGE.marginX, y);
+      y += Math.min(noteLines.length, 2) * 3.1;
+    }
+    y += 1.6;
+  }
+
+  // ── Page 2: our comparables & ledger ──
+  doc.addPage();
+  y = PAGE.top;
+  const p2Logo = drawLogo(doc, logo, PAGE.marginX, y);
+  doc.setFont("times", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text("Comparables & Adjustment Ledger", PAGE.width / 2 + 18, y + 8, { align: "center" });
+  y = Math.max(p2Logo + 4, y + 20);
+
+  y = sectionHeading(doc, "Dealer comparables (same year, model & trim):", y);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...MUTED);
+  doc.text("#  DEALER / SOURCE", PAGE.marginX, y);
+  doc.text("ASKING", PAGE.marginX + 96, y, { align: "right" });
+  doc.text("MILEAGE", PAGE.marginX + 122, y, { align: "right" });
+  doc.text("ADJ @ $0.07", PAGE.marginX + 152, y, { align: "right" });
+  doc.text("ADJUSTED", PAGE.width - PAGE.marginX, y, { align: "right" });
+  y += 3.6;
+  doc.line(PAGE.marginX, y, PAGE.width - PAGE.marginX, y);
+  y += 4;
+  for (const [index, entry] of tl.acv.adjustments.entries()) {
+    y = ensureSpace(doc, y, 10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.4);
+    doc.setTextColor(...INK);
+    const name = `${index + 1}  ${entry.comp.dealer ?? entry.comp.source}`;
+    doc.text(doc.splitTextToSize(name, 92)[0] ?? name, PAGE.marginX, y);
+    doc.text(usd(entry.comp.askingPrice), PAGE.marginX + 96, y, { align: "right" });
+    doc.text(num(entry.comp.mileage), PAGE.marginX + 122, y, { align: "right" });
+    doc.text(signed(entry.adjustment), PAGE.marginX + 152, y, { align: "right" });
+    doc.text(usd(entry.adjustedValue), PAGE.width - PAGE.marginX, y, { align: "right" });
+    y += 4;
+    if (entry.comp.vin) {
+      doc.setFontSize(7);
+      doc.setTextColor(...MUTED);
+      doc.text(`VIN ${entry.comp.vin} · ${entry.comp.source} · ${entry.comp.dateAccessed}`, PAGE.marginX + 5, y);
+      y += 3.6;
+    }
+  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...INK);
+  doc.text("Average of adjusted comps", PAGE.marginX, y + 1);
+  doc.text(usd(tl.acv.compAdjustedAverage), PAGE.width - PAGE.marginX, y + 1, { align: "right" });
+  y += 8;
+
+  y = sectionHeading(doc, "Adjustment ledger — asking prices to ACV:", y);
+  const ledgerRow = (step: string, amount: string, running: string, bold = false) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...INK);
+    doc.text(step, PAGE.marginX, y);
+    doc.text(amount, PAGE.width - PAGE.marginX - 34, y, { align: "right" });
+    doc.text(running, PAGE.width - PAGE.marginX, y, { align: "right" });
+    y += 5.4;
+  };
+  ledgerRow(
+    `Average asking, ${tl.acv.adjustments.length} comps`,
+    usd(tl.acv.compListAverage),
+    usd(tl.acv.compListAverage)
+  );
+  ledgerRow(
+    "Mileage adjustment (average)",
+    signed(tl.acv.mileageAdjustmentAverage),
+    usd(tl.acv.compAdjustedAverage)
+  );
+  if (tl.acv.conditionAdjustment !== 0) {
+    ledgerRow("Condition", signed(tl.acv.conditionAdjustment), usd(tl.acv.preTaxAcv));
+  }
+  ledgerRow("Pre-loss Actual Cash Value (pre-tax)", "", usd(tl.acv.preTaxAcv), true);
+  ledgerRow(
+    `Sales tax ${tl.acv.taxRatePct}% (carrier worksheet — reference only)`,
+    signed(tl.acv.tax),
+    usd(tl.acv.acvWithTax)
+  );
+
+  // ── Page 3: audit of the carrier's valuation ──
+  doc.addPage();
+  y = PAGE.top;
+  const p3Logo = drawLogo(doc, logo, PAGE.marginX, y);
+  doc.setFont("times", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text(`Audit of the ${tl.gap.vendor} Valuation`, PAGE.width / 2 + 18, y + 8, { align: "center" });
+  y = Math.max(p3Logo + 4, y + 20);
+
+  y = sectionHeading(
+    doc,
+    `How the carrier reached ${moneyOrDash(tl.carrier.adjustedVehicleValue)}:`,
+    y
+  );
+  const auditRow = (label: string, value: string) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...INK);
+    doc.text(label, PAGE.marginX, y);
+    doc.text(value, PAGE.width - PAGE.marginX, y, { align: "right" });
+    y += 5.4;
+  };
+  auditRow("Base Vehicle Value", moneyOrDash(tl.carrier.baseVehicleValue));
+  if (tl.carrier.statewideValue !== null) {
+    auditRow("Statewide Value (an index, not a vehicle for sale)", moneyOrDash(tl.carrier.statewideValue));
+  }
+  if (tl.carrier.blendedValuation !== null) {
+    auditRow(`${tl.gap.vendor} Valuation (average of the two above)`, moneyOrDash(tl.carrier.blendedValuation));
+  }
+  if (tl.carrier.conditionAdjustment !== null) {
+    auditRow("Condition adjustment", moneyOrDash(tl.carrier.conditionAdjustment));
+  }
+  if (tl.carrier.dateOfLossAllowance !== null) {
+    auditRow("Date-of-loss allowance (accepted, not disputed)", moneyOrDash(tl.carrier.dateOfLossAllowance));
+  }
+  auditRow("Adjusted Vehicle Value (pre-tax)", moneyOrDash(tl.carrier.adjustedVehicleValue));
+  auditRow(
+    "Tax / fees / total",
+    `${moneyOrDash(tl.carrier.tax)} / ${moneyOrDash(tl.carrier.fees)} / ${moneyOrDash(tl.carrier.total)}`
+  );
+  y += 3;
+
+  if (tl.gap.carrierReadjusted.length > 0) {
+    y = ensureSpace(doc, y, 40);
+    y = sectionHeading(doc, "The carrier's own comparables, re-run at $0.07/mi:", y);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...MUTED);
+    doc.text("#  DEALER", PAGE.marginX, y);
+    doc.text("ODOMETER", PAGE.marginX + 86, y, { align: "right" });
+    doc.text("LIST", PAGE.marginX + 112, y, { align: "right" });
+    doc.text('CARRIER "ADJ"', PAGE.marginX + 146, y, { align: "right" });
+    doc.text("RE-ADJUSTED", PAGE.width - PAGE.marginX, y, { align: "right" });
+    y += 3.6;
+    doc.line(PAGE.marginX, y, PAGE.width - PAGE.marginX, y);
+    y += 4;
+    for (const row of tl.gap.carrierReadjusted) {
+      y = ensureSpace(doc, y, 8);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.4);
+      doc.setTextColor(...INK);
+      doc.text(`${row.n}  ${doc.splitTextToSize(row.dealer, 78)[0] ?? row.dealer}`, PAGE.marginX, y);
+      doc.text(num(row.odometer), PAGE.marginX + 86, y, { align: "right" });
+      doc.text(usd(row.list), PAGE.marginX + 112, y, { align: "right" });
+      doc.text(moneyOrDash(row.carrierAdjusted), PAGE.marginX + 146, y, { align: "right" });
+      doc.text(usd(row.readjusted), PAGE.width - PAGE.marginX, y, { align: "right" });
+      y += 4.4;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.6);
+    doc.text("Average", PAGE.marginX, y + 1);
+    doc.text(moneyOrDash(tl.gap.carrierListAverage), PAGE.marginX + 112, y + 1, { align: "right" });
+    doc.text(moneyOrDash(tl.gap.carrierAdjustedAverage), PAGE.marginX + 146, y + 1, { align: "right" });
+    doc.text(moneyOrDash(tl.gap.carrierReadjustedAverage), PAGE.width - PAGE.marginX, y + 1, {
+      align: "right",
+    });
+    y += 8;
+    y = paragraph(
+      doc,
+      `Every comparable in the carrier's report is re-run above with a conventional mileage adjustment to the ` +
+        `subject and no other change. The carrier's own comparables support ` +
+        `${moneyOrDash(tl.gap.carrierReadjustedAverage)} — ` +
+        `${moneyOrDash(
+          tl.gap.carrierReadjustedAverage !== null && tl.carrier.baseVehicleValue !== null
+            ? Math.round((tl.gap.carrierReadjustedAverage - tl.carrier.baseVehicleValue) * 100) / 100
+            : null
+        )} above the Base Vehicle Value its settlement was built on.`,
+      y,
+      { size: 8.6 }
+    );
+  }
+
+  // ── Page 4: enclosures, open items, disclaimer ──
+  doc.addPage();
+  y = PAGE.top;
+  const p4Logo = drawLogo(doc, logo, PAGE.marginX, y);
+  doc.setFont("times", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text("Sources & Open Items", PAGE.width / 2 + 18, y + 8, { align: "center" });
+  y = Math.max(p4Logo + 4, y + 20);
+
+  const linked = result.compResearch.clean.filter((comp) => comp.url);
+  if (linked.length) {
+    y = sectionHeading(doc, "Comparable listing links (for independent review):", y);
+    for (const [index, comp] of linked.entries()) {
+      y = ensureSpace(doc, y, 10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.2);
+      doc.setTextColor(...INK);
+      doc.text(
+        pdfSafe(`Comp ${index + 1} — ${comp.source} · ${usd(comp.askingPrice)}${comp.vin ? ` · VIN ${comp.vin}` : ""}`),
+        PAGE.marginX,
+        y
+      );
+      y += 3.6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.4);
+      doc.setTextColor(60, 90, 170);
+      const shown = comp.url!.length > 118 ? `${comp.url!.slice(0, 115)}...` : comp.url!;
+      doc.textWithLink(shown, PAGE.marginX, y, { url: listingHref(comp.url!) });
+      y += 4.6;
+    }
+  }
+
+  y = ensureSpace(doc, y + 2, 40);
+  y = sectionHeading(doc, "Open items before submission:", y);
+  for (const item of result.openItems) {
+    y = ensureSpace(doc, y, 12);
+    y = paragraph(doc, `• ${item}`, y, { size: 9 });
+  }
+
+  y = ensureSpace(doc, y + 4, 34);
+  const closingBadge = logo ? drawLogo(doc, logo, PAGE.marginX, y, 16) : y;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text(
+    pdfSafe(
+      `Prepared through Collision iQ, a ${BRAND.companyName} service, on ${result.generatedAt.slice(0, 10)}.`
+    ),
+    logo ? PAGE.marginX + 20 : PAGE.marginX,
+    y + 6
+  );
+  y = Math.max(closingBadge, y + 10) + 2;
+  drawDisclaimer(doc, y);
+
+  return markLinksOpenInNewWindow(doc.output("blob"));
+}
+
+export async function buildTotalLossDemandLetterBlob(data: DvReportData): Promise<Blob> {
+  const { extraction, intake, result } = data;
+  const tl = result.totalLoss;
+  if (!tl) throw new Error("This report has no total-loss result to render.");
+  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const logo = await loadLogoDataUrl(BRAND.logoPath);
+
+  const claimant = intake.ownerName ?? extraction.ownerName ?? "Vehicle Owner";
+  const insurer = intake.insurer ?? extraction.insurer ?? tl.carrier.carrier ?? "Insurance Carrier";
+
+  let y = PAGE.top + 4;
+  if (logo) {
+    try {
+      const props = doc.getImageProperties(logo);
+      const width = 22;
+      const height = (props.height / props.width) * width;
+      doc.addImage(logo, "PNG", PAGE.width - PAGE.marginX - width, y, width, height);
+      y = Math.max(y + height + 4, y + 24);
+    } catch {
+      y += 24;
+    }
+  } else {
+    y += 24;
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  doc.setTextColor(...INK);
+  doc.text("Enclosure:  Total loss value dispute — independent ACV appraisal", PAGE.marginX, y);
+  y += 5.4;
+  doc.text(insurer, PAGE.marginX, y);
+  y += 5.4;
+  doc.text(extraction.vehicle.label ?? "the insured vehicle", PAGE.marginX, y);
+  y += 10;
+
+  const blockX = PAGE.marginX + 24;
+  doc.setFont("times", "normal");
+  doc.text("Claim #:", blockX, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(intake.claimNumber ?? extraction.claimNumber ?? "—", blockX + 30, y);
+  y += 5.6;
+  doc.text("Loss Date:", blockX, y);
+  doc.text(intake.lossDate || "—", blockX + 30, y);
+  y += 5.6;
+  doc.text("Claimant:", blockX, y);
+  doc.text(claimant, blockX + 30, y);
+  y += 11;
+
+  y = paragraph(doc, "To whom it may concern;", y);
+  y += 1;
+  for (const [index, text] of tl.letterParagraphs.entries()) {
+    y = ensureSpace(doc, y, 26);
+    // The demand paragraph (last) carries the money and is set bold.
+    y = paragraph(doc, text, y, { bold: index === tl.letterParagraphs.length - 1 });
+  }
+
+  return finishDemandLetter(doc, y, claimant);
+}
+
+export async function exportTotalLossReportPdf(data: DvReportData) {
+  const blob = await buildTotalLossReportBlob(data);
+  await deliverBlob(blob, `${filenameStem(data)}_ACV_Appraisal_Total_Loss.pdf`);
+}
+
+export async function exportTotalLossDemandLetterPdf(data: DvReportData) {
+  const blob = await buildTotalLossDemandLetterBlob(data);
+  await deliverBlob(blob, `${filenameStem(data)}_Total_Loss_Demand_Letter.pdf`);
+}
+
 // ── Delivery ─────────────────────────────────────────────────────────────────
 
 async function deliverBlob(blob: Blob, filename: string) {

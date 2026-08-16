@@ -67,9 +67,24 @@ export type DvExtraction = {
 
 export type DvClaimPosture = "third_party" | "first_party" | "unsure";
 
+/** Value IQ produces two report pairs: a diminished-value packet (repairable
+ *  vehicle) and a total-loss value-dispute packet (carrier declared it a
+ *  total loss and its valuation is being challenged). */
+export type DvReportMode = "diminished_value" | "total_loss";
+
+export const DV_REPORT_MODES: readonly DvReportMode[] = ["diminished_value", "total_loss"];
+
+export function isDvReportMode(value: unknown): value is DvReportMode {
+  return typeof value === "string" && (DV_REPORT_MODES as readonly string[]).includes(value);
+}
+
 /** Owner-confirmed intake. Extracted values are prefilled and editable;
  *  nothing generates until the owner has confirmed them. */
 export type DvIntake = {
+  /** Absent on requests created before total-loss mode shipped → DV. */
+  mode?: DvReportMode;
+  /** Total-loss mode: the uploaded carrier Market Valuation Report. */
+  carrierAttachmentId?: string;
   lossDate: string;
   claimPosture: DvClaimPosture;
   zip: string;
@@ -196,9 +211,22 @@ export type DvCalculation = {
   crossCheck17c: DvCrossCheck17c;
 };
 
+/** Total-loss mode payload: our appraisal, the parsed carrier valuation, the
+ *  gap analysis, and the letter body. Absent in diminished-value mode. */
+export type DvTotalLossResult = {
+  acv: import("./totalLoss").TotalLossAcv;
+  carrier: import("./carrierValuation").CarrierValuation;
+  gap: import("./totalLoss").TotalLossGap;
+  letterParagraphs: string[];
+};
+
 export type DvResult = {
+  mode?: DvReportMode;
   compResearch: DvCompResearch;
+  /** Diminished-value mode only. */
   calculation: DvCalculation;
+  /** Total-loss mode only. */
+  totalLoss?: DvTotalLossResult;
   openItems: string[];
   generatedAt: string;
 };
