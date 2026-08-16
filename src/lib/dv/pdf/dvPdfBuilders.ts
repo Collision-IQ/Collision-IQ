@@ -380,12 +380,57 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     `Post-loss value${calc.postLoss.projected ? " (PROJECTED)" : ""}`,
     usd(calc.postLoss.value)
   );
-  dvRow("Diminished value", usd(calc.diminishedValue), true);
+  if (calc.marketDv !== null && calc.marketDv !== undefined) {
+    dvRow("Market Method DV (ACV − post-loss value)", usd(calc.marketDv));
+  }
+  if (calc.repairCost) {
+    dvRow("Repair-Cost Method DV", usd(calc.repairCost.repairCostDv));
+  }
+  dvRow("Reconciled diminished value", usd(calc.diminishedValue), true);
   dvRow("Appraisal fee (additional indirect loss)", usd(calc.appraisalFee));
   dvRow("Total demand", usd(calc.totalDemand), true, true);
   y += 2;
 
   y = paragraph(doc, `Post-loss method: ${calc.postLoss.rationale}`, y, { size: 9 });
+
+  // Repair-Cost DV analysis — the second method, stated on the face of the
+  // report so it can be defended (owner's schedule).
+  if (calc.repairCost) {
+    const rc = calc.repairCost;
+    y = ensureSpace(doc, y + 2, 46);
+    y = sectionHeading(doc, `Repair-Cost Diminished Value Analysis (${rc.scheduleLabel}):`, y);
+    const adderText = Object.entries(rc.adders)
+      .map(([name, value]) => `+ ${(value * 100).toFixed(0)}% ${name}`)
+      .join(", ");
+    y = paragraph(
+      doc,
+      `Damage Severity Ratio (gross repair cost ÷ pre-loss ACV): ${(rc.dsr * 100).toFixed(2)}%. ` +
+        `Base factor from DSR tier: ${(rc.baseFactor * 100).toFixed(0)}%${adderText ? `, ${adderText}` : ""}. ` +
+        `Applied factor: ${(rc.appliedFactor * 100).toFixed(0)}%. ` +
+        `Repair-Cost Method DV: ${usd(intake.repairTotal ?? extraction.repairTotal)} × ${(rc.appliedFactor * 100).toFixed(0)}% = ${usd(rc.repairCostDv)}.`,
+      y,
+      { size: 9 }
+    );
+    if (calc.marketDv !== null && calc.marketDv !== undefined) {
+      y = paragraph(
+        doc,
+        `Market Method DV (pre-loss ACV − post-loss value): ${usd(calc.marketDv)}. ` +
+          `Variance between methods: ${usd(Math.abs(calc.marketDv - rc.repairCostDv))}. ` +
+          `Reconciled (${calc.reconciliationUsed}): ${usd(calc.diminishedValue)} — ` +
+          `${((calc.diminishedValue / calc.preLossAcv) * 100).toFixed(2)}% of pre-loss ACV.`,
+        y,
+        { size: 9 }
+      );
+    } else {
+      y = paragraph(
+        doc,
+        `No market post-loss value in the packet — the Repair-Cost Method controls (${calc.reconciliationUsed}). ` +
+          `Reconciled DV: ${usd(calc.diminishedValue)} — ${((calc.diminishedValue / calc.preLossAcv) * 100).toFixed(2)}% of pre-loss ACV.`,
+        y,
+        { size: 9 }
+      );
+    }
+  }
   y = paragraph(
     doc,
     `Repair severity: ${usd(intake.repairTotal ?? extraction.repairTotal)} of repairs equals ` +
@@ -559,16 +604,109 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
     y
   );
 
-  const projectedNote = calc.postLoss.projected
-    ? " The post-loss figure is a documented market projection pending the CarFax History-Based Value for this VIN; a revised appraisal will follow once the loss record posts."
-    : "";
+  // Attorney-style demand (owner's repair_cost_dv module prose, first-person
+  // owner voice). The figure is anchored to the carrier's own estimate and,
+  // when market data exists, independently corroborated by it. Results stored
+  // before the Repair-Cost method shipped have no repairCost block — those
+  // keep the original single-paragraph demand.
+  const rc = calc.repairCost;
+  const grossRepair = intake.repairTotal ?? extraction.repairTotal ?? 0;
+  if (!rc) {
+    y = paragraph(
+      doc,
+      `I hereby request reimbursement for my vehicle's diminished value in the amount of ${usd(calc.totalDemand)} ` +
+        `(ACV amount ${usd(calc.preLossAcv)} − post-loss value ${usd(calc.postLoss.value)} = ${usd(calc.diminishedValue)} ` +
+        `+ ${usd(calc.appraisalFee)} appraisal fee = ${usd(calc.totalDemand)}; the appraisal fee is included as it is an ` +
+        `additional indirect loss I had to endure due to the actions of ${atFaultParty}).`,
+      y,
+      { bold: true }
+    );
+    return finishDemandLetter(doc, y, claimant);
+  }
+  const estimateRef = [insurer, intake.claimNumber ?? extraction.claimNumber]
+    .filter(Boolean)
+    .join(" claim ");
+
   y = paragraph(
     doc,
-    `I hereby request reimbursement for my vehicle's diminished value in the amount of ${usd(calc.totalDemand)} ` +
-      `(ACV amount ${usd(calc.preLossAcv)} − post-loss value ${usd(calc.postLoss.value)} = ${usd(calc.diminishedValue)} ` +
-      `+ ${usd(calc.appraisalFee)} appraisal fee = ${usd(calc.totalDemand)}; the appraisal fee is included as it is an ` +
-      `additional indirect loss I had to endure due to the actions of ${atFaultParty}).` +
-      projectedNote,
+    `The diminished value figure demanded herein is not an estimate pulled from the air. It is anchored to the ` +
+      `repair estimate on this claim (${estimateRef}), which fixes the gross cost of returning my vehicle to ` +
+      `pre-loss condition at ${usd(grossRepair)}. Measured against a pre-loss actual cash value of ` +
+      `${usd(calc.preLossAcv)}, that repair bill represents a Damage Severity Ratio of ${(rc.dsr * 100).toFixed(1)}% ` +
+      `of my vehicle's entire worth.`,
+    y
+  );
+
+  const characterDetails: string[] = [];
+  if (extraction.severity.totalLaborHours) {
+    characterDetails.push(`${extraction.severity.totalLaborHours.toFixed(1)} labor hours`);
+  }
+  if (extraction.severity.structural) {
+    characterDetails.push(
+      `repair to a component documented as structural (${extraction.severity.structuralLineRef ?? "see estimate"})`
+    );
+  }
+  if ((extraction.severity.repairedOuterPanels ?? 0) > 0) {
+    characterDetails.push(
+      `${extraction.severity.repairedOuterPanels} outer body panel(s) repaired rather than replaced (${extraction.severity.repairedPanelRefs ?? "see estimate"})`
+    );
+  }
+  if (extraction.severity.airbag) {
+    characterDetails.push("airbag system repair");
+  }
+  if (extraction.severity.aftermarketParts) {
+    characterDetails.push("the use of non-OEM aftermarket crash parts");
+  }
+  if (characterDetails.length > 0) {
+    y = paragraph(
+      doc,
+      `The character of that repair matters as much as its price. The estimate documents ` +
+        characterDetails.join("; ") +
+        `. Every one of these facts is discoverable by any prospective purchaser, any dealer appraiser, and any ` +
+        `lender who runs this VIN, and every one of them drives the resale price down.`,
+      y
+    );
+  }
+
+  const adderClauses = Object.entries(rc.adders)
+    .map(([name, value]) => `, plus ${(value * 100).toFixed(0)}% for ${name}`)
+    .join("");
+  y = paragraph(
+    doc,
+    `Applying the Repair-Cost Method — gross repair cost of ${usd(grossRepair)} multiplied by an applied factor ` +
+      `of ${(rc.appliedFactor * 100).toFixed(0)}% (a base factor of ${(rc.baseFactor * 100).toFixed(0)}% for the ` +
+      `${(rc.dsr * 100).toFixed(1)}% severity tier${adderClauses}) — yields a repair-cost diminished value of ` +
+      `${usd(rc.repairCostDv)}.`,
+    y
+  );
+
+  if (calc.marketDv !== null && calc.marketDv !== undefined) {
+    y = paragraph(
+      doc,
+      `That figure is independently corroborated by the market. The post-loss value for my vehicle is ` +
+        `${usd(calc.postLoss.value)}. Subtracted from the pre-loss ACV of ${usd(calc.preLossAcv)}, the market ` +
+        `itself reports a loss of ${usd(calc.marketDv)}. Two methods, two independent data sources, arriving ` +
+        `within ${usd(Math.abs(calc.marketDv - rc.repairCostDv))} of one another. Reconciling the two ` +
+        `(${calc.reconciliationUsed}), the diminished value is ${usd(calc.diminishedValue)} — ` +
+        `${((calc.diminishedValue / calc.preLossAcv) * 100).toFixed(1)}% of my vehicle's pre-loss value.`,
+      y,
+      { bold: true }
+    );
+  } else {
+    y = paragraph(
+      doc,
+      `In the absence of a published history-based value for this VIN, the Repair-Cost Method controls, and the ` +
+        `diminished value is ${usd(calc.diminishedValue)} — ` +
+        `${((calc.diminishedValue / calc.preLossAcv) * 100).toFixed(1)}% of my vehicle's pre-loss value.`,
+      y,
+      { bold: true }
+    );
+  }
+
+  y = paragraph(
+    doc,
+    `Adding the ${usd(calc.appraisalFee)} appraisal fee — an indirect loss I incurred solely because of the ` +
+      `actions of ${atFaultParty} — the total amount demanded is ${usd(calc.totalDemand)}.`,
     y,
     { bold: true }
   );
@@ -579,6 +717,12 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
     y
   );
 
+  return finishDemandLetter(doc, y, claimant);
+}
+
+/** Shared letter closing: 15-day terms, claimant signature, disclaimer. */
+function finishDemandLetter(doc: jsPDF, y: number, claimant: string): Blob {
+  y = ensureSpace(doc, y, 50);
   y = paragraph(
     doc,
     "Please send payment within 15 days of receipt of this notice. The claim should be easy to resolve, and I look " +

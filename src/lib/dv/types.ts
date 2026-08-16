@@ -38,6 +38,14 @@ export type DvSeveritySignals = {
   airbag: boolean;
   adasCalibration: boolean;
   pointOfImpact?: string;
+  /** Repair-Cost DV method inputs (Collision Academy Repair-Cost Schedule):
+   *  outer panels REPAIRED (not replaced), aftermarket parts, labor hours,
+   *  and line references for the narrative. Absent on older extractions. */
+  repairedOuterPanels?: number;
+  repairedPanelRefs?: string;
+  aftermarketParts?: boolean;
+  totalLaborHours?: number;
+  structuralLineRef?: string;
 };
 
 /** Facts read off the uploaded estimate. Absent fields stay absent — the
@@ -135,7 +143,21 @@ export type DvCompResearch = {
   failureReason?: string;
 };
 
-export type DvPostLossMethod = "carfax_hbv" | "one_loss_comps" | "projected_stigma";
+export type DvPostLossMethod =
+  | "carfax_hbv"
+  | "one_loss_comps"
+  | "projected_stigma"
+  | "repair_cost_derived";
+
+/** Repair-Cost DV method figures (Collision Academy Repair-Cost Schedule). */
+export type DvRepairCostMethod = {
+  dsr: number;
+  baseFactor: number;
+  adders: Record<string, number>;
+  appliedFactor: number;
+  repairCostDv: number;
+  scheduleLabel: string;
+};
 
 export type DvCrossCheck17c = {
   baseCapPct: number;
@@ -161,6 +183,13 @@ export type DvCalculation = {
     rationale: string;
   };
   severityRatioPct: number;
+  /** Second method: repair-cost DV per the schedule. Always computed. */
+  repairCost: DvRepairCostMethod;
+  /** Market method DV (pre-loss − market post-loss); null when no CarFax or
+   *  usable 1-loss set exists and the repair-cost method controls alone. */
+  marketDv: number | null;
+  reconciliationUsed: string;
+  /** The reconciled figure — this IS the demanded diminished value. */
   diminishedValue: number;
   appraisalFee: number;
   totalDemand: number;

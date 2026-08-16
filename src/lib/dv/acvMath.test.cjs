@@ -84,7 +84,7 @@ run("RO 22210: per-comp $0.07/mile adjustments match the pilot worksheet", () =>
   assert.equal(fredBeans.adjustedValue, 38938.66);
 });
 
-run("RO 22210: full projected-stigma calculation reproduces the pilot report", () => {
+run("RO 22210: ACV math holds; no market data -> Repair-Cost Method controls", () => {
   const calc = computeDvCalculation({
     cleanComps: [comp(38498, 4961), comp(36791, 1616), comp(38985, 833)],
     oneLossComps: [],
@@ -95,24 +95,66 @@ run("RO 22210: full projected-stigma calculation reproduces the pilot report", (
     appraisalFee: 350,
   });
 
+  // The comp-side worksheet math is unchanged from the pilot.
   assert.equal(calc.averageAdjusted, 38159.58);
   assert.equal(calc.taxAmount, 2289.58);
   assert.equal(calc.preLossAcv, 40449.16);
-  assert.equal(calc.postLoss.method, "projected_stigma");
+  // No CarFax and no 1-loss set: the Repair-Cost Method controls (it replaced
+  // the projected-stigma stopgap). DSR 28.03% -> base 35%, no adders.
+  assert.equal(calc.postLoss.method, "repair_cost_derived");
   assert.equal(calc.postLoss.projected, true);
-  assert.equal(calc.postLoss.stigmaPct, 6);
-  assert.equal(calc.postLoss.value, 38022.21);
-  assert.equal(calc.diminishedValue, 2426.95);
-  assert.equal(calc.totalDemand, 2776.95);
+  assert.equal(calc.repairCost.baseFactor, 0.35);
+  assert.equal(calc.repairCost.appliedFactor, 0.35);
+  assert.equal(calc.repairCost.repairCostDv, 3967.64);
+  assert.equal(calc.marketDv, null);
+  assert.equal(calc.diminishedValue, 3967.64);
+  assert.equal(calc.totalDemand, 4317.64);
+  assert.equal(calc.postLoss.value, 36481.52);
   // Insurer 17c cross-check: moderate damage, under 20k miles.
   assert.equal(calc.crossCheck17c.damageClass, "moderate");
   assert.equal(calc.crossCheck17c.mileageMultiplier, 1.0);
   assert.equal(calc.crossCheck17c.value, 2022.46);
 });
 
-run("Civic file: supplied CarFax value drives the post-loss side verbatim", () => {
-  // ACV 18,828.39 − CarFax 15,370.00 = 3,458.39 + 350 = 3,808.39. The clean
-  // comp set is arranged so average + 6% tax lands on the letter's ACV.
+run("McLaren X3 golden: repair-cost + market methods reconcile by average", () => {
+  // Worked example from the owner's repair_cost_dv.py module: ACV 33,076.95,
+  // gross repair 7,047.41, CarFax 29,890. DSR 21.31% -> base 35% +10%
+  // structural +5% repaired panels = 50%. Repair DV 3,523.71, market
+  // 3,186.95, reconciled 3,355.33, total demand 3,705.33.
+  const calc = computeDvCalculation({
+    cleanComps: [comp(31204.67, 30000)],
+    oneLossComps: [],
+    subjectMileage: 30000,
+    taxRatePct: 6,
+    repairTotal: 7047.41,
+    severity: {
+      structural: true,
+      airbag: false,
+      adasCalibration: false,
+      repairedOuterPanels: 3,
+      aftermarketParts: true,
+    },
+    appraisalFee: 350,
+    carfaxPostLossValue: 29890,
+  });
+
+  assert.equal(calc.preLossAcv, 33076.95);
+  assert.equal(Math.round(calc.repairCost.dsr * 10000) / 10000, 0.2131);
+  assert.equal(calc.repairCost.baseFactor, 0.35);
+  assert.equal(calc.repairCost.appliedFactor, 0.5);
+  assert.equal(calc.repairCost.repairCostDv, 3523.71);
+  assert.equal(calc.marketDv, 3186.95);
+  assert.equal(calc.diminishedValue, 3355.33);
+  assert.equal(calc.totalDemand, 3705.33);
+  assert.ok(calc.reconciliationUsed.includes("average"));
+  // aftermarket adder is 0 in the schedule — flagged but not priced
+  assert.equal(calc.repairCost.adders["aftermarket parts"], undefined);
+});
+
+run("Civic file: CarFax market DV reconciles with the repair-cost method", () => {
+  // Market: ACV 18,828.39 − CarFax 15,370.00 = 3,458.39. Repair-cost: DSR
+  // 42.49% -> base 45%, no adders -> 8,000 × 45% = 3,600.00. Reconciled
+  // (average) = 3,529.20; total demand 3,879.20.
   const calc = computeDvCalculation({
     cleanComps: [comp(17762.63, 30000)],
     oneLossComps: [],
@@ -127,8 +169,10 @@ run("Civic file: supplied CarFax value drives the post-loss side verbatim", () =
   assert.equal(calc.preLossAcv, 18828.39);
   assert.equal(calc.postLoss.method, "carfax_hbv");
   assert.equal(calc.postLoss.projected, false);
-  assert.equal(calc.diminishedValue, 3458.39);
-  assert.equal(calc.totalDemand, 3808.39);
+  assert.equal(calc.marketDv, 3458.39);
+  assert.equal(calc.repairCost.repairCostDv, 3600);
+  assert.equal(calc.diminishedValue, 3529.2);
+  assert.equal(calc.totalDemand, 3879.2);
 });
 
 run("HARD RULE: a 1-loss comp set at/above the clean average is discarded", () => {
@@ -150,7 +194,7 @@ run("HARD RULE: a 1-loss comp set at/above the clean average is discarded", () =
     severity: NO_SEVERITY,
     appraisalFee: 350,
   });
-  assert.equal(calc.postLoss.method, "projected_stigma");
+  assert.equal(calc.postLoss.method, "repair_cost_derived");
   assert.equal(calc.postLoss.projected, true);
   assert.ok(calc.diminishedValue > 0, "DV must be positive after fallback");
   assert.ok(

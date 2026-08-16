@@ -17,6 +17,7 @@ import type {
   DvPostLossMethod,
   DvSeveritySignals,
 } from "./types";
+import { computeRepairCostDv, reconcileDv } from "./repairCostDv";
 
 /** Insurer-accepted mileage adjustment used across the settled house files. */
 export const PER_MILE_RATE = 0.07;
@@ -163,36 +164,63 @@ export function computeDvCalculation(params: ComputeDvParams): DvCalculation {
   const oneLossUsable =
     typeof oneLossAverage === "number" && oneLossAverage > 0 && oneLossAverage < average;
 
+  // Repair-Cost DV method (owner's schedule) — ALWAYS computed. It reconciles
+  // with the market method when one exists and controls alone when none does,
+  // replacing the earlier projected-stigma stopgap.
+  const repairCost = computeRepairCostDv({
+    preLossAcv,
+    grossRepairCost: params.repairTotal,
+    character: {
+      structuralRepair: params.severity.structural,
+      airbagDeployed: params.severity.airbag,
+      repairedOuterPanels: params.severity.repairedOuterPanels ?? 0,
+      aftermarketParts: params.severity.aftermarketParts ?? false,
+      totalLaborHours: params.severity.totalLaborHours,
+      structuralLineRef: params.severity.structuralLineRef,
+      repairedPanelRefs: params.severity.repairedPanelRefs,
+    },
+  });
+
+  let marketDv: number | null = null;
+  const discardedNote =
+    oneLossAverage !== null && !oneLossUsable
+      ? ` The automated 1-loss comp set was discarded: its average (${oneLossAverage.toLocaleString(
+          "en-US",
+          { style: "currency", currency: "USD" }
+        )}) met or exceeded the clean-comp average, and a loss-history vehicle can never be worth as much as its clean counterpart.`
+      : "";
+
   if (typeof params.carfaxPostLossValue === "number" && params.carfaxPostLossValue > 0) {
     method = "carfax_hbv";
     postLossValue = roundCents(params.carfaxPostLossValue);
+    marketDv = roundCents(preLossAcv - postLossValue);
     rationale =
       "CarFax History-Based Value for this VIN after the loss record posted — the house-preferred post-loss input.";
   } else if (oneLossUsable && oneLossAverage !== null) {
     method = "one_loss_comps";
     postLossValue = oneLossAverage;
+    marketDv = roundCents(preLossAcv - postLossValue);
     rationale = `Average of ${params.oneLossComps.length} mileage-adjusted comparable vehicles with a confirmed single loss record.`;
   } else {
-    method = "projected_stigma";
-    projected = true;
-    stigmaPct = projectStigmaPct({ severityRatioPct, severity: params.severity });
-    postLossValue = roundCents(preLossAcv * (1 - stigmaPct / 100));
-    const discardedNote =
-      oneLossAverage !== null && !oneLossUsable
-        ? ` The automated 1-loss comp set was discarded: its average (${oneLossAverage.toLocaleString(
-            "en-US",
-            { style: "currency", currency: "USD" }
-          )}) met or exceeded the clean-comp average, and a loss-history vehicle can never be worth as much as its clean counterpart.`
-        : "";
+    method = "repair_cost_derived";
+    projected = true; // still replaceable by the real CarFax pull
+    postLossValue = roundCents(preLossAcv - repairCost.repairCostDv);
     rationale =
-      `Projected ${stigmaPct}% market stigma pending the CarFax History-Based Value pull ` +
-      `(severity ${severityRatioPct.toFixed(1)}% of pre-loss ACV; benchmarked against settled files at 4.7%–5.6% ` +
-      `and CARFAX published damage-impact research). Replace with the CarFax value once the loss posts to the VIN.` +
+      `No market post-loss input in the packet — the Repair-Cost Method controls ` +
+      `(${repairCost.scheduleLabel}: gross repair cost × ${(repairCost.appliedFactor * 100).toFixed(0)}% applied factor). ` +
+      `Post-loss value shown is pre-loss ACV minus the repair-cost diminished value. ` +
+      `Replace with the CarFax History-Based Value once the loss posts to the VIN.` +
       discardedNote;
   }
 
-  const rawDv = roundCents(preLossAcv - postLossValue);
-  const diminishedValue = Math.max(0, rawDv);
+  // Reconcile with the RAW market figure (a negative market DV is a data red
+  // flag that must drag the average down, not be hidden); only the FINAL
+  // demanded figure clamps at zero — matching the reference module.
+  const { reconciledDv, reconciliationUsed } = reconcileDv({
+    marketDv,
+    repairCostDv: repairCost.repairCostDv,
+  });
+  const diminishedValue = Math.max(0, reconciledDv);
   const totalDemand = roundCents(diminishedValue + params.appraisalFee);
 
   const damage = classify17cDamage({ severityRatioPct, severity: params.severity });
@@ -214,6 +242,9 @@ export function computeDvCalculation(params: ComputeDvParams): DvCalculation {
     preLossAcv,
     postLoss: { method, value: postLossValue, projected, stigmaPct, rationale },
     severityRatioPct,
+    repairCost,
+    marketDv,
+    reconciliationUsed,
     diminishedValue,
     appraisalFee: roundCents(params.appraisalFee),
     totalDemand,

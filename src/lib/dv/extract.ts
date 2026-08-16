@@ -4,6 +4,7 @@
 
 import { extractEstimateFacts } from "@/lib/ai/extractors/extractEstimateFacts";
 import { parseEstimate } from "@/lib/ai/extractors/estimateExtractor";
+import { parseCccEstimateRows } from "@/lib/reports/estimateDeltaMatcher";
 import { buildFactsFromEstimate } from "@/lib/ai/extractors/buildFactsFromEstimate";
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import {
@@ -92,25 +93,65 @@ function extractPointOfImpact(text: string): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
+/** Outer sheet-metal panels for the Repair-Cost method's repaired-panel
+ *  adder. Bumpers/covers are plastic and deliberately excluded. */
+const OUTER_PANEL_PATTERN =
+  /\b(door(?:\s+(?:shell|outer|skin))?|fender|quarter(?:\s+panel)?|qtr(?:\s+(?:panel|outer))?|hood|deck\s?lid|trunk\s?lid|liftgate|tailgate|bedside|roof(?:\s+panel)?|rocker(?:\s+panel)?|cab\s+corner|uniside|aperture\s+panel)\b/i;
+
 function readSeveritySignals(text: string): DvSeveritySignals {
   const parsed = parseEstimate(text);
   const facts = buildFactsFromEstimate(parsed);
+  // The delta matcher's CCC parser handles glued supplement rows
+  // ("9S01R&I Aperture panel…") that the lightweight parseEstimate misses —
+  // panel counting and labor totals come from it.
+  const cccRows = parseCccEstimateRows(text);
+
+  // Repair-Cost method character: outer panels REPAIRED (not replaced), with
+  // the line references the demand narrative cites.
+  const repairedPanelRows = cccRows.filter(
+    (row) =>
+      /^rpr$/i.test(row.opCode ?? "") && OUTER_PANEL_PATTERN.test(row.description ?? "")
+  );
+  const repairedPanelRefs = repairedPanelRows
+    .map((row) => (row.lineNumber != null ? `Line ${row.lineNumber}` : null))
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(", ");
+
+  const structural = Boolean(
+    facts.setupMeasure ||
+      facts.unibodyAlignment ||
+      facts.dimensionalVerification ||
+      facts.clampZoneRepair
+  );
+  const structuralRow = cccRows.find((row) =>
+    /-S\b|setup.*measure|unibody|frame\b|pillar/i.test(row.rawText ?? row.description ?? "")
+  );
+
+  const laborHours = cccRows.reduce(
+    (sum, row) => sum + (row.labor ?? 0) + (row.paint ?? 0),
+    0
+  );
 
   return {
-    structural: Boolean(
-      facts.setupMeasure ||
-        facts.unibodyAlignment ||
-        facts.dimensionalVerification ||
-        facts.clampZoneRepair
+    structural,
+    // Operation rows ONLY: the equipment header lists "Drivers Side Air Bag"
+    // on every CCC estimate, which is not a deployment.
+    airbag: cccRows.some(
+      (row) => /air\s?bag/i.test(row.description ?? "") && Boolean(row.opCode)
     ),
-    // Operation rows ONLY (R&I/Repl/...): the equipment header lists
-    // "Drivers Side Air Bag" on every CCC estimate, which is not a
-    // deployment — hasLine's raw-line fallback would match it.
-    airbag: parsed.lines.some((line) => /air\s?bag/i.test(line.raw)),
     adasCalibration: Boolean(
       facts.radarCalibration || facts.cameraCalibration || facts.surroundCalibration
     ),
     pointOfImpact: extractPointOfImpact(text),
+    repairedOuterPanels: repairedPanelRows.length,
+    repairedPanelRefs: repairedPanelRefs || undefined,
+    aftermarketParts: /\baftermarket\b|(?:^|[^\w/])A\/M(?:[^\w/]|$)/im.test(text),
+    totalLaborHours: laborHours > 0 ? Math.round(laborHours * 10) / 10 : undefined,
+    structuralLineRef:
+      structural && structuralRow
+        ? `${structuralRow.lineNumber != null ? `Line ${structuralRow.lineNumber}: ` : ""}${(structuralRow.description ?? "").slice(0, 70)}`
+        : undefined,
   };
 }
 
