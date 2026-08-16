@@ -98,35 +98,95 @@ function extractPointOfImpact(text: string): string | undefined {
 const OUTER_PANEL_PATTERN =
   /\b(door(?:\s+(?:shell|outer|skin))?|fender|quarter(?:\s+panel)?|qtr(?:\s+(?:panel|outer))?|hood|deck\s?lid|trunk\s?lid|liftgate|tailgate|bedside|roof(?:\s+panel)?|rocker(?:\s+panel)?|cab\s+corner|uniside|aperture\s+panel)\b/i;
 
+type SimpleOpRow = {
+  lineNumber: number | null;
+  description: string;
+  op: string;
+  raw: string;
+};
+
+/**
+ * Mitchell Cloud Estimating rows (Progressive et al.) glue supplement code,
+ * line number, part number, description, and operation into one run:
+ * "S140202568R Frt Door ShellRepairBody*7.0*" — S1, line 40, part 202568,
+ * "R Frt Door Shell", Repair. The CCC parser cannot read these; this lane
+ * exists so the Repair-Cost method's character inputs work on Mitchell
+ * documents too.
+ */
+function parseMitchellOpRows(text: string): SimpleOpRow[] {
+  const rows: SimpleOpRow[] = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    // (?![a-z]) instead of \b: Mitchell glues the next column onto the
+    // operation ("RepairBody*7.0*"), and a letter-to-letter seam is never a
+    // word boundary.
+    const match =
+      /^(?:S\d)?(\d{1,3})(\d{6})(.{3,60}?)(Repair|Replace|Remove|Blend|Refinish|R&I)(?![a-z])/.exec(
+        line
+      );
+    if (!match) continue;
+    rows.push({
+      lineNumber: Number(match[1]),
+      description: match[3].trim(),
+      op: match[4],
+      raw: line,
+    });
+  }
+  return rows;
+}
+
 function readSeveritySignals(text: string): DvSeveritySignals {
   const parsed = parseEstimate(text);
   const facts = buildFactsFromEstimate(parsed);
   // The delta matcher's CCC parser handles glued supplement rows
   // ("9S01R&I Aperture panel…") that the lightweight parseEstimate misses —
-  // panel counting and labor totals come from it.
+  // panel counting and labor totals come from it. Mitchell documents get
+  // their own row lane; both feed one unified op-row set.
   const cccRows = parseCccEstimateRows(text);
+  const opRows: SimpleOpRow[] = [
+    ...cccRows.map((row) => ({
+      lineNumber: row.lineNumber,
+      description: row.description ?? "",
+      op: row.opCode ?? "",
+      raw: row.rawText ?? row.description ?? "",
+    })),
+    ...parseMitchellOpRows(text),
+  ];
 
   // Repair-Cost method character: outer panels REPAIRED (not replaced), with
-  // the line references the demand narrative cites.
-  const repairedPanelRows = cccRows.filter(
-    (row) =>
-      /^rpr$/i.test(row.opCode ?? "") && OUTER_PANEL_PATTERN.test(row.description ?? "")
-  );
+  // the line references the demand narrative cites. Rows coded structural
+  // ("-S") are cited as structural, not counted as outer panels — matching
+  // the reference analysis (McLaren X3: 3 panels + the -S B-pillar line).
+  const seenPanelLines = new Set<number>();
+  const repairedPanelRows = opRows.filter((row) => {
+    if (!/^(rpr|repair)$/i.test(row.op)) return false;
+    if (!OUTER_PANEL_PATTERN.test(row.description)) return false;
+    if (/-S\s*$/.test(row.description.trim())) return false;
+    if (row.lineNumber != null) {
+      if (seenPanelLines.has(row.lineNumber)) return false;
+      seenPanelLines.add(row.lineNumber);
+    }
+    return true;
+  });
   const repairedPanelRefs = repairedPanelRows
     .map((row) => (row.lineNumber != null ? `Line ${row.lineNumber}` : null))
     .filter(Boolean)
     .slice(0, 8)
     .join(", ");
 
+  // Mitchell codes structural components with a "-S" suffix on the part
+  // description; CCC-side detection stays fact-based.
+  const structuralCodedRow = opRows.find((row) => /-S\s*$/.test(row.description.trim()));
   const structural = Boolean(
     facts.setupMeasure ||
       facts.unibodyAlignment ||
       facts.dimensionalVerification ||
-      facts.clampZoneRepair
+      facts.clampZoneRepair ||
+      structuralCodedRow
   );
-  const structuralRow = cccRows.find((row) =>
-    /-S\b|setup.*measure|unibody|frame\b|pillar/i.test(row.rawText ?? row.description ?? "")
-  );
+  const structuralRow =
+    structuralCodedRow ??
+    opRows.find((row) => /setup.*measure|unibody|frame\b|pillar/i.test(row.raw));
 
   const laborHours = cccRows.reduce(
     (sum, row) => sum + (row.labor ?? 0) + (row.paint ?? 0),
@@ -137,9 +197,7 @@ function readSeveritySignals(text: string): DvSeveritySignals {
     structural,
     // Operation rows ONLY: the equipment header lists "Drivers Side Air Bag"
     // on every CCC estimate, which is not a deployment.
-    airbag: cccRows.some(
-      (row) => /air\s?bag/i.test(row.description ?? "") && Boolean(row.opCode)
-    ),
+    airbag: opRows.some((row) => /air\s?bag/i.test(row.description) && Boolean(row.op)),
     adasCalibration: Boolean(
       facts.radarCalibration || facts.cameraCalibration || facts.surroundCalibration
     ),
@@ -150,7 +208,7 @@ function readSeveritySignals(text: string): DvSeveritySignals {
     totalLaborHours: laborHours > 0 ? Math.round(laborHours * 10) / 10 : undefined,
     structuralLineRef:
       structural && structuralRow
-        ? `${structuralRow.lineNumber != null ? `Line ${structuralRow.lineNumber}: ` : ""}${(structuralRow.description ?? "").slice(0, 70)}`
+        ? `${structuralRow.lineNumber != null ? `Line ${structuralRow.lineNumber}: ` : ""}${structuralRow.description.slice(0, 70)}`
         : undefined,
   };
 }

@@ -507,6 +507,10 @@ function collectEstimateTotalCandidates(text: string) {
   // labels silently miss the glued form (RO 21897 lost its total to this).
   const patterns: Array<{ pattern: RegExp; score: number }> = [
     { pattern: /\btotal cost of repairs?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 1000 },
+    // Mitchell prints "Gross Total $7,047.41 … Deductible −$500 … Net
+    // Estimate Total $6,547.41" — the GROSS is the repair cost; the net is
+    // post-deductible and must never win over it (RO: McLaren X3).
+    { pattern: /\bgross total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 980 },
     { pattern: /\bgrand total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 940 },
     { pattern: /\bestimate total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 920 },
     { pattern: /\b(?:carrier|shop)\s+total(?:\s+(?:cost|repairs?))?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 900 },
@@ -514,6 +518,7 @@ function collectEstimateTotalCandidates(text: string) {
     // Net cost of repairs is AFTER deductible — never the comparison/display
     // basis. Kept only as a last resort when no gross repair total is present.
     { pattern: /\bnet cost of repairs?(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 300 },
+    { pattern: /\bnet estimate total(?![a-z])[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 300 },
   ];
 
   for (const { pattern, score } of patterns) {
