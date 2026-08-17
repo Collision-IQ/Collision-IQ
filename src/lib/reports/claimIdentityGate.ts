@@ -232,24 +232,59 @@ function ownerWindow(text: string): string | null {
 const STRONG_KEYS: ReadonlySet<IdentityKey> = new Set<IdentityKey>(["vin", "claim number"]);
 
 /**
- * One claim number, allowing for the sequence suffix a carrier appends as the
- * file supplements. On RO 22182 the shop prints 8848396030000002 and the
- * carrier's Estimate of Record prints 8848396030000002-01 — the SAME claim,
- * one revision on. Requiring equality blocks that pair, which is a false
- * refusal of real work on a real document in this corpus.
+ * One claim number, allowing for the print variants real documents stack on
+ * the same carrier-assigned core:
  *
- * So: identical after formatting is stripped, or one extends the other by a
- * short numeric tail. A tail is a revision; a different number is a different
- * claim.
+ * - a revision suffix ("8848396030000002" vs "8848396030000002-01" on
+ *   RO 22182 — the same claim, one supplement on);
+ * - a short glued PREFIX from an adjacent field in the extraction, or a
+ *   system prefix one producer prints and the other omits ("020274293880101072"
+ *   vs "0274293880101072-01" on the 21347 pair — both variants AT ONCE, which
+ *   blocked two documents whose VIN, owner and vehicle all agreed).
+ *
+ * The rules stay narrow so sequential claims never conflate: a revision tail
+ * is at most 3 digits, a glued prefix at most 3 characters and only ever on
+ * ONE side, and the shared core must be substantial (>= 8 characters).
+ * "…0002" vs "…0003" differ inside the core and still conflict.
  */
 export function sameClaimNumber(a: string, b: string): boolean {
-  const strip = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-  const [x, y] = [strip(a), strip(b)];
-  if (!x || !y) return false;
-  if (x === y) return true;
-  const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
-  if (!longer.startsWith(shorter)) return false;
-  return /^\d{1,3}$/.test(longer.slice(shorter.length));
+  // A separator-delimited short numeric tail is a revision marker, never part
+  // of the core ("...-01", "...-1", ".../02").
+  const dropRevisionTail = (value: string) => value.replace(/[\s./-]+\d{1,3}\s*$/, "");
+  const normalize = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const stripZeros = (value: string) => value.replace(/^0+/, "");
+
+  const cores = (value: string) => {
+    const full = normalize(value);
+    const tailless = normalize(dropRevisionTail(value));
+    return tailless && tailless !== full ? [full, tailless] : [full];
+  };
+
+  const matches = (rawX: string, rawY: string): boolean => {
+    const [x, y] = [stripZeros(rawX), stripZeros(rawY)];
+    if (!x || !y) return false;
+    if (x === y) return true;
+    const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
+    if (shorter.length < 8) return false;
+    // Un-delimited revision tail on the longer form.
+    if (longer.startsWith(shorter) && /^\d{1,3}$/.test(longer.slice(shorter.length))) return true;
+    // Glued prefix on the longer form — compared BEFORE zero-stripping so the
+    // core's own leading zeros line up ("02" + "0274…" ends with "0274…").
+    return rawX !== rawY && rawFormEndsWithCore(rawX, rawY);
+  };
+
+  const rawFormEndsWithCore = (rawX: string, rawY: string): boolean => {
+    const [shorter, longer] = rawX.length <= rawY.length ? [rawX, rawY] : [rawY, rawX];
+    if (shorter.length < 8) return false;
+    return longer.length - shorter.length <= 3 && longer.endsWith(shorter);
+  };
+
+  for (const x of cores(a)) {
+    for (const y of cores(b)) {
+      if (matches(x, y)) return true;
+    }
+  }
+  return false;
 }
 
 /**

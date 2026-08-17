@@ -257,3 +257,25 @@ describe("an RO number never blocks a comparison, and a filename never speaks", 
     expect(readClaimIdentity("RO 22186 shop final.pdf").vin).toBeNull();
   });
 });
+
+describe("stacked print variants are the same claim — the 21347 false block", () => {
+  it("accepts a glued prefix on one side and a revision suffix on the other", () => {
+    // Shop prints 02+core; the SOR prints core+-01. VIN, owner, vehicle and
+    // RO all agreed and the pair was still refused.
+    expect(sameClaimNumber("020274293880101072", "0274293880101072-01")).toBe(true);
+  });
+
+  it("accepts a glued prefix alone", () => {
+    expect(sameClaimNumber("020274293880101072", "0274293880101072")).toBe(true);
+  });
+
+  it("still rejects sequential claim numbers", () => {
+    // The nightmare false-positive: consecutive claims share a long prefix.
+    expect(sameClaimNumber("8848396030000002", "8848396030000003")).toBe(false);
+    expect(sameClaimNumber("8848396030000002-01", "8848396030000003-01")).toBe(false);
+  });
+
+  it("still rejects a long glued prefix — that is a different number", () => {
+    expect(sameClaimNumber("99887720274293880101072", "0274293880101072")).toBe(false);
+  });
+});
