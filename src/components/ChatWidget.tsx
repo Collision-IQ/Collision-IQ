@@ -2673,7 +2673,16 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     onAttachmentsChange?.([]);
-    invalidateStructuredAnalysis();
+    // HARD clear, never invalidateStructuredAnalysis(): that function
+    // deliberately preserves state while a case is active (it exists for
+    // follow-up uploads), so on End Chat it returned without clearing and
+    // analysisReportIdRef kept the closed case's id. Every message in the
+    // NEXT conversation then posted the old caseId, the server pulled the
+    // closed case's documents, and a fresh estimate pair was "compared"
+    // against the previous claim's estimate. Ending a chat closes the case
+    // client-side unconditionally.
+    analysisRunRef.current += 1;
+    clearStructuredAnalysisState();
     onSessionReset?.();
 
     shouldAutoScrollRef.current = true;
@@ -2682,7 +2691,7 @@ export default function ChatWidget({
     }, 50);
   }, [
     attachments,
-    invalidateStructuredAnalysis,
+    clearStructuredAnalysisState,
     onAttachmentChange,
     onAttachmentsChange,
     onSessionReset,
