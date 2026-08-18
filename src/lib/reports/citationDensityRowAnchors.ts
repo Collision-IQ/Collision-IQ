@@ -52,6 +52,20 @@ export type PdfTextExtractionDiagnostics = {
  * FontFile and no ToUnicode map produces a reflowed text stream that cannot
  * be trusted (the PeerNet/image-printer class of producer). Checked
  * structurally from the PDF object graph — never inferred from text content.
+ *
+ * "No ToUnicode" is NOT on its own a broken encoding. A simple font that
+ * declares a well-known base encoding (WinAnsi/MacRoman/Standard/MacExpert)
+ * carries the code→character mapping in the encoding itself, so its text
+ * reflows correctly whether or not the program is embedded. RO 22140's SOR-2
+ * is exactly this shape — non-embedded /ArialMT and /Arial-BoldMT under
+ * /WinAnsiEncoding — and reading it as unreliable capped extraction
+ * confidence at 0.45, pushed a cleanly-parseable document into the
+ * glyph-repair fallback, and suppressed its delta marks at 24% coverage. The
+ * fallback produced the bad parse; the document was fine.
+ *
+ * Composite (Type0) fonts stay unreliable without a ToUnicode map: under
+ * Identity-H the codes are glyph indices into a program that is not present,
+ * so nothing defines what character a code means.
  */
 export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<{
   reliable: boolean;
@@ -71,6 +85,39 @@ export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<
             descriptor.has(PDFName.of("FontFile3")))
       );
     };
+    // Encodings that DEFINE a code→character mapping on their own. A font
+    // using one of these needs no ToUnicode map to decode.
+    const knownBaseEncodings = new Set([
+      "/WinAnsiEncoding",
+      "/MacRomanEncoding",
+      "/StandardEncoding",
+      "/MacExpertEncoding",
+    ]);
+    // Subset/glyph-index names in a /Differences array (/g17, /index42,
+    // /cid9) name a glyph in a program we do not have, so they carry no
+    // character meaning even under a known base encoding.
+    const opaqueGlyphName = /^\/(?:g|glyph|index|cid)\d+$/i;
+    const encodingDefinesCharacters = (fontDict: PdfLibDict): boolean => {
+      const subtype = String(fontDict.lookupMaybe(PDFName.of("Subtype"), PDFName) ?? "");
+      // Type0/Identity-H maps codes to glyph indices, not characters.
+      if (subtype === "/Type0") return false;
+      const encoding = fontDict.lookup(PDFName.of("Encoding"));
+      if (!encoding) return false;
+      if (encoding instanceof PDFName) return knownBaseEncodings.has(String(encoding));
+      if (encoding instanceof PDFDict) {
+        const base = encoding.lookupMaybe(PDFName.of("BaseEncoding"), PDFName);
+        if (!base || !knownBaseEncodings.has(String(base))) return false;
+        const differences = encoding.lookupMaybe(PDFName.of("Differences"), PDFArray);
+        if (differences) {
+          for (let index = 0; index < differences.size(); index += 1) {
+            const entry = differences.lookup(index);
+            if (entry instanceof PDFName && opaqueGlyphName.test(String(entry))) return false;
+          }
+        }
+        return true;
+      }
+      return false;
+    };
     for (const page of doc.getPages()) {
       const resources = page.node.Resources();
       const fonts = resources?.lookupMaybe(PDFName.of("Font"), PDFDict);
@@ -85,6 +132,9 @@ export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<
         // definition — no FontFile and no ToUnicode is their normal state,
         // not a broken producer.
         if (/^\/?(?:Helvetica|Times|Courier|Symbol|ZapfDingbats)/.test(baseFont)) continue;
+        // A declared base encoding decodes the text stream by itself; only
+        // reach the embedding test when nothing defines the mapping.
+        if (encodingDefinesCharacters(font)) continue;
         let embedded = descriptorHasFontFile(font);
         if (!embedded) {
           // Composite (Type0) fonts carry the descriptor on descendant fonts.
@@ -103,7 +153,7 @@ export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<
     if (unreliableFonts.length) {
       return {
         reliable: false,
-        reason: `non-embedded font(s) without ToUnicode map: ${unreliableFonts.slice(0, 4).join(", ")}`,
+        reason: `non-embedded font(s) with no ToUnicode map and no defined encoding: ${unreliableFonts.slice(0, 4).join(", ")}`,
       };
     }
     return { reliable: true };
