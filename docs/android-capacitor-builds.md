@@ -64,8 +64,8 @@ Play rejects a bundle whose `versionCode` already exists on any track. Bump both
 fields in `android/app/build.gradle` before every upload:
 
 ```groovy
-versionCode 13
-versionName "1.0.13"
+versionCode 14
+versionName "1.0.14"
 ```
 
 `versionCode` must strictly increase; `versionName` is the human-facing string.
