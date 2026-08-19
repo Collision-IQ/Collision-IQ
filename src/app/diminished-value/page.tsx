@@ -1012,20 +1012,40 @@ export default function DiminishedValuePage() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-3xl px-5 pb-10 pt-12">
-        <p className="ci-eyebrow mb-2">Self-service · Pay per report</p>
-        <h1 className="mb-3 text-3xl font-semibold tracking-tight">
-          Actual Cash Value &amp; Diminished Value Generator
-        </h1>
-        <p className="text-sm leading-6 text-muted-foreground">
-          The diminished value report generated here is more accurate than the 17c formula
-          insurance carriers tend to run when left unchallenged. We provide a detailed report
-          using live comparable values to support the value of your vehicle both with and without
-          a recorded loss — every comp linked to its listing for independent review, with a
-          carrier-ready demand letter issued in your own name.
-        </p>
-        <div className="mt-4">
-          <ShareValueIqButton />
+      <section className="mx-auto max-w-6xl px-5 pb-10 pt-12">
+        <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[1.05fr_1fr]">
+          <div>
+            <p className="ci-eyebrow mb-2">Self-service · Pay per report</p>
+            <h1 className="mb-3 text-3xl font-semibold tracking-tight">
+              Actual Cash Value &amp; Diminished Value Generator
+            </h1>
+            <p className="text-sm leading-6 text-muted-foreground">
+              The diminished value report generated here is more accurate than the 17c formula
+              insurance carriers tend to run when left unchallenged. We provide a detailed report
+              using live comparable values to support the value of your vehicle both with and
+              without a recorded loss — every comp linked to its listing for independent review,
+              with a carrier-ready demand letter issued in your own name.
+            </p>
+            <div className="mt-6">
+              <ShareValueIqButton />
+            </div>
+          </div>
+
+          <div>
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-lg">
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                className="aspect-video w-full bg-black"
+              >
+                <source src="/iq/Value_iQ_slide.mp4" type="video/mp4" />
+              </video>
+            </div>
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              See how a Value IQ report reads before you upload an estimate.
+            </p>
+          </div>
         </div>
       </section>
 
