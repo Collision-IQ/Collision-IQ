@@ -60,6 +60,16 @@ async function _initAppStateListener() {
   }
 }
 
+export async function exitApp(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { App } = await import('@capacitor/app');
+    App.exitApp();
+  } catch {
+    // not a native build
+  }
+}
+
 async function _initBackButtonListener() {
   if (_backPluginHandle || !isNative()) return;
   try {

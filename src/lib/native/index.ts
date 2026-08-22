@@ -3,6 +3,7 @@ export {
   getPlatform,
   onAppStateChange,
   onBackButton,
+  exitApp,
   takeCameraPhoto,
   pickPhotoFromGallery,
   saveFileToDownloads,
