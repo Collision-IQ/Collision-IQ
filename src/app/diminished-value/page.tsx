@@ -1073,20 +1073,19 @@ export default function DiminishedValuePage() {
           </div>
 
           <div>
-            {/* The source file is currently H.265/HEVC, which Chrome, Firefox
-                and Edge cannot decode — the container parses (duration shows)
-                but the frame stays black. The poster keeps a branded still on
-                screen instead of a dead black rectangle until the file is
-                re-exported as H.264/AAC with faststart. */}
+            {/* H.264/AAC so every browser can decode it (an earlier H.265
+                file parsed but rendered black). The poster shows until play
+                begins — the file is not faststart, so the browser fetches
+                the moov atom from the tail before the first frame. */}
             <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-lg">
               <video
                 controls
                 playsInline
                 preload="metadata"
-                poster="/iq/Brand.png"
+                poster="/value_iq/value-iq.png"
                 className="aspect-video w-full bg-card object-contain"
               >
-                <source src="/iq/Value_iQ_slide.mp4" type="video/mp4" />
+                <source src="/value_iq/Value_iQ-Slide.mp4" type="video/mp4" />
                 Your browser cannot play this video.
               </video>
             </div>
