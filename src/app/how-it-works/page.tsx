@@ -22,7 +22,7 @@ const PIPELINE = [
   { icon: Cpu, title: "2. Processing", body: "The AI extracts text — OCR'ing scanned/image-only PDFs — indexes it, and understands the case context." },
   { icon: Search, title: "3. Analysis", body: "It compares and validates against OEM procedures, position statements, industry standards, and the documented damage." },
   { icon: Lightbulb, title: "4. Insights", body: "You get clear findings, evidence, citations, and next-step recommendations." },
-  { icon: FileText, title: "5. Reports", body: "Generate Repair Intelligence, Delta / OEM Citation Density, and customer/DOI reports, then export or share." },
+  { icon: FileText, title: "5. Reports", body: "Generate Repair Intelligence, Delta / OEM Citation Density, customer/DOI reports, and Value IQ valuation packets (ACV, diminished value, total-loss dispute), then export or share." },
 ] as const;
 
 const RESPONSE_STEPS = [
@@ -53,6 +53,11 @@ const SECTIONS = [
     id: "delta",
     title: "Delta & OEM Citation Density",
     body: "Comparing two estimates produces a delta ledger that highlights real changes — added operations, expanded scope, changed labor/part/operation — while suppressing unchanged rows. OEM Citation Density ties operations to manufacturer authority, marking anything unretrieved as such rather than treating estimate text as OEM proof.",
+  },
+  {
+    id: "value-iq",
+    title: "Value IQ — Valuation & Diminished Value",
+    body: "A pay-per-report valuation lane with two modes. For a repaired vehicle it builds a Market Value Report from live dealer comparables mileage-adjusted at $0.07/mi, reconciles the market method against a repair-cost schedule (damage severity ratio, structural/airbag/repaired-panel factors), cross-checks the insurer's own 17c formula, and issues a demand letter in the owner's name. For a total loss it parses the carrier's CCC ONE or Mitchell valuation report and reconciles it line by line — including re-running the carrier's own comparables at the industry mileage rate — then issues an independent ACV appraisal and value-dispute letter. Comparables must be single-vehicle retail listings, are linked for independent review, and loss-history comps can never price at or above clean ones.",
   },
   {
     id: "accuracy",

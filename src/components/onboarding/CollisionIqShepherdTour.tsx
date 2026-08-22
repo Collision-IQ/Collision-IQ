@@ -149,6 +149,15 @@ function buildTour() {
       mobilePlacement: "bottom",
     },
     {
+      id: "value-iq",
+      title: "Value IQ — ACV & Diminished Value",
+      text:
+        "Value IQ is the pay-per-report valuation lane, and it runs two ways. If the vehicle was REPAIRED, upload the estimate and it builds a Market Value Report from live dealer comparables plus a diminished value demand letter — the market method and the repair-cost schedule reconciled. If the vehicle was TOTALLED, upload the carrier's CCC or Mitchell valuation report and it builds an independent ACV appraisal that reconciles against the carrier line by line — including re-running the carrier's own comparables at the industry mileage rate — plus a value-dispute letter. Every comp is linked to its listing, and you confirm every field before anything is charged.",
+      selectors: ['[data-tour="nav-dv-generator"]'],
+      desktopPlacement: "right",
+      mobilePlacement: "bottom",
+    },
+    {
       id: "reports",
       title: "History",
       text: "History is where your saved outputs live, including estimate reviews, delta reports, citation reports, and downloadable summaries from past sessions. Past chats are saved here too — reopen one to pick the conversation back up in the Analysis Workspace.",

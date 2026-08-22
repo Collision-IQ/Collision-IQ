@@ -38,6 +38,11 @@ const DISCLAIMER =
   "The requesting party is responsible for confirming the availability of the claim under " +
   "applicable state law before submission.";
 
+// Footer type — small enough that the notice fits beneath a full-length
+// letter, large enough to stay readable in print.
+const DISCLAIMER_FONT_SIZE = 6.4;
+const DISCLAIMER_LEADING = 2.7;
+
 const INK: [number, number, number] = [40, 42, 46];
 const MUTED: [number, number, number] = [110, 114, 120];
 const ACCENT: [number, number, number] = [196, 90, 36];
@@ -132,11 +137,38 @@ function drawDisclaimer(doc: jsPDF, y: number): number {
   doc.line(PAGE.marginX, y, PAGE.width - PAGE.marginX, y);
   y += 3.5;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.4);
+  doc.setFontSize(DISCLAIMER_FONT_SIZE);
   doc.setTextColor(...MUTED);
   const lines = doc.splitTextToSize(pdfSafe(DISCLAIMER), CONTENT_WIDTH);
-  doc.text(lines, PAGE.marginX, y);
-  return y + lines.length * 3.1 + 2;
+  doc.text(lines, PAGE.marginX, y, { lineHeightFactor: 1.15 });
+  return y + lines.length * DISCLAIMER_LEADING + 2;
+}
+
+/** The disclaimer's real wrapped height — it must never be assumed, or a
+ *  longer notice silently overruns whatever sits above it. */
+function measureDisclaimerHeight(doc: jsPDF): number {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(DISCLAIMER_FONT_SIZE);
+  const lines = doc.splitTextToSize(pdfSafe(DISCLAIMER), CONTENT_WIDTH);
+  return 3.5 + lines.length * DISCLAIMER_LEADING + 2;
+}
+
+/**
+ * Footer disclaimer anchored to the bottom margin, measured rather than
+ * guessed. If the content above would collide with it, the disclaimer moves
+ * to a fresh page instead of printing through the signature block.
+ */
+function drawDisclaimerAtBottom(doc: jsPDF, contentBottomY: number): void {
+  const height = measureDisclaimerHeight(doc);
+  let top = PAGE.height - PAGE.bottom - height;
+  // 3mm clearance between the last baseline above and the footer rule: enough
+  // to read as separate blocks, tight enough that a full-length demand letter
+  // still closes on one page.
+  if (contentBottomY + 3 > top) {
+    doc.addPage();
+    top = PAGE.height - PAGE.bottom - height;
+  }
+  drawDisclaimer(doc, top);
 }
 
 function sectionRule(doc: jsPDF, y: number): number {
@@ -531,7 +563,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
     y + 6
   );
   y = Math.max(closingBadgeBottom, y + 10) + 2;
-  drawDisclaimer(doc, y);
+  drawDisclaimerAtBottom(doc, y);
 
   return markLinksOpenInNewWindow(doc.output("blob"));
 }
@@ -572,7 +604,7 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
   doc.text(insurer, PAGE.marginX, y);
   y += 5.4;
   doc.text(vehicleLabel, PAGE.marginX, y);
-  y += 10;
+  y += 8;
 
   const blockX = PAGE.marginX + 24;
   doc.setFont("times", "normal");
@@ -585,7 +617,7 @@ export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
   y += 5.6;
   doc.text("Claimant:", blockX, y);
   doc.text(claimant, blockX + 30, y);
-  y += 11;
+  y += 9;
 
   y = paragraph(doc, "To whom it may concern;", y);
   y += 1;
@@ -739,18 +771,18 @@ function finishDemandLetter(doc: jsPDF, y: number, claimant: string): Blob {
 
   // The letter is issued in the claimant's own name — no individual appraiser
   // identity or contact details appear on generated documents.
-  y += 4;
+  y += 2;
   y = paragraph(doc, "Sincerely,", y);
-  y += 8;
+  y += 7;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
   doc.setTextColor(...INK);
   doc.text(claimant, PAGE.marginX, y);
-  y += 5.4;
+  y += 5;
   doc.setTextColor(...MUTED);
   doc.text("Vehicle Owner / Claimant", PAGE.marginX, y);
 
-  drawDisclaimer(doc, PAGE.height - PAGE.bottom - 18);
+  drawDisclaimerAtBottom(doc, y);
 
   return doc.output("blob");
 }
@@ -1095,7 +1127,7 @@ export async function buildTotalLossReportBlob(data: DvReportData): Promise<Blob
     y + 6
   );
   y = Math.max(closingBadge, y + 10) + 2;
-  drawDisclaimer(doc, y);
+  drawDisclaimerAtBottom(doc, y);
 
   return markLinksOpenInNewWindow(doc.output("blob"));
 }
@@ -1133,7 +1165,7 @@ export async function buildTotalLossDemandLetterBlob(data: DvReportData): Promis
   doc.text(insurer, PAGE.marginX, y);
   y += 5.4;
   doc.text(extraction.vehicle.label ?? "the insured vehicle", PAGE.marginX, y);
-  y += 10;
+  y += 8;
 
   const blockX = PAGE.marginX + 24;
   doc.setFont("times", "normal");
@@ -1146,7 +1178,7 @@ export async function buildTotalLossDemandLetterBlob(data: DvReportData): Promis
   y += 5.6;
   doc.text("Claimant:", blockX, y);
   doc.text(claimant, blockX + 30, y);
-  y += 11;
+  y += 9;
 
   y = paragraph(doc, "To whom it may concern;", y);
   y += 1;
