@@ -119,6 +119,40 @@ function ShareValueIqButton() {
   );
 }
 
+/**
+ * Jurisdictional eligibility notice. Shown before payment on the intake step
+ * and again on the payment step: recovery of diminished value or a disputed
+ * actual cash value is a creature of state law and policy language, and the
+ * purchaser — not Collision Academy — bears responsibility for confirming it
+ * is available to them before they buy a report or submit it to a carrier.
+ */
+function EligibilityNotice({ mode }: { mode: DvReportMode }) {
+  const claimType =
+    mode === "total_loss"
+      ? "a total-loss valuation dispute"
+      : "a diminished value claim";
+  return (
+    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-500">
+      <p className="mb-1 text-sm font-semibold">
+        Confirm your state&apos;s law before you purchase or submit
+      </p>
+      <p>
+        Recovery of {claimType} is governed by the law of your jurisdiction and by the terms of the
+        applicable policy of insurance, and is not available on every claim. Certain states bar or
+        materially limit first-party recovery; others impose notice requirements, statutes of
+        limitation, appraisal-clause prerequisites, or proof standards that may affect your claim.
+        Collision Academy and Collision iQ do not provide legal advice, do not act as your
+        representative, and make no representation or warranty that any amount stated in this
+        report is recoverable in your state, under your policy, or on your claim. You are solely
+        responsible for determining, prior to purchase and prior to submission, whether{" "}
+        {claimType} is available to you — including by consulting a licensed attorney or your
+        state&apos;s department of insurance where appropriate. Fees for completed reports are
+        non-refundable.
+      </p>
+    </div>
+  );
+}
+
 const STEPS: Array<{ key: WizardStep; label: string }> = [
   { key: "upload", label: "Upload estimate" },
   { key: "intake", label: "Confirm details" },
@@ -739,12 +773,16 @@ function DiminishedValueFlow() {
               </>
             )}
           </div>
-          <div className="mt-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
-            <span className="font-semibold">Check every field before continuing.</span> Your
-            valuation, comparable search, and demand letter are generated from the information
+          <div className="mt-6 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              Check every field before continuing.
+            </span>{" "}
+            Your valuation, comparable search, and demand letter are generated from the information
             confirmed on this page — in particular the registered ZIP, mileage
-            {mode === "diminished_value" ? ", and repair total" : ", and date of loss"}. Fees for
-            completed reports are non-refundable.
+            {mode === "diminished_value" ? ", and repair total" : ", and date of loss"}.
+          </div>
+          <div className="mt-3">
+            <EligibilityNotice mode={mode} />
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button
@@ -782,10 +820,13 @@ function DiminishedValueFlow() {
             <li>Diminished value calculation with the insurer 17c cross-check</li>
             <li>Carrier-ready demand letter, issued in your own name, on the Collision Academy template</li>
           </ul>
-          <p className="mb-6 text-xs text-muted-foreground">
+          <p className="mb-4 text-xs text-muted-foreground">
             By paying you confirm the details entered on the previous step are accurate. The report
             is generated from that information, and fees for completed reports are non-refundable.
           </p>
+          <div className="mb-6">
+            <EligibilityNotice mode={mode} />
+          </div>
           <div className="flex justify-end gap-3">
             <button
               type="button"
@@ -1032,14 +1073,21 @@ export default function DiminishedValuePage() {
           </div>
 
           <div>
+            {/* The source file is currently H.265/HEVC, which Chrome, Firefox
+                and Edge cannot decode — the container parses (duration shows)
+                but the frame stays black. The poster keeps a branded still on
+                screen instead of a dead black rectangle until the file is
+                re-exported as H.264/AAC with faststart. */}
             <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-lg">
               <video
                 controls
                 playsInline
                 preload="metadata"
-                className="aspect-video w-full bg-black"
+                poster="/iq/Brand.png"
+                className="aspect-video w-full bg-card object-contain"
               >
                 <source src="/iq/Value_iQ_slide.mp4" type="video/mp4" />
+                Your browser cannot play this video.
               </video>
             </div>
             <p className="mt-3 text-center text-xs text-muted-foreground">

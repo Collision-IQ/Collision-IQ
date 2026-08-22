@@ -30,7 +30,13 @@ const DISCLAIMER =
   "requesting party and is reproduced solely for that party's own use in presenting their claim; " +
   "Collision Academy has not independently verified owner-supplied information and makes no " +
   "representation regarding it. Market values are drawn from the retail listings cited herein as of " +
-  "the date of access; each listing remains subject to change or removal by its publisher.";
+  "the date of access; each listing remains subject to change or removal by its publisher. " +
+  "Entitlement to the amounts stated herein is governed by the law of the applicable jurisdiction " +
+  "and by the terms of the policy of insurance; this document is a valuation opinion and is not " +
+  "legal advice, no attorney-client or representative relationship is created by its preparation, " +
+  "and no representation or warranty is made that any amount stated is recoverable on this claim. " +
+  "The requesting party is responsible for confirming the availability of the claim under " +
+  "applicable state law before submission.";
 
 const INK: [number, number, number] = [40, 42, 46];
 const MUTED: [number, number, number] = [110, 114, 120];
