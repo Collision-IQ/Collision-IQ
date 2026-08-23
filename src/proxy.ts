@@ -17,7 +17,13 @@ const isProtectedRoute = createRouteMatcher([
 
 const withClerk = clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {
-    await auth.protect();
+    // A signed-out visitor must land on sign-in, not a 404. protect()
+    // hides the route by default, which reads as a broken site to anyone
+    // arriving from a shared link, a nav item, or an email — and these are
+    // the pages a paying customer is most likely to be sent to.
+    const signInUrl = new URL("/sign-in", req.url);
+    signInUrl.searchParams.set("redirect_url", req.url);
+    await auth.protect({ unauthenticatedUrl: signInUrl.toString() });
   }
 });
 
