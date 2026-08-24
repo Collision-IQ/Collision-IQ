@@ -21,6 +21,18 @@ export default async function DashboardPage() {
         <div className="text-xs uppercase tracking-[0.24em] text-white/45">Dashboard</div>
         <h1 className="mt-3 text-3xl font-semibold">Entitlements and readiness</h1>
 
+        {access.isPlatformAdmin ? (
+          <a
+            href="/dashboard/results"
+            className="mt-6 block rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:border-white/30"
+          >
+            <div className="text-sm font-medium text-white">Results ledger</div>
+            <div className="mt-2 text-xs uppercase tracking-[0.18em] text-white/45">
+              Admin only — awards, DV, and total-loss outcomes
+            </div>
+          </a>
+        ) : null}
+
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           {FEATURES.map((feature) => (
             <div
