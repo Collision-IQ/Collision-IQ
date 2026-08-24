@@ -18,7 +18,7 @@ export const BILLING_CATALOG = {
   },
   // ── Lane 2: The Academy — Professional Services ──────────────────────
   academy_rekey_estimating: {
-    priceId: process.env["STRIPE_PRICE_RE-KEY_APPRAISAL_ID"]?.trim() || "",
+    priceId: process.env.STRIPE_PRICE_RE_KEY_APPRAISAL_ID?.trim() || "",
     mode: "payment",
     lane: "service",
     serviceType: "REKEY_ESTIMATING",

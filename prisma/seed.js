@@ -14,7 +14,7 @@ function requiredEnv(name) {
 const SERVICE_PRICES = [
   {
     serviceType: "academy_rekey_estimating",
-    stripePriceId: requiredEnv("STRIPE_PRICE_RE-KEY_APPRAISAL_ID"),
+    stripePriceId: requiredEnv("STRIPE_PRICE_RE_KEY_APPRAISAL_ID"),
     label: "Rekey Estimating",
   },
   {
