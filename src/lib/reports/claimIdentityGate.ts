@@ -37,6 +37,8 @@ export interface ClaimIdentity {
   roNumber: string | null;
   ownerTokens: string[];
   vehicle: string | null;
+  /** Printed date of loss, when the document carries one. Advisory only. */
+  dateOfLoss?: string | null;
 }
 
 export type IdentityKey = "vin" | "claim number" | "RO number" | "owner" | "vehicle";
@@ -50,6 +52,11 @@ export interface IdentityVerdict {
   conflicting: IdentityKey[];
   /** True when no key was comparable on both sides, so nothing was proven. */
   unverified: boolean;
+  /** CR-0: which strong key established identity, when one did. */
+  basis?: "claim number" | "vin" | null;
+  /** CR-0: advisory lines to render where the BLOCKED box renders today —
+   *  e.g. "claims differ, proceeding on VIN match". Never block on these. */
+  warnings?: string[];
 }
 
 /** A VIN is 17 chars from a 33-letter alphabet — I, O and Q are excluded so
@@ -156,6 +163,23 @@ export function nameTokens(raw: string | null | undefined): string[] {
 /** Slide a 17-character window and accept on the check digit. Windows near a
  *  VIN label are preferred so a long document cannot offer an unrelated run
  *  that happens to check out (~1 in 11 do). */
+/**
+ * VINs never contain I, O or Q, so folding an OCR'd O→0, I→1, Q→0 is lossless
+ * for a valid VIN (R-2, Citation fix v2). The 26 Aug carrier scan reads
+ * "5FNYF8H58PB0O1022"; without the fold the VIN fallback fails on its first
+ * real scanned file. Returns "" unless the folded result is exactly 17
+ * characters — a redacted prefix or truncated VIN must never match.
+ */
+export function foldVinForComparison(value: string | null | undefined): string {
+  const folded = (value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .replace(/O/g, "0")
+    .replace(/I/g, "1")
+    .replace(/Q/g, "0");
+  return folded.length === 17 ? folded : "";
+}
+
 export function findVin(text: string): string | null {
   const scan = (segment: string): string | null => {
     const upper = segment.toUpperCase();
@@ -166,8 +190,20 @@ export function findVin(text: string): string | null {
     return null;
   };
   for (const match of text.matchAll(/\bVIN\b\s*[:#-]?/gi)) {
-    const found = scan(text.slice(match.index + match[0].length, match.index + match[0].length + 60));
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 60);
+    const found = scan(after);
     if (found) return found;
+    // LABELED lane only: accept a 17-char token whose OCR fold lands in the
+    // VIN alphabet even when the check digit fails. The label anchors what the
+    // value IS; the check digit stays a confidence signal, never a gate
+    // (some non-North-American makes do not use it, and one misread glyph
+    // breaks it on an otherwise-real scan). The free-text sliding window
+    // below keeps its strict check so part numbers never match.
+    const run = /[A-Z0-9]{17,}/i.exec(after.replace(/\s+/g, ""));
+    if (run) {
+      const folded = foldVinForComparison(run[0].slice(0, 17));
+      if (folded && VIN_ALPHABET.test(folded)) return folded;
+    }
   }
   return scan(text);
 }
@@ -196,6 +232,9 @@ export function readClaimIdentity(text: string): ClaimIdentity {
     source
   );
 
+  const dateOfLoss =
+    /\bDate\s*of\s*Loss\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i.exec(source)?.[1] ?? null;
+
   return {
     vin,
     claimNumber: claimNumber ? claimNumber.toUpperCase() : null,
@@ -204,6 +243,7 @@ export function readClaimIdentity(text: string): ClaimIdentity {
     // above it on another, so harvest a window rather than a single token.
     ownerTokens: nameTokens(ownerWindow(source) ?? owner),
     vehicle: vehicleMatch ? vehicleMatch[1].replace(/\s+/g, " ").trim().toUpperCase() : null,
+    dateOfLoss,
   };
 }
 
@@ -306,17 +346,44 @@ export function sameVehicleHead(a: string, b: string): boolean {
   return x.make.startsWith(y.make) || y.make.startsWith(x.make);
 }
 
+/**
+ * CR-0 GATE-IDENTITY (owner-stated rule, 26 Aug 2026): claim number first,
+ * VIN fallback. If the claim numbers do not match, check the VINs; if the
+ * VINs match, the comparison CONTINUES with a warning naming both claim
+ * strings. Hard block only when neither field establishes identity — a shop
+ * CCC "0835185430" and a carrier "000835185430B03" on the same VIN are one
+ * claim wearing two claim-number formats, and the old verbatim compare
+ * blocked that pair in production.
+ *
+ * VINs compare after the OCR fold (O→0, I→1, Q→0 — lossless, VINs never
+ * contain those letters), so a scanned carrier estimate still matches.
+ *
+ * Absent evidence still never proves a mismatch: a pair where neither strong
+ * key is readable on both sides proceeds as UNVERIFIED (scans would be
+ * refused wholesale otherwise), and the weak keys stay corroboration only.
+ *
+ * Accepted caveat (drop §7): the VIN fallback passes two DIFFERENT claims on
+ * the SAME vehicle. When both documents print a date of loss and they
+ * differ, an advisory says so; by the stated rule it does not block.
+ */
 export function compareClaimIdentity(a: ClaimIdentity, b: ClaimIdentity): IdentityVerdict {
   const agreed: IdentityKey[] = [];
   const conflicting: IdentityKey[] = [];
+  const warnings: string[] = [];
 
-  const both = (x: unknown, y: unknown): boolean => x !== null && y !== null;
+  const both = (x: unknown, y: unknown): boolean => x !== null && y !== null && x !== undefined && y !== undefined;
   const record = (key: IdentityKey, same: boolean) => (same ? agreed : conflicting).push(key);
 
-  if (both(a.vin, b.vin)) record("vin", a.vin === b.vin);
-  if (both(a.claimNumber, b.claimNumber)) {
-    record("claim number", sameClaimNumber(a.claimNumber!, b.claimNumber!));
-  }
+  const vinA = foldVinForComparison(a.vin);
+  const vinB = foldVinForComparison(b.vin);
+  const bothVins = vinA.length > 0 && vinB.length > 0;
+  const vinSame = bothVins && vinA === vinB;
+  if (bothVins) record("vin", vinSame);
+
+  const bothClaims = both(a.claimNumber, b.claimNumber);
+  const claimSame = bothClaims && sameClaimNumber(a.claimNumber!, b.claimNumber!);
+  if (bothClaims) record("claim number", claimSame);
+
   if (both(a.roNumber, b.roNumber)) record("RO number", a.roNumber === b.roNumber);
   if (a.ownerTokens.length > 0 && b.ownerTokens.length > 0) {
     // Overlap, not equality: producers print differing amounts of one name.
@@ -324,15 +391,41 @@ export function compareClaimIdentity(a: ClaimIdentity, b: ClaimIdentity): Identi
   }
   if (both(a.vehicle, b.vehicle)) record("vehicle", sameVehicleHead(a.vehicle!, b.vehicle!));
 
-  const blockingConflicts = conflicting.filter((key) => STRONG_KEYS.has(key));
-  const strongAgreements = agreed.filter((key) => STRONG_KEYS.has(key));
+  if (claimSame) {
+    if (bothVins && !vinSame) {
+      warnings.push(
+        `Claim numbers match but VINs differ (${a.vin} vs ${b.vin}); proceeding on the claim number.`
+      );
+    }
+    return { blocked: false, agreed, conflicting, unverified: false, basis: "claim number", warnings };
+  }
+
+  if (vinSame) {
+    warnings.push(
+      `Claim numbers differ (${a.claimNumber ?? "missing"} vs ${b.claimNumber ?? "missing"}); proceeding on VIN match ${vinA}.`
+    );
+    if (a.dateOfLoss && b.dateOfLoss && a.dateOfLoss !== b.dateOfLoss) {
+      warnings.push(
+        `Dates of loss differ (${a.dateOfLoss} vs ${b.dateOfLoss}); confirm this is one loss, not two claims on the same vehicle.`
+      );
+    }
+    return { blocked: false, agreed, conflicting, unverified: false, basis: "vin", warnings };
+  }
+
+  // Neither strong key established identity. Block only on POSITIVE
+  // disagreement — claims both readable and different, or VINs both readable
+  // and different. Unreadable fields prove nothing.
+  const claimConflict = bothClaims && !claimSame;
+  const vinConflict = bothVins && !vinSame;
+  const blocked = claimConflict || vinConflict;
 
   return {
-    blocked: blockingConflicts.length > 0,
+    blocked,
     agreed,
     conflicting,
-    // Nothing was PROVEN unless a strong key matched on both documents.
-    unverified: strongAgreements.length === 0 && blockingConflicts.length === 0,
+    unverified: !blocked,
+    basis: null,
+    warnings,
   };
 }
 

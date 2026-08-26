@@ -1746,12 +1746,25 @@ function buildEstimatorFacingRequest(
   return `Add or clarify ${operation}; document the estimate basis and attach supporting repair-plan evidence.`;
 }
 
+/** CR-9 (R09, Citation fix v2): source classifications are INTERNAL enums.
+ *  "ESTIMATE_EVIDENCE: Existing estimate parser" leaked into customer prose
+ *  on Test 100; the reader-facing form is plain English. */
+const SCRUBBER_SOURCE_LABELS: Record<string, string> = {
+  POLICY_EVIDENCE: "Policy document",
+  ESTIMATE_EVIDENCE: "Estimate evidence",
+  OEM_POSITION_STATEMENT: "OEM position statement",
+  OEM_PROCEDURE: "OEM procedure",
+  INDUSTRY_CONTEXT: "Industry reference",
+  USER_CHAT_CONTEXT: "Case discussion",
+};
+
 function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string[] {
   return finding.sources
     .map((source) => {
       const title = cleanCustomerFacingEstimateLine(source.title);
       if (!title) return "";
-      return `${classifyScrubberSource(source.sourceType, title)}: ${title}`;
+      const classification = classifyScrubberSource(source.sourceType, title);
+      return `${SCRUBBER_SOURCE_LABELS[classification] ?? "Supporting evidence"}: ${title}`;
     })
     .filter(Boolean);
 }

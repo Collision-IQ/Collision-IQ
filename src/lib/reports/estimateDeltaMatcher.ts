@@ -15,6 +15,7 @@
  */
 
 import { canonicalOperationKey } from "./operationAliases";
+import { normalizeOverprintText } from "./overprintNormalize";
 import {
   canonTotalsCategory,
   continuesIdentifier,
@@ -468,6 +469,9 @@ export function isSectionHeader(rawText: string): boolean {
 /** Extract the numeric "Net Cost of Repairs" / "Total Cost of Repairs" total. */
 export function parseEstimateNetTotal(text: string): number | null {
   if (!text) return null;
+  // CR-3: Mitchell bold prints every glyph twice; no money regex matches the
+  // doubled form. Identity on plain text.
+  text = normalizeOverprintText(text);
   const patterns = [
     /net\s+cost\s+of\s+repairs?\s*[:$]?\s*\$?\s*([\d,]+\.\d{2})/i,
     /total\s+cost\s+of\s+repairs?\s*[:$]?\s*\$?\s*([\d,]+\.\d{2})/i,
@@ -1541,6 +1545,7 @@ function boundRowsByPrintedSubtotals(
 
 export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   if (!text) return [];
+  text = normalizeOverprintText(text);
   if (isFragmentedEstimateText(text)) {
     text = reflowFragmentedEstimateText(text);
   }
@@ -2981,6 +2986,7 @@ export interface EstimateTotalsSummary {
  */
 export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | null {
   if (!text) return null;
+  text = normalizeOverprintText(text);
   if (isFragmentedEstimateText(text)) {
     text = reflowFragmentedEstimateText(text);
   }
