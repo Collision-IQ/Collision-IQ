@@ -45,7 +45,9 @@ type DvRequestView = {
   errorMessage: string | null;
 };
 
-type WizardStep = "upload" | "intake" | "payment" | "generating" | "ready";
+type WizardStep = "consult-choice" | "upload" | "intake" | "payment" | "generating" | "ready";
+
+type ConsultType = "self-service" | "consult-dv" | "consult-vd" | null;
 
 type IntakeForm = {
   lossDate: string;
@@ -154,6 +156,7 @@ function EligibilityNotice({ mode }: { mode: DvReportMode }) {
 }
 
 const STEPS: Array<{ key: WizardStep; label: string }> = [
+  { key: "consult-choice", label: "Choose your approach" },
   { key: "upload", label: "Upload estimate" },
   { key: "intake", label: "Confirm details" },
   { key: "payment", label: "Payment" },
@@ -165,8 +168,9 @@ function DiminishedValueFlow() {
   const searchParams = useSearchParams();
   const { getToken, isLoaded, userId } = useAuth();
 
-  const [step, setStep] = useState<WizardStep>("upload");
+  const [step, setStep] = useState<WizardStep>("consult-choice");
   const [mode, setMode] = useState<DvReportMode>("diminished_value");
+  const [consultType, setConsultType] = useState<ConsultType>(null);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [request, setRequest] = useState<DvRequestView | null>(null);
   const [intakeForm, setIntakeForm] = useState<IntakeForm>(EMPTY_INTAKE);
@@ -477,20 +481,37 @@ function DiminishedValueFlow() {
   }
 
   async function handleCheckout() {
-    if (!request) return;
+    // For consults, don't require a request (file upload)
+    if (consultType === "self-service" && !request) return;
+    if (consultType !== "self-service" && !consultType) {
+      setError("Please select a service option.");
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setBusyLabel("Opening secure checkout…");
     try {
+      let serviceType = "value_iq";
+      if (consultType === "consult-dv") serviceType = "value_iq_consult_dv";
+      if (consultType === "consult-vd") serviceType = "value_iq_consult_vd";
+
+      const body: Record<string, unknown> = {
+        serviceType,
+        sourcePage: "diminished-value",
+      };
+
+      if (consultType === "self-service" && request?.id) {
+        body.dvRequestId = request.id;
+        body.returnUrl = `/diminished-value?checkout=cancelled&request=${request.id}`;
+      } else {
+        body.returnUrl = `/diminished-value?checkout=cancelled`;
+      }
+
       const res = await fetch("/api/billing/service-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          serviceType: "value_iq",
-          dvRequestId: request.id,
-          sourcePage: "diminished-value",
-          returnUrl: `/diminished-value?checkout=cancelled&request=${request.id}`,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.url) {
@@ -587,6 +608,81 @@ function DiminishedValueFlow() {
               Sign in to begin
             </button>
           </SignInButton>
+        </div>
+      ) : step === "consult-choice" ? (
+        <div className="ci-card p-8">
+          <div className="mb-6">
+            <h2 className="mb-2 text-lg font-semibold">How would you like to proceed?</h2>
+            <p className="text-sm text-muted-foreground">
+              Choose between a self-service report or talk directly with an appraiser
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Self-Service Option */}
+            <button
+              type="button"
+              onClick={() => {
+                setConsultType("self-service");
+                setStep("upload");
+              }}
+              className={`rounded-lg border-2 p-6 text-left transition-colors ${
+                consultType === "self-service"
+                  ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                  : "border-border hover:border-[var(--accent)]/50"
+              }`}
+            >
+              <h3 className="mb-2 font-semibold">Self-Service Report</h3>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Upload your estimate and get an immediate, accurate ACV and DV report. Perfect for those who want quick results.
+              </p>
+              <p className="text-xs font-semibold text-[var(--accent)]">$200</p>
+            </button>
+
+            {/* 1-on-1 Consult Option - DV */}
+            {mode === "diminished_value" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setConsultType("consult-dv");
+                  setStep("payment");
+                }}
+                className={`rounded-lg border-2 p-6 text-left transition-colors ${
+                  consultType === "consult-dv"
+                    ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                    : "border-border hover:border-[var(--accent)]/50"
+                }`}
+              >
+                <h3 className="mb-2 font-semibold">1-on-1 Professional Consult</h3>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Schedule a consultation with an appraiser to discuss your claim, strategy, and next steps.
+                </p>
+                <p className="text-xs font-semibold text-[var(--accent)]">Professional rates apply</p>
+              </button>
+            )}
+
+            {/* 1-on-1 Consult Option - VD */}
+            {mode === "total_loss" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setConsultType("consult-vd");
+                  setStep("payment");
+                }}
+                className={`rounded-lg border-2 p-6 text-left transition-colors ${
+                  consultType === "consult-vd"
+                    ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                    : "border-border hover:border-[var(--accent)]/50"
+                }`}
+              >
+                <h3 className="mb-2 font-semibold">1-on-1 Professional Consult</h3>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Discuss your total loss value dispute with an appraiser before submitting to the carrier.
+                </p>
+                <p className="text-xs font-semibold text-[var(--accent)]">Professional rates apply</p>
+              </button>
+            )}
+          </div>
         </div>
       ) : step === "upload" ? (
         <div className="ci-card p-8">
@@ -809,21 +905,44 @@ function DiminishedValueFlow() {
             <ShieldCheck className="h-5 w-5 text-[var(--accent)]" />
             <h2 className="text-lg font-semibold">One-time payment</h2>
           </div>
-          <p className="mb-2 text-sm text-muted-foreground">
-            The report generates only after payment clears — a single flat fee, no subscription.
-            The appraisal fee is itemized on the demand itself as an additional indirect loss, so a
-            successful claim recovers it.
-          </p>
-          <ul className="mb-6 list-inside list-disc space-y-1 text-sm text-muted-foreground">
-            <li>Market Value Report (ACV) with three live dealer comps, mileage-adjusted at $0.07/mile</li>
-            <li>Every comp linked to its live listing so you and the carrier can verify it</li>
-            <li>Diminished value calculation with the insurer 17c cross-check</li>
-            <li>Carrier-ready demand letter, issued in your own name, on the Collision Academy template</li>
-          </ul>
-          <p className="mb-4 text-xs text-muted-foreground">
-            By paying you confirm the details entered on the previous step are accurate. The report
-            is generated from that information, and fees for completed reports are non-refundable.
-          </p>
+
+          {consultType !== "self-service" ? (
+            // Consult flow
+            <>
+              <p className="mb-2 text-sm text-muted-foreground">
+                Schedule a 1-on-1 consultation with a professional appraiser. They'll help you understand your claim, review strategy, and prepare documentation.
+              </p>
+              <ul className="mb-6 list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                <li>Direct consultation with a licensed appraiser</li>
+                <li>Personalized guidance for your claim</li>
+                <li>Strategy and documentation review</li>
+                <li>Answers to your specific questions</li>
+              </ul>
+              <p className="mb-4 text-xs text-muted-foreground">
+                After payment, you'll receive a confirmation and scheduling information to book your consultation.
+              </p>
+            </>
+          ) : (
+            // Self-service report flow
+            <>
+              <p className="mb-2 text-sm text-muted-foreground">
+                The report generates only after payment clears — a single flat fee, no subscription.
+                The appraisal fee is itemized on the demand itself as an additional indirect loss, so a
+                successful claim recovers it.
+              </p>
+              <ul className="mb-6 list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                <li>Market Value Report (ACV) with three live dealer comps, mileage-adjusted at $0.07/mile</li>
+                <li>Every comp linked to its live listing so you and the carrier can verify it</li>
+                <li>Diminished value calculation with the insurer 17c cross-check</li>
+                <li>Carrier-ready demand letter, issued in your own name, on the Collision Academy template</li>
+              </ul>
+              <p className="mb-4 text-xs text-muted-foreground">
+                By paying you confirm the details entered on the previous step are accurate. The report
+                is generated from that information, and fees for completed reports are non-refundable.
+              </p>
+            </>
+          )}
+
           <div className="mb-6">
             <EligibilityNotice mode={mode} />
           </div>
@@ -832,7 +951,7 @@ function DiminishedValueFlow() {
               type="button"
               className="ci-btn ci-btn-ghost"
               disabled={busy}
-              onClick={() => setStep("intake")}
+              onClick={() => setStep(consultType === "self-service" ? "intake" : "consult-choice")}
             >
               Back
             </button>
@@ -842,7 +961,7 @@ function DiminishedValueFlow() {
               disabled={busy}
               onClick={() => void handleCheckout()}
             >
-              Pay &amp; generate
+              {consultType !== "self-service" ? "Schedule Consultation" : "Pay &amp; generate"}
             </button>
           </div>
           {request?.paidAt && (

@@ -76,6 +76,21 @@ export const BILLING_CATALOG = {
     serviceType: "VALUE_IQ",
     label: "Value IQ — ACV + Diminished Value Report",
   },
+  // 1-on-1 consult variants for Value IQ users who want professional guidance
+  value_iq_consult_dv: {
+    priceId: process.env.STRIPE_PRICE_DIMINISHED_VALUE_ID?.trim() || "",
+    mode: "payment",
+    lane: "service",
+    serviceType: "VALUE_IQ_CONSULT_DV",
+    label: "1-on-1 Consult — Diminished Value",
+  },
+  value_iq_consult_vd: {
+    priceId: process.env.STRIPE_PRICE_VALUE_DISPUTE_ID?.trim() || "",
+    mode: "payment",
+    lane: "service",
+    serviceType: "VALUE_IQ_CONSULT_VD",
+    label: "1-on-1 Consult — Value Dispute",
+  },
   // ── Legacy / Technical Systems ────────────────────────────────────────
   executive_onboarding: {
     priceId:

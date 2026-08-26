@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createServiceCaseFromCheckoutSession } from "@/lib/academy/serviceCases";
 import { getStripe } from "@/lib/billing/stripe";
+import { sendSubscriptionAlert } from "@/lib/email/sendAlerts";
 
 export const runtime = "nodejs";
 
@@ -67,7 +68,42 @@ export async function POST(req: Request) {
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
+    const isCreation = event.type === "customer.subscription.created";
     await syncSubscriptionFromStripeEvent(event);
+
+    // Send alert for new subscriptions
+    if (isCreation) {
+      const subscription = event.data.object as Stripe.Subscription;
+      const customerId = typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer?.id || null;
+
+      if (customerId) {
+        try {
+          const existing = await prisma.subscription.findFirst({
+            where: { stripeCustomerId: customerId },
+            orderBy: { createdAt: "desc" },
+            include: { user: { select: { id: true, email: true, firstName: true, lastName: true } } }
+          });
+
+          if (existing?.user) {
+            const planLabel = PLAN_BY_PRICE_LOOKUP[subscription.items.data[0]?.price?.id || ""] || "Unknown Plan";
+            const userName = [existing.user.firstName, existing.user.lastName].filter(Boolean).join(" ") || undefined;
+
+            await sendSubscriptionAlert({
+              subscriptionType: planLabel,
+              subscriptionName: `Collision iQ ${planLabel} Plan`,
+              userId: existing.user.id,
+              userEmail: existing.user.email || "unknown",
+              userName,
+              sessionId: subscription.id,
+            });
+          }
+        } catch (error) {
+          console.error("[stripe-webhook] Failed to send subscription alert", { error });
+        }
+      }
+    }
   }
 
   return NextResponse.json({ received: true });

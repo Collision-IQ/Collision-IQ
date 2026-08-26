@@ -10,6 +10,20 @@ import type Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
 import { prisma } from "@/lib/prisma";
+import { sendPurchaseAlert, sendSubscriptionAlert } from "@/lib/email/sendAlerts";
+
+// Map serviceType to human-readable names
+const SERVICE_TYPE_LABELS: Record<string, string> = {
+  value_iq: "Value IQ — ACV + Diminished Value Report",
+  value_iq_consult_dv: "Value IQ Consult — Diminished Value",
+  value_iq_consult_vd: "Value IQ Consult — Value Dispute",
+  academy_diminished_value: "Diminished Value",
+  academy_value_dispute: "Value Dispute",
+  academy_acv_review: "ACV Review",
+  academy_appraisal: "Appraisal",
+  academy_legal_assist: "Legal Assist",
+  academy_rekey_estimating: "Rekey Estimating",
+};
 
 export type CreateServiceCaseParams = {
   userId?: string | null;
@@ -246,6 +260,32 @@ export async function createServiceCaseFromCheckoutSession(params: {
     attachmentCount: attachmentIds.length,
     hasReviewSnapshot: Boolean(reportContext.snapshot),
   });
+
+  // Send purchase alert email
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true },
+    });
+
+    if (user) {
+      const serviceName = SERVICE_TYPE_LABELS[serviceType] || serviceType;
+      const userName = [user.firstName, user.lastName].filter(Boolean).join(" ") || undefined;
+
+      await sendPurchaseAlert({
+        serviceType,
+        serviceName,
+        userId,
+        userEmail: user.email || "unknown",
+        userName,
+        sessionId: session.id,
+        claimId: claimId || undefined,
+      });
+    }
+  } catch (error) {
+    console.error("[stripe-webhook] Failed to send purchase alert", { error });
+    // Don't let email errors block the webhook response
+  }
 
   return { ok: true, created: true, serviceCaseId: serviceCase.id };
 }
