@@ -8,7 +8,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import CollisionIqShepherdTour from "@/components/onboarding/CollisionIqShepherdTour";
 import { MembershipPopup } from "@/components/MembershipPopup";
 import { AppFooter } from "@/components/AppFooter";
-import { MembershipPopup } from "@/components/MembershipPopup";
 
 function getSiteUrl() {
   const rawUrl =

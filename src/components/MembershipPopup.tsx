@@ -30,7 +30,8 @@ export function MembershipPopup() {
             viewBox="0 0 800 600"
             xmlns="http://www.w3.org/2000/svg"
             className="w-full h-auto"
-            alt="Collision iQ Memberships - 30 days of Pro free at sign-up"
+            role="img"
+            aria-label="Collision iQ Memberships - 30 days of Pro free at sign-up"
           >
             <defs>
               <linearGradient id="bgGradient" x1="0%" y1="0%" x2="0%" y2="100%">
