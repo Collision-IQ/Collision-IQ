@@ -252,8 +252,20 @@ export default function TechnicalSystemsPage() {
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           {SYSTEMS.map((item) => (
             <div key={item.title} className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
-              <h3 className="text-2xl font-semibold">{item.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.description}</p>
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-2xl font-semibold">{item.title}</h3>
+                </div>
+                {/* Logo placeholder - replace with actual logos */}
+                <div className="w-16 h-16 rounded-xl bg-muted border border-border flex items-center justify-center flex-shrink-0">
+                  <div className="text-xs text-muted-foreground text-center">
+                    {item.title === "Shop-Flow" && "🏭"}
+                    {item.title === "Parts App" && "📦"}
+                    {item.title === "Shop Hub" && "🏠"}
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm leading-7 text-muted-foreground">{item.description}</p>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-border bg-muted px-3 py-2">{highlight}</li>)}</ul>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href={item.href} className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">View {item.title}</Link>
