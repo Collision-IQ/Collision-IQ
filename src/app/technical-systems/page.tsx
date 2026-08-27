@@ -58,7 +58,6 @@ const SYSTEMS = [
     title: "Shop-Flow",
     plan: "shop_flow" as PurchasablePlan,
     href: "/technical-systems/shop-flow",
-    priceLabel: "$200/month",
     description:
       "Tailored workflow software for estimate review, supplement handling, and cleaner repair-process execution.",
     highlights: [
@@ -71,7 +70,6 @@ const SYSTEMS = [
     title: "Parts App",
     plan: "parts_app" as PurchasablePlan,
     href: "/technical-systems/parts-app",
-    priceLabel: "$200/month",
     description:
       "Parts-focused process support and decision guidance inside the repair workflow.",
     highlights: [
@@ -84,7 +82,6 @@ const SYSTEMS = [
     title: "Shop Hub",
     plan: "shop_hub" as PurchasablePlan,
     href: "/technical-systems/shop-hub",
-    priceLabel: "$300/month",
     description:
       "A bundled operating system that includes both apps with a lower monthly price and free virtual onboarding.",
     highlights: [
@@ -255,15 +252,12 @@ export default function TechnicalSystemsPage() {
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           {SYSTEMS.map((item) => (
             <div key={item.title} className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
-              <div className="flex items-start justify-between gap-4">
-                <h3 className="text-2xl font-semibold">{item.title}</h3>
-                <div className="text-sm font-medium text-[var(--accent)]">{item.priceLabel}</div>
-              </div>
+              <h3 className="text-2xl font-semibold">{item.title}</h3>
               <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.description}</p>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-border bg-muted px-3 py-2">{highlight}</li>)}</ul>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href={item.href} className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">View {item.title}</Link>
-                <button type="button" onClick={scrollToLeadForm} className="rounded-2xl border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">Ask about tailoring this</button>
+                <button type="button" onClick={scrollToLeadForm} className="rounded-2xl border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">Contact / Start trial</button>
               </div>
             </div>
           ))}

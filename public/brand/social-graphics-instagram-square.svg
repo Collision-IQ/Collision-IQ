@@ -1,0 +1,56 @@
+<svg viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1a2a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#05080f;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1080" height="1080" fill="url(#bgGrad)"/>
+
+  <!-- Top text -->
+  <text x="540" y="100" font-size="56" font-weight="700" fill="white" text-anchor="middle">Your car was fixed.</text>
+  <text x="540" y="180" font-size="56" font-weight="700" fill="white" text-anchor="middle">Its value wasn't. 🚗💥</text>
+
+  <!-- Main headline -->
+  <text x="540" y="280" font-size="32" font-weight="700" fill="#ff6b35" text-anchor="middle">Collision iQ memberships</text>
+  <text x="540" y="320" font-size="32" font-weight="700" fill="#ff6b35" text-anchor="middle">are LIVE</text>
+
+  <!-- Subheading -->
+  <text x="540" y="400" font-size="18" fill="white" text-anchor="middle">Plus three new tools for your shop:</text>
+  <text x="540" y="435" font-size="18" fill="white" text-anchor="middle">Shop-Flow, Parts-App & Shop Hub</text>
+  <text x="540" y="475" font-size="18" fill="white" text-anchor="middle">One login. Four tools. Zero guesswork.</text>
+
+  <!-- Tier info -->
+  <text x="540" y="560" font-size="22" fill="#ff6b35" font-weight="600" text-anchor="middle">🆓 FREE</text>
+  <text x="540" y="595" font-size="16" fill="#b0b0b0" text-anchor="middle">create your account & explore the workspace</text>
+
+  <text x="540" y="650" font-size="22" fill="#ff6b35" font-weight="600" text-anchor="middle">⭐ STARTER $50/mo</text>
+  <text x="540" y="685" font-size="16" fill="#b0b0b0" text-anchor="middle">AI chat • 1 upload • basic analysis • 1 report export</text>
+
+  <text x="540" y="740" font-size="22" fill="#ff6b35" font-weight="600" text-anchor="middle">🚀 PRO $200/mo</text>
+  <text x="540" y="775" font-size="16" fill="#b0b0b0" text-anchor="middle">everything unlocked: supplement lines, negotiation drafts,</text>
+  <text x="540" y="805" font-size="16" fill="#b0b0b0" text-anchor="middle">rebuttal emails, side-by-side & line-by-line reports</text>
+
+  <!-- QR Codes section -->
+  <text x="540" y="890" font-size="24" font-weight="600" fill="white" text-anchor="middle">📲 SCAN TO JOIN</text>
+
+  <g id="qr-collision-iq">
+    <rect x="200" y="920" width="140" height="140" fill="#ffffff" stroke="#cccccc" stroke-width="2" rx="8"/>
+    <text x="270" y="1060" font-size="16" fill="white" text-anchor="middle" font-weight="600">Collision iQ</text>
+  </g>
+
+  <g id="qr-shop-flow">
+    <rect x="470" y="920" width="140" height="140" fill="#ffffff" stroke="#cccccc" stroke-width="2" rx="8"/>
+    <text x="540" y="1060" font-size="16" fill="white" text-anchor="middle" font-weight="600">Shop-Flow</text>
+  </g>
+
+  <g id="qr-parts-app">
+    <rect x="740" y="920" width="140" height="140" fill="#ffffff" stroke="#cccccc" stroke-width="2" rx="8"/>
+    <text x="810" y="1060" font-size="16" fill="white" text-anchor="middle" font-weight="600">Parts-App</text>
+  </g>
+
+  <!-- Footer hashtags -->
+  <text x="540" y="1020" font-size="12" fill="#666666" text-anchor="middle">#CollisionRepair #AutoBody #BodyShop #DiminishedValue #InsuranceClaims #CarRepair #AutoBodyLife #CollisionIQ #ShopLife</text>
+</svg>

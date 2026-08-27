@@ -1,0 +1,53 @@
+<svg viewBox="0 0 1200 628" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1a2a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#05080f;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="628" fill="url(#bgGrad)"/>
+
+  <!-- Left side content -->
+  <text x="60" y="80" font-size="48" font-weight="700" fill="white">Your car was fixed.</text>
+  <text x="60" y="140" font-size="48" font-weight="700" fill="white">Its value wasn't.</text>
+
+  <text x="60" y="200" font-size="20" fill="#b0b0b0">Collision iQ memberships are open — plus three new tools for your shop.</text>
+  <text x="60" y="235" font-size="20" fill="#b0b0b0">Shop-Flow, Parts App & Shop Hub. One login. Four tools. Zero guesswork.</text>
+
+  <!-- Tiers -->
+  <text x="60" y="320" font-size="16" fill="#ff6b35" font-weight="600">FREE — create your account & explore</text>
+  <text x="60" y="360" font-size="16" fill="#b0b0b0">⭐ STARTER $50/mo — AI chat • Research • Scan iQ • Snapshot customer report</text>
+  <text x="60" y="400" font-size="16" fill="#b0b0b0">🚀 PRO $200/mo — everything unlocked: supplement lines, negotiation drafts, rebuttal emails, side-by-side & line-by-line reports</text>
+
+  <text x="60" y="480" font-size="16" fill="#a0a0a0">Enterprise coming soon</text>
+  <text x="60" y="520" font-size="16" fill="#a0a0a0">📲 Scan the QR codes on the graphic — or hit the link in bio.</text>
+
+  <!-- Right side - QR codes placeholder -->
+  <text x="800" y="100" font-size="24" font-weight="600" fill="white" text-anchor="middle">SCAN TO JOIN</text>
+
+  <g id="qr-collision-iq">
+    <rect x="750" y="140" width="100" height="100" fill="#ffffff" stroke="#cccccc" stroke-width="2"/>
+    <text x="800" y="260" font-size="14" fill="white" text-anchor="middle" font-weight="600">Collision iQ</text>
+  </g>
+
+  <g id="qr-shop-flow">
+    <rect x="900" y="140" width="100" height="100" fill="#ffffff" stroke="#cccccc" stroke-width="2"/>
+    <text x="950" y="260" font-size="14" fill="white" text-anchor="middle" font-weight="600">Shop-Flow</text>
+  </g>
+
+  <g id="qr-parts-app">
+    <rect x="750" y="320" width="100" height="100" fill="#ffffff" stroke="#cccccc" stroke-width="2"/>
+    <text x="800" y="440" font-size="14" fill="white" text-anchor="middle" font-weight="600">Parts-App</text>
+  </g>
+
+  <g id="qr-shop-hub">
+    <rect x="900" y="320" width="100" height="100" fill="#ffffff" stroke="#cccccc" stroke-width="2"/>
+    <text x="950" y="440" font-size="14" fill="white" text-anchor="middle" font-weight="600">Shop Hub</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="60" y="600" font-size="14" fill="#666666" font-weight="600">collision-iq.ai</text>
+  <text x="1140" y="600" font-size="12" fill="#666666" text-anchor="end">#CollisionRepair #AutoBody #DiminishedValue #CollisionIQ</text>
+</svg>
