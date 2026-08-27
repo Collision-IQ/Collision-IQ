@@ -374,11 +374,19 @@ export function resolveHigherEstimatePdfSelection(params: {
     } => typeof candidate.total === "number" && Number.isFinite(candidate.total))
     .sort((a, b) => b.total - a.total || a.index - b.index);
 
+  // CR-2 (GATE-TARGET, Citation fix v2): auto target selection requires BOTH
+  // totals to be readable. With only one readable total there is no delta
+  // direction — Test 100 annotated "the document that parsed" (the higher
+  // one) after the Mitchell totals failed to read, which inverts the report.
+  // Returning null routes the pair to the standard resolver's explicit
+  // ambiguity handling instead of silently defaulting.
+  if (candidates.length < 2) return null;
+
   const highest = candidates[0];
-  if (!highest) return null;
   const comparison = candidates.find((candidate) => candidate.attachment.id !== highest.attachment.id);
+  if (!comparison) return null;
   // Both totals identical → no meaningful delta direction; let the caller fall back.
-  if (comparison && comparison.total === highest.total) return null;
+  if (comparison.total === highest.total) return null;
 
   return buildSelectionResult({
     attachment: highest.attachment,

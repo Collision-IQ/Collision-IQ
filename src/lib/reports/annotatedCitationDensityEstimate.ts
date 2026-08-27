@@ -9,6 +9,7 @@ import {
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf } from "./forensicReportRenderer";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
+import { normalizeOverprintLine, normalizeOverprintText } from "./overprintNormalize";
 import {
   PDFDocument,
   StandardFonts,
@@ -515,13 +516,23 @@ function engineResultToLineItemDeltas(params: {
   };
 }
 
-/** Group extracted PdfWords into the delta engine's per-page Word map. */
+/** Group extracted PdfWords into the delta engine's per-page Word map.
+ *  Word text goes through the overprint collapse (CR-3): Mitchell bold rows
+ *  double every glyph in the WORD layer too ("$$77,,117744..8811"), and no
+ *  money or label pattern in the engine matches the doubled form. Identity on
+ *  plain text. */
 function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
   const byPage = new Map<number, DeltaEngineWord[]>();
   for (const word of words) {
     const list = byPage.get(word.pageNumber) ?? [];
     if (list.length === 0) byPage.set(word.pageNumber, list);
-    list.push({ text: word.text, x0: word.x, x1: word.x + word.width, top: word.y, bottom: word.y + word.height });
+    list.push({
+      text: normalizeOverprintLine(word.text),
+      x0: word.x,
+      x1: word.x + word.width,
+      top: word.y,
+      bottom: word.y + word.height,
+    });
   }
   return byPage;
 }
@@ -1599,12 +1610,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // blocks ONLY on positive disagreement of a strong key (VIN, claim number)
   // — absent evidence never proves a mismatch, and the weak keys are the
   // producer's formatting choice (see claimIdentityGate).
-  const gateSourceIdentity = readClaimIdentity(params.sourceText ?? "");
+  // Identity is read from NORMALIZED text (CR-0/R-2): Mitchell prints header
+  // fields bold, so the raw layer reads "CCllaaiimm ##" and a raw-text regex
+  // misses every field on that platform.
+  const gateSourceIdentity = readClaimIdentity(normalizeOverprintText(params.sourceText ?? ""));
   for (const comparison of params.comparisonEstimateTexts ?? []) {
     if (!comparison.text?.trim()) continue;
-    const comparisonIdentity = readClaimIdentity(comparison.text);
+    const comparisonIdentity = readClaimIdentity(normalizeOverprintText(comparison.text));
     const verdict = compareClaimIdentity(gateSourceIdentity, comparisonIdentity);
-    if (!verdict.blocked) continue;
+    if (!verdict.blocked) {
+      // CR-0: a pair that continued on the VIN fallback (or with a VIN
+      // advisory) says so where the BLOCKED box would have rendered.
+      for (const warning of verdict.warnings ?? []) warnings.push(warning);
+      continue;
+    }
     appendToolUsageTrace(trace, {
       tool: "claim_identity_gate",
       ran: true,
@@ -3396,7 +3415,11 @@ export function buildRequiredEstimatorDeltaFindings(
           score: isTeslaOrEv ? 66 : 60,
           safetyImpact: isTeslaOrEv ? "high" : "medium",
           priority: "high",
-          currentSupportSummary: `Carrier/source rows affected: ${summarizeWheelCarrierEvidence(context.anchors)}. Anchored row: ${rowText}. Carrier allowed labor: ${anchor.labor ?? "missing/0.0"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|alignment|access|r&i|remove|install|replacement|repl/i)}.`,
+          // CR-7 (R26, Citation fix v2): an unread labor cell is UNKNOWN, not
+          // zero. "missing/0.0" asserted the carrier allowed nothing about a
+          // value this pass never read — Test 98 F47 and Test 100 both shipped
+          // that false claim, once against rows that visibly carried hours.
+          currentSupportSummary: `Carrier/source rows affected: ${summarizeWheelCarrierEvidence(context.anchors)}. Anchored row: ${rowText}. Carrier allowed labor: ${typeof anchor.labor === "number" ? anchor.labor : "not read from the document (unknown — not asserted as zero)"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|alignment|access|r&i|remove|install|replacement|repl/i)}.`,
           missingProofSummary: "Carrier may be missing or inadequately documenting wheel R&I/access labor. Wheel repair, wheel cover, mount/balance, wheel replacement, tire replacement, or wheel-opening access may require line-item R&I/access labor when removal is needed for liner, flare, bumper hardware, or wheel-end access.",
           recommendedNextAction: "Request line-item wheel R&I/access labor or a written included-operation basis explaining where the wheel removal/access labor is included.",
           missingAuthorityTypes: ["line-item R&I/access labor basis", "included-operation basis", "shop comparison estimate"],
@@ -3557,8 +3580,26 @@ export function buildRequiredEstimatorDeltaFindings(
     { vehicleMake: context.vehicleMake, jurisdiction: context.jurisdiction }
   );
 
+  // CR-8 (R25, Citation fix v2): one finding per (category, gap type,
+  // affected-line set). Anchor choice is presentation, not identity — Test 100
+  // rendered the same wheel-labor finding twice, identical affected rows
+  // {16, 17, 20}, differing only in which row it anchored to. Findings citing
+  // no line numbers keep their own identity (document-level findings are not
+  // interchangeable).
+  const seenFindingKeys = new Set<string>();
+  const dedupedFindings = findings.filter((finding) => {
+    const lines = [finding.shopEvidence?.lineNumber, finding.carrierEvidence?.lineNumber]
+      .map((line) => (line === null || line === undefined ? "" : String(line).trim()))
+      .filter(Boolean);
+    if (lines.length === 0) return true;
+    const key = `${finding.category}|${finding.estimateGapType ?? ""}|${[...new Set(lines)].sort().join(",")}`;
+    if (seenFindingKeys.has(key)) return false;
+    seenFindingKeys.add(key);
+    return true;
+  });
+
   return {
-    findings,
+    findings: dedupedFindings,
     // Built here because this is the only scope holding both documents' parsed
     // totals blocks; the PDF assembly downstream cannot reach the delta engine.
     forensic: {

@@ -17,6 +17,7 @@ import {
   nameTokens,
   readClaimIdentity,
   sameClaimNumber,
+  foldVinForComparison,
   sameVehicleHead,
   type ClaimIdentity,
 } from "../claimIdentityGate";
@@ -238,13 +239,27 @@ describe("an RO number never blocks a comparison, and a filename never speaks", 
     expect(verdict.unverified).toBe(false);
   });
 
-  it("still blocks when a strong key disagrees, whatever the RO numbers say", () => {
-    const matchingRo = compareClaimIdentity(
+  it("CR-0: a claim match carries the pair even when the VINs disagree", () => {
+    // Rule change (Citation fix v2, owner-stated): claim number first. The
+    // helper's default claim number matches on both sides, so the differing
+    // VIN is an advisory, not a block — the old contract blocked here.
+    const matchingClaim = compareClaimIdentity(
       identity({ roNumber: "22186", vin: "5YJSA1E65NF488007" }),
       identity({ roNumber: "22186", vin: "5YJ3E1EA8JF006632" })
     );
-    expect(matchingRo.blocked).toBe(true);
-    expect(matchingRo.conflicting).toContain("vin");
+    expect(matchingClaim.blocked).toBe(false);
+    expect(matchingClaim.basis).toBe("claim number");
+    expect(matchingClaim.conflicting).toContain("vin");
+    expect((matchingClaim.warnings ?? []).join(" ")).toMatch(/VINs differ/);
+  });
+
+  it("still blocks when a strong key disagrees and no other strong key rescues it", () => {
+    const verdict = compareClaimIdentity(
+      identity({ claimNumber: null, vin: "5YJSA1E65NF488007" }),
+      identity({ claimNumber: null, vin: "5YJ3E1EA8JF006632" })
+    );
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.conflicting).toContain("vin");
   });
 
   it("reads identity only from document text, never from a file name", () => {
@@ -277,5 +292,82 @@ describe("stacked print variants are the same claim — the 21347 false block", 
 
   it("still rejects a long glued prefix — that is a different number", () => {
     expect(sameClaimNumber("99887720274293880101072", "0274293880101072")).toBe(false);
+  });
+});
+
+describe("CR-0 GATE-IDENTITY — claim first, VIN fallback (Citation fix v2)", () => {
+  const ident = (over: Partial<ClaimIdentity>): ClaimIdentity => ({
+    vin: null,
+    claimNumber: null,
+    roNumber: null,
+    ownerTokens: [],
+    vehicle: null,
+    ...over,
+  });
+
+  it("continues on the VIN when the claim numbers differ — the 26 Aug Allstate pair", () => {
+    const shop = ident({ claimNumber: "0835185430", vin: "5FNYF8H58PB001022" });
+    const carrier = ident({ claimNumber: "000835185430B03", vin: "5FNYF8H58PB001022" });
+    const verdict = compareClaimIdentity(shop, carrier);
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.basis).toBe("vin");
+    expect((verdict.warnings ?? []).join(" ")).toMatch(/Claim numbers differ/);
+  });
+
+  it("the OCR'd scan matches through the fold", () => {
+    const shop = ident({ claimNumber: "0835185430", vin: "5FNYF8H58PB001022" });
+    const scan = ident({ claimNumber: "OO0835185430B03", vin: "5FNYF8H58PB0O1022" });
+    const verdict = compareClaimIdentity(shop, scan);
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.basis).toBe("vin");
+  });
+
+  it("a matching claim establishes identity without needing the VIN", () => {
+    const a = ident({ claimNumber: "8848396030000002" });
+    const b = ident({ claimNumber: "8848396030000002-01" });
+    const verdict = compareClaimIdentity(a, b);
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.basis).toBe("claim number");
+  });
+
+  it("claims match but VINs differ: proceeds on claim, with the advisory", () => {
+    const a = ident({ claimNumber: "12345678", vin: "5FNYF8H58PB001022" });
+    const b = ident({ claimNumber: "12345678", vin: "1HGCM82633A004352" });
+    const verdict = compareClaimIdentity(a, b);
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.basis).toBe("claim number");
+    expect((verdict.warnings ?? []).join(" ")).toMatch(/VINs differ/);
+  });
+
+  it("blocks the Test-94 cross-claim pair — both fields disagree", () => {
+    const a = ident({ claimNumber: "0835185430", vin: "5FNYF8H58PB001022" });
+    const b = ident({ claimNumber: "0999999999", vin: "1HGCM82633A004352" });
+    const verdict = compareClaimIdentity(a, b);
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.basis).toBe(null);
+  });
+
+  it("still never blocks on absent evidence", () => {
+    const verdict = compareClaimIdentity(ident({}), ident({}));
+    expect(verdict.blocked).toBe(false);
+    expect(verdict.unverified).toBe(true);
+  });
+
+  it("advises when the dates of loss differ on a VIN-basis pass", () => {
+    const a = ident({ claimNumber: "111111111", vin: "5FNYF8H58PB001022", dateOfLoss: "03/12/2026" });
+    const b = ident({ claimNumber: "222222222", vin: "5FNYF8H58PB001022", dateOfLoss: "08/04/2026" });
+    const verdict = compareClaimIdentity(a, b);
+    expect(verdict.blocked).toBe(false);
+    expect((verdict.warnings ?? []).join(" ")).toMatch(/Dates of loss differ/);
+  });
+
+  it("foldVinForComparison requires 17 characters and folds O/I/Q", () => {
+    expect(foldVinForComparison("5FNYF8H58PB0O1022")).toBe("5FNYF8H58PB001022");
+    expect(foldVinForComparison("5FNYF8H58PB00102")).toBe("");
+    expect(foldVinForComparison("SAL1P9EU1S")).toBe("");
+  });
+
+  it("findVin tolerates an OCR'd letter after the VIN label", () => {
+    expect(findVin("VIN: 5FNYF8H58PB0O1022")).toBe("5FNYF8H58PB001022");
   });
 });
