@@ -48,6 +48,7 @@ import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
 import ToolboxPanel from "@/components/workspace/ToolboxPanel";
 import MyVehiclePanel from "@/components/workspace/MyVehiclePanel";
 import ScanIqPanel from "@/components/workspace/ScanIqPanel";
+import { MembershipPopup } from "@/components/MembershipPopup";
 import {
   WorkspaceCalibrationPanel,
   WorkspaceEvidencePanel,
@@ -520,6 +521,7 @@ export default function CollisionWorkspaceV2({
               Collapse
             </button>
             {NAV_ITEMS.map((item) => renderNavItem(item))}
+            <MembershipPopup />
             <div className="mt-auto flex flex-col gap-1">
               {NAV_FOOTER_ITEMS.map((item) => renderNavItem(item))}
               <button

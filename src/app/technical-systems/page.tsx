@@ -38,12 +38,16 @@ const SUBSCRIPTIONS = [
     title: "Starter",
     plan: "starter" as PurchasablePlan,
     priceLabel: "$50/month",
+    logo: "/iq/iq-app.png",
+    logoAlt: "Collision iQ",
     features: ["Chat access", "1 upload", "1 export", "Best for lighter usage after trial"],
   },
   {
     title: "Pro",
     plan: "pro" as PurchasablePlan,
     priceLabel: "$200/month",
+    logo: "/iq/iq-app.png",
+    logoAlt: "Collision iQ",
     features: [
       "Full Collision IQ features",
       "Advanced analysis",
@@ -58,6 +62,8 @@ const SYSTEMS = [
     title: "Shop-Flow",
     plan: "shop_flow" as PurchasablePlan,
     href: "/technical-systems/shop-flow",
+    logo: "/shop_flow/brand/collision-flow-app-icon.png",
+    logoAlt: "Shop-Flow",
     description:
       "Tailored workflow software for estimate review, supplement handling, and cleaner repair-process execution.",
     highlights: [
@@ -70,6 +76,8 @@ const SYSTEMS = [
     title: "Parts App",
     plan: "parts_app" as PurchasablePlan,
     href: "/technical-systems/parts-app",
+    logo: "/parts_app/brand/collision-iq-parts-app-icon.png",
+    logoAlt: "Parts App",
     description:
       "Parts-focused process support and decision guidance inside the repair workflow.",
     highlights: [
@@ -82,6 +90,8 @@ const SYSTEMS = [
     title: "Shop Hub",
     plan: "shop_hub" as PurchasablePlan,
     href: "/technical-systems/shop-hub",
+    logo: "/shop-hub/shop-hub-logo.png",
+    logoAlt: "Shop Hub",
     description:
       "A bundled operating system that includes both apps with a lower monthly price and free virtual onboarding.",
     highlights: [
@@ -238,8 +248,19 @@ export default function TechnicalSystemsPage() {
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           {SUBSCRIPTIONS.map((item) => (
             <div key={item.title} className={`rounded-3xl border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] ${item.title === "Pro" ? "border-[var(--accent)]/40" : "border-border"}`}>
-              <div className="text-lg font-semibold">{item.title}</div>
-              <div className="mt-2 text-2xl font-bold">{item.priceLabel}</div>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold">{item.title}</div>
+                  <div className="mt-2 text-2xl font-bold">{item.priceLabel}</div>
+                </div>
+                <Image
+                  src={item.logo}
+                  alt={item.logoAlt}
+                  width={112}
+                  height={112}
+                  className="h-12 w-auto max-w-[120px] shrink-0 rounded-lg object-contain"
+                />
+              </div>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.features.map((feature) => <li key={feature} className="rounded-xl border border-border bg-muted px-3 py-2">{feature}</li>)}</ul>
               <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className={`mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${item.title === "Pro" ? "bg-[var(--accent)] text-black hover:opacity-90" : "border border-border bg-background text-foreground hover:bg-muted"}`}>{activeCheckout === item.plan ? "Redirecting..." : "Choose a Collision IQ Plan"}</button>
             </div>
@@ -256,14 +277,13 @@ export default function TechnicalSystemsPage() {
                 <div>
                   <h3 className="text-2xl font-semibold">{item.title}</h3>
                 </div>
-                {/* Logo placeholder - replace with actual logos */}
-                <div className="w-16 h-16 rounded-xl bg-muted border border-border flex items-center justify-center flex-shrink-0">
-                  <div className="text-xs text-muted-foreground text-center">
-                    {item.title === "Shop-Flow" && "🏭"}
-                    {item.title === "Parts App" && "📦"}
-                    {item.title === "Shop Hub" && "🏠"}
-                  </div>
-                </div>
+                <Image
+                  src={item.logo}
+                  alt={item.logoAlt}
+                  width={128}
+                  height={128}
+                  className="h-14 w-auto max-w-[140px] shrink-0 rounded-lg object-contain"
+                />
               </div>
               <p className="text-sm leading-7 text-muted-foreground">{item.description}</p>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-border bg-muted px-3 py-2">{highlight}</li>)}</ul>

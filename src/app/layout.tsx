@@ -6,7 +6,6 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import NativeAuthBridge from "@/components/NativeAuthBridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import CollisionIqShepherdTour from "@/components/onboarding/CollisionIqShepherdTour";
-import { MembershipPopup } from "@/components/MembershipPopup";
 import { AppFooter } from "@/components/AppFooter";
 
 function getSiteUrl() {
@@ -101,7 +100,6 @@ export default function RootLayout({
         {children}
         <AppFooter />
       </div>
-      <MembershipPopup />
     </>
   );
 
@@ -137,7 +135,6 @@ export default function RootLayout({
           <ThemeProvider>
             {content}
           </ThemeProvider>
-          <MembershipPopup />
           <CollisionIqShepherdTour />
           <NativeAuthBridge />
           <SpeedInsights />
