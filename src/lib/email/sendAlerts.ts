@@ -1,6 +1,17 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Constructed lazily (mirrors src/lib/billing/stripe.ts): a top-level
+// `new Resend(...)` throws immediately when RESEND_API_KEY is unset, which
+// crashed `next build`'s page-data collection for every route that imports
+// this module transitively, in any environment without the key configured.
+let resend: Resend | null | undefined;
+function getResend(): Resend | null {
+  if (resend === undefined) {
+    const apiKey = process.env.RESEND_API_KEY?.trim();
+    resend = apiKey ? new Resend(apiKey) : null;
+  }
+  return resend;
+}
 
 export async function sendPurchaseAlert(params: {
   serviceType: string;
@@ -35,8 +46,13 @@ Claim ID: ${claimId || "—"}
 Timestamp: ${new Date().toISOString()}
   `.trim();
 
+  const client = getResend();
+  if (!client) {
+    console.warn("[sendPurchaseAlert] RESEND_API_KEY not set — skipping alert email.");
+    return;
+  }
   try {
-    await resend.emails.send({
+    await client.emails.send({
       from: "reports@collision-iq.ai",
       to: adminEmail,
       subject: `[Value IQ] Purchase Alert: ${serviceName}`,
@@ -78,8 +94,13 @@ Session ID: ${sessionId}
 Timestamp: ${new Date().toISOString()}
   `.trim();
 
+  const client = getResend();
+  if (!client) {
+    console.warn("[sendSubscriptionAlert] RESEND_API_KEY not set — skipping alert email.");
+    return;
+  }
   try {
-    await resend.emails.send({
+    await client.emails.send({
       from: "reports@collision-iq.ai",
       to: adminEmail,
       subject: `[Collision iQ] Subscription Alert: ${subscriptionName}`,

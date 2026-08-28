@@ -521,8 +521,8 @@ export default function CollisionWorkspaceV2({
               Collapse
             </button>
             {NAV_ITEMS.map((item) => renderNavItem(item))}
-            <MembershipPopup />
             <div className="mt-auto flex flex-col gap-1">
+              <MembershipPopup />
               {NAV_FOOTER_ITEMS.map((item) => renderNavItem(item))}
               <button
                 type="button"
