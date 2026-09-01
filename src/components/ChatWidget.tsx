@@ -34,6 +34,7 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
+  extractPastedImageFiles,
   formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
@@ -4455,6 +4456,43 @@ export default function ChatWidget({
     void handleFilesSelected(Array.from(event.dataTransfer.files));
   }
 
+  /**
+   * Screenshot paste. Reuses the drop/picker intake wholesale, so a pasted
+   * image gets the same validation, plan limits, upload lifecycle and vision
+   * processing as one that was dragged in.
+   *
+   * The event is only consumed when there is actually an image to attach;
+   * every other paste (including text copied alongside a bitmap) falls through
+   * to the browser untouched.
+   */
+  function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (disabled || uploadLimitsLoading) return;
+
+    const clipboardData = event.clipboardData;
+    if (!clipboardData) return;
+
+    // clipboardData.files is empty in some browsers; items is the fallback.
+    const clipboardFiles = clipboardData.files?.length
+      ? Array.from(clipboardData.files)
+      : Array.from(clipboardData.items ?? [])
+          .filter((item) => item.kind === "file")
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => Boolean(file));
+
+    const pastedImages = extractPastedImageFiles({
+      files: clipboardFiles,
+      plainText: clipboardData.getData("text/plain"),
+    });
+    if (!pastedImages.length) return;
+
+    event.preventDefault();
+    console.info("[attachments] clipboard image pasted", {
+      count: pastedImages.length,
+      names: pastedImages.map((file) => file.name),
+    });
+    void handleFilesSelected(pastedImages);
+  }
+
   function removeAttachment(attachmentId: string) {
     if (disabled) return;
     const target = attachments.find((attachment) => attachment.attachmentId === attachmentId);
@@ -5287,6 +5325,7 @@ export default function ChatWidget({
                     : "min-h-11 max-h-[88px] px-3 py-2 leading-5",
                 ].join(" ")}
                 data-tour="chat-input"
+                onPaste={handleComposerPaste}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();

@@ -241,3 +241,102 @@ export function buildAttachmentBatchStatus(
 
   return `${files.length} files ${verb}: ${parts.join(", ")}.`;
 }
+
+/**
+ * Clipboard image paste (screenshots).
+ *
+ * Screenshots arrive on the clipboard as an image file with a generic, or
+ * absent, filename — every one is "image.png". Left alone they stack up in the
+ * attachment tray under identical names, and the model sees the same
+ * meaningless label on each. So generic names are replaced with a timestamped
+ * one while a real filename (copying an actual image file from the desktop) is
+ * preserved.
+ *
+ * Vision compatibility is NOT re-gated here: paste accepts exactly what
+ * drag-drop and the file picker accept (any image/*), so one intake path never
+ * silently rejects what another allows. The server reports hasVision per
+ * attachment, as it already does for dropped files.
+ */
+
+/** Extensions for the types chat vision actually reads; see openAiVisionInput.ts. */
+const CLIPBOARD_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+/**
+ * Names browsers invent for clipboard bitmaps. Anything matching is treated as
+ * "no real name" and replaced; anything else is the user's own file name.
+ */
+const GENERIC_CLIPBOARD_NAME = /^(?:image|blob|unknown|screenshot|clipboard|untitled)?(?:\.[a-z0-9]+)?$/i;
+
+export type ClipboardImageInput = {
+  /** Files already resolved from clipboardData (files, or items fallback). */
+  files: readonly File[];
+  /** clipboardData.getData("text/plain"). */
+  plainText: string;
+};
+
+function twoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+export function buildPastedImageName(mime: string, now: Date, index: number): string {
+  const subtype = mime.toLowerCase().split("/")[1] ?? "";
+  const extension =
+    CLIPBOARD_IMAGE_EXTENSIONS[mime.toLowerCase()] ??
+    (subtype.replace(/[^a-z0-9]/g, "") || "png");
+
+  const stamp = [
+    now.getFullYear(),
+    twoDigits(now.getMonth() + 1),
+    twoDigits(now.getDate()),
+  ].join("-");
+  const time = [
+    twoDigits(now.getHours()),
+    twoDigits(now.getMinutes()),
+    twoDigits(now.getSeconds()),
+  ].join("");
+
+  const suffix = index > 0 ? `-${index + 1}` : "";
+  return `screenshot-${stamp}-${time}${suffix}.${extension}`;
+}
+
+export function hasMeaningfulClipboardText(plainText: string): boolean {
+  return plainText.trim().length > 0;
+}
+
+/**
+ * Returns the image files to attach for a paste, or [] to let the browser
+ * paste normally.
+ *
+ * A clipboard carrying real text is always treated as a text paste, even when
+ * an image is also present: Excel, Word and Outlook put BOTH a bitmap and
+ * text/plain on the clipboard, so attaching on image-presence alone would
+ * staple a spurious screenshot to every copied cell or quoted paragraph.
+ * A genuine screenshot has no text/plain.
+ */
+export function extractPastedImageFiles(
+  input: ClipboardImageInput,
+  now: Date = new Date()
+): File[] {
+  if (hasMeaningfulClipboardText(input.plainText)) return [];
+
+  const images = input.files.filter((file) => isLikelyImageFile(file));
+  if (!images.length) return [];
+
+  return images.map((file, index) => {
+    const currentName = file.name?.trim() ?? "";
+    if (currentName && !GENERIC_CLIPBOARD_NAME.test(currentName)) {
+      return file;
+    }
+
+    return new File([file], buildPastedImageName(file.type, now, index), {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+  });
+}
