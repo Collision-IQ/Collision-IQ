@@ -13,8 +13,8 @@ artifact), so this section is the authoritative record.
 
 | | |
 | --- | --- |
-| Vercel team | Collision Academy (`team_5XjHltnVsDuAVNds0chKVvkT`) |
-| Production project | `collision-iq-origin-main-test` |
+| Vercel team | Collision Academy — slug `collision-academy`, `team_aEEgnYVJ9InLRAfFxgu4GaO9` |
+| Production project | `collision-iq-origin-main-test` (`prj_0Tr5i29rXzcuqslnCtYTOUDotvyp`) |
 | Production domain | `https://www.collision-iq.ai` |
 | Deploys on | push to `main` |
 | Mobile (Capacitor) | loads the SAME origin — see `capacitor.config.ts`, `PRODUCTION_SERVER_URL` |
@@ -22,8 +22,24 @@ artifact), so this section is the authoritative record.
 There is one production surface. Web and mobile share it; the Capacitor shell
 is a native wrapper around `www.collision-iq.ai`, not a separate build target.
 
+**Two teams answer to "Collision Academy".** The other one — slug
+`collision-academy-82dbb1d7`, `team_5XjHltnVsDuAVNds0chKVvkT` — contains only
+`motor-ebook` and serves no part of this product. This table recorded that ID
+until 2026-09-01, which sent two verification attempts looking for the
+production project on a team that has never held it. Match on the team ID
+above, not on the display name.
+
 **Verifying a release.** Confirm the deployment for the pushed commit SHA
-reaches **Ready** on `collision-iq-origin-main-test`. A `target: production`
+reaches **Ready** on `collision-iq-origin-main-test`, and that
+`www.collision-iq.ai` actually aliases to that deployment — the alias is the
+part that proves real traffic is being served:
+
+```bash
+npx vercel login   # once; the CLI stores the token globally
+npx vercel ls collision-iq-origin-main-test --scope collision-academy
+```
+
+A `target: production`
 field on some other project is NOT evidence — more than one project can be
 connected to this repository at a time, and a project can report
 `target: production` while serving no real domain.
