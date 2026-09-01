@@ -44,12 +44,19 @@ export function buildQuickChatSystemPrompt(params: {
   audienceDirective?: string;
   /** Honest capability boundary for questions the chat has no lane for. */
   capabilityNotes?: string;
+  /**
+   * Verified knowledge promoted by the Collision Learning Engine. Already
+   * rendered as a directive block by promotedKnowledgeDirective.ts; empty when
+   * nothing is in scope for this turn.
+   */
+  promotedKnowledge?: string;
 }): string {
   return [
     QUICK_VOICE_RULES.join("\n"),
     params.audienceDirective,
     params.capabilityNotes,
     params.productAccessGuard,
+    params.promotedKnowledge,
     params.activeCaseGuard,
     params.caseContext ? `CASE CONTEXT (already reviewed — answer from this, never ask the user to re-upload):\n${params.caseContext}` : null,
   ]

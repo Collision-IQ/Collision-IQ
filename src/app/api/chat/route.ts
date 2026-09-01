@@ -73,6 +73,7 @@ import {
   recordAgentRetrievalStep,
   type AgentRetrievalTrace,
 } from "@/lib/ai/agentRetrievalTrace";
+import { buildPromotedKnowledgeSystemDirective } from "@/lib/ai/promotedKnowledge";
 import {
   buildLargeCaseChatContext,
   countLargeCaseSummaryArtifacts,
@@ -1462,6 +1463,16 @@ export async function POST(req: Request) {
       });
     }
 
+    // Knowledge the Collision Learning Engine has PROMOTED — source-verified,
+    // benchmark-gated and approved by a Platform Admin — becomes one more
+    // system directive. Scope is drawn from the active case vehicle and the
+    // request jurisdiction so manufacturer-specific knowledge never crosses to
+    // another make. This is read-only: the learning engine never writes here.
+    const promotedKnowledgeDirective = await buildPromotedKnowledgeSystemDirective({
+      oem: openActiveCase?.vehicle.make ?? null,
+      jurisdiction: body.jurisdiction?.stateCode ?? null,
+    });
+
     // Quick mode (the default) swaps the formal instruction stack for the
     // conversational voice: short, natural replies with no section
     // scaffolding, no internal tokens, and no mentor tone. The full formal
@@ -1478,6 +1489,7 @@ export async function POST(req: Request) {
           responseShapeInstruction,
           NO_INTERNAL_TOKENS_RULE,
           STRUCTURED_WRITING_DIRECTIVE,
+          promotedKnowledgeDirective,
           buildActiveCaseSystemGuard({
             hasStoredEvidence: activeCaseHasStoredEvidence,
             hasVehicleContext: activeCaseHasVehicleContext,
@@ -1494,6 +1506,7 @@ export async function POST(req: Request) {
           // sends the profile; only research mode was consuming it.
           audienceDirective: buildConversationBehaviorDirective(body.assistanceProfile),
           capabilityNotes: CHAT_CAPABILITY_BOUNDARIES,
+          promotedKnowledge: promotedKnowledgeDirective,
           activeCaseGuard: buildActiveCaseSystemGuard({
             hasStoredEvidence: activeCaseHasStoredEvidence,
             hasVehicleContext: activeCaseHasVehicleContext,
