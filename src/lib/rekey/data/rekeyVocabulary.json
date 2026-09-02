@@ -1,0 +1,172 @@
+{
+  "$comment": [
+    "Rekey vocabulary — Mitchell/platform estimate wording mapped to CCC ONE",
+    "keying vocabulary and CIECA EMS v2.01 codes.",
+    "",
+    "Universality directive: this file holds PLATFORM vocabulary only. No",
+    "carrier, shop, make, model, claim or RO literal may ever appear here.",
+    "Knowing that 'Remove / Replace' is CCC's 'Repl' is estimating-platform",
+    "data, the same way operationAliases.json knows cross-carrier wording.",
+    "",
+    "Aliases are matched on the NORMALIZED form: uppercased, punctuation",
+    "collapsed to single spaces, whitespace collapsed. Write them that way.",
+    "Operation aliases are anchored at the START of a row description, longest",
+    "alias first, so a description word can never be read as an operation.",
+    "",
+    "ADDITIVE-ONLY. Estimators extend this file directly; no code change is",
+    "required. Anything not listed resolves to UNMAPPED and is carried through",
+    "verbatim and flagged for the estimator — it is never guessed."
+  ],
+
+  "operations": [
+    { "ccc": "Repl", "laborOpCode": "OP11", "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"] },
+    { "ccc": "R&I", "laborOpCode": "OP2", "aliases": ["REMOVE INSTALL", "REMOVE AND INSTALL", "R I", "REMOVE REINSTALL"] },
+    { "ccc": "Rpr", "laborOpCode": "OP9", "aliases": ["REPAIR", "RPR"] },
+    { "ccc": "Blnd", "laborOpCode": "OP15", "aliases": ["BLEND", "BLND"] },
+    { "ccc": "Refn", "laborOpCode": null, "refinishOnly": true, "aliases": ["REFINISH ONLY", "REFINISH", "REFN"] },
+    { "ccc": "O/H", "laborOpCode": null, "aliases": ["OVERHAUL", "O H"] },
+    { "ccc": "Aim", "laborOpCode": null, "aliases": ["CHECK ADJUST", "CHECK AND ADJUST", "AIM"] },
+    { "ccc": "Algn", "laborOpCode": "OP4", "aliases": ["ALIGN", "ALIGNMENT", "ALGN"] },
+    { "ccc": "Subl", "laborOpCode": "OP16", "sublet": true, "aliases": ["SUBLET", "SUBL"] },
+    {
+      "ccc": "Manual",
+      "laborOpCode": "OP0",
+      "manualEntry": true,
+      "aliases": [
+        "ADDITIONAL LABOR",
+        "ADDITIONAL OPERATIONS",
+        "ADDITIONAL OPERATION",
+        "ADDITIONAL COSTS",
+        "ADDITIONAL COST",
+        "MANUAL ENTRY",
+        "ADD"
+      ]
+    }
+  ],
+
+  "partTypes": [
+    { "ccc": "OEM", "ems": "PAN", "aliases": ["NEW OEM", "OEM", "NEW"] },
+    { "ccc": "CAPA A/M", "ems": "PAC", "aliases": ["AFTERMARKET CERTIFIED", "CERTIFIED AFTERMARKET", "CAPA"] },
+    { "ccc": "A/M", "ems": "PAA", "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
+    { "ccc": "LKQ", "ems": "PAL", "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
+    { "ccc": "Recond", "ems": "PAR", "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
+    { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"] },
+    { "ccc": "Sublet", "ems": null, "miscOnly": true, "aliases": ["SUBLET"] }
+  ],
+
+  "laborTypes": [
+    { "ccc": "LAB", "aliases": ["BODY", "BODY LABOR", "SHEET METAL", "B"] },
+    { "ccc": "LAR", "aliases": ["REFINISH", "REFINISH LABOR", "PAINT", "PAINT LABOR", "R"] },
+    { "ccc": "LAM", "aliases": ["MECHANICAL", "MECHANICAL LABOR", "MECH", "M"] }
+  ],
+
+  "sectionGroups": [
+    { "group": "FRONT BUMPER & GRILLE", "aliases": ["FRONT BUMPER", "GRILLE", "FRONT BUMPER GRILLE"] },
+    { "group": "FRONT LAMPS", "aliases": ["FRONT LAMPS", "FRONT LAMP", "HEADLAMPS"] },
+    { "group": "REAR LAMPS", "aliases": ["REAR LAMPS", "REAR LAMP", "TAIL LAMPS"] },
+    { "group": "RESTRAINT SYSTEMS", "aliases": ["AIR BAG SYSTEM", "AIR BAG", "AIRBAG", "RESTRAINT SYSTEM", "RESTRAINTS"] },
+    { "group": "ENGINE / TRANSAXLE", "aliases": ["AIR CLEANER", "ENGINE", "TRANSAXLE", "TRANSMISSION", "ENGINE TRANSAXLE"] },
+    { "group": "PILLARS, ROCKER & FLOOR", "aliases": ["ROCKER", "PILLARS", "PILLAR", "FLOOR", "ROCKER PILLARS FLOOR", "PILLARS ROCKER FLOOR"] },
+    { "group": "COOLING SYSTEM", "aliases": ["COOLING", "COOLING SYSTEM", "RADIATOR"] },
+    { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["ADDITIONAL COSTS MATERIALS", "ADDITIONAL COSTS", "ADDITIONAL COST", "ADDITIONAL OPERATIONS", "ADDITIONAL OPERATION", "SPECIAL MANUAL ENTRY", "MANUAL ENTRY", "MISCELLANEOUS", "MISCELLANEOUS OPERATIONS"] }
+  ],
+
+  "knownCccGroups": [
+    "FRONT BUMPER & GRILLE",
+    "FRONT LAMPS",
+    "HOOD",
+    "FENDER",
+    "COOLING SYSTEM",
+    "ENGINE / TRANSAXLE",
+    "EXHAUST SYSTEM",
+    "FRONT SUSPENSION",
+    "REAR SUSPENSION",
+    "STEERING",
+    "WHEELS",
+    "GLASS",
+    "ROOF",
+    "FRONT DOOR",
+    "REAR DOOR",
+    "QUARTER PANEL",
+    "PILLARS, ROCKER & FLOOR",
+    "REAR BODY & FLOOR",
+    "DECK LID",
+    "TAILGATE",
+    "REAR BUMPER",
+    "REAR LAMPS",
+    "RESTRAINT SYSTEMS",
+    "ELECTRICAL",
+    "INTERIOR TRIM",
+    "FRAME",
+    "VEHICLE DIAGNOSTICS",
+    "MISCELLANEOUS OPERATIONS"
+  ],
+
+  "groupOrder": [
+    "FRONT BUMPER & GRILLE",
+    "FRONT LAMPS",
+    "COOLING SYSTEM",
+    "ENGINE / TRANSAXLE",
+    "EXHAUST SYSTEM",
+    "HOOD",
+    "FENDER",
+    "FRONT SUSPENSION",
+    "STEERING",
+    "FRAME",
+    "GLASS",
+    "ROOF",
+    "FRONT DOOR",
+    "REAR DOOR",
+    "PILLARS, ROCKER & FLOOR",
+    "QUARTER PANEL",
+    "REAR BODY & FLOOR",
+    "DECK LID",
+    "TAILGATE",
+    "REAR BUMPER",
+    "REAR LAMPS",
+    "REAR SUSPENSION",
+    "WHEELS",
+    "RESTRAINT SYSTEMS",
+    "ELECTRICAL",
+    "INTERIOR TRIM",
+    "VEHICLE DIAGNOSTICS",
+    "MISCELLANEOUS OPERATIONS"
+  ],
+
+  "totalsCategories": [
+    { "ems": "LAB", "label": "Body labor", "unit": "hours", "aliases": ["BODY LABOR", "BODY", "SHEET METAL LABOR"] },
+    { "ems": "LAR", "label": "Refinish labor", "unit": "hours", "aliases": ["REFINISH LABOR", "REFINISH", "PAINT LABOR"] },
+    { "ems": "LAM", "label": "Mechanical labor", "unit": "hours", "aliases": ["MECHANICAL LABOR", "MECHANICAL"] },
+    { "ems": "LAF", "label": "Frame labor", "unit": "hours", "aliases": ["FRAME LABOR", "FRAME"] },
+    { "ems": "LAG", "label": "Glass labor", "unit": "hours", "aliases": ["GLASS LABOR", "GLASS"] },
+    { "ems": "PAT", "label": "Parts", "unit": "amount", "aliases": ["PARTS", "TOTAL PARTS", "PART TOTAL"] },
+    { "ems": "MAPA", "label": "Paint materials", "unit": "amount", "aliases": ["PAINT SUPPLIES", "PAINT MATERIALS", "PAINT MATERIAL", "PAINT AND MATERIALS"] },
+    { "ems": "PAS", "label": "Sublet / miscellaneous", "unit": "amount", "aliases": ["SUBLET", "MISCELLANEOUS", "OTHER CHARGES", "MISCELLANEOUS OPERATIONS"] },
+    { "ems": "SHOP", "label": "Shop supplies", "unit": "amount", "aliases": ["SHOP SUPPLIES", "BODY SUPPLIES"] }
+  ],
+
+  "manualEntryCodes": ["900500"],
+
+  "noteCodes": ["900501"],
+
+  "profileRoutedCostLabels": ["PAINT MATERIALS", "PAINT AND MATERIALS", "PAINT SUPPLIES", "PAINT MATERIAL"],
+
+  "aggregateRefinishLabels": ["ADD FOR CLEAR COAT", "CLEAR COAT", "CLEARCOAT"],
+
+  "diagnosticsKeywords": [
+    "SCAN",
+    "PRE SCAN",
+    "POST SCAN",
+    "DIAGNOSTIC",
+    "CALIBRATION",
+    "CALIBRATE",
+    "RECALIBRATE",
+    "ADAS",
+    "RESET",
+    "REPROGRAM",
+    "PROGRAMMING",
+    "INITIALIZE",
+    "RELEARN",
+    "MODULE SETUP"
+  ]
+}

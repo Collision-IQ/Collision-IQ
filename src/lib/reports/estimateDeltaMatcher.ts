@@ -64,6 +64,13 @@ export interface EstimateDeltaRow {
   /** Opaque identifier carried through from a source PDF row anchor. */
   anchorId?: string;
   pageNumber?: number | null;
+  /**
+   * Supplement tag printed BEFORE the line number on a Supplement of Record
+   * ("S2 21 Repl Hood"). Absent on a single-estimate print. Carried, never
+   * used for matching: the same physical operation keeps its identity whether
+   * it was written on the original estimate or on a later supplement.
+   */
+  supplementTag?: string | null;
 }
 
 export type EstimateDeltaKind =
@@ -883,12 +890,30 @@ export function explodeGluedRow(rawText: string): string {
   return text;
 }
 
-function stripLeadingMetadata(rawText: string): { body: string; lineNumber: number | null } {
+function stripLeadingMetadata(rawText: string): {
+  body: string;
+  lineNumber: number | null;
+  supplementTag: string | null;
+} {
   let body = rawText.replace(/\s+/g, " ").trim();
   let lineNumber: number | null = null;
+  let supplementTag: string | null = null;
 
   // Leading optional "Line" keyword.
   body = body.replace(/^line\s+/i, "");
+
+  // Supplement-of-record tag printed AHEAD of the line number ("S2 21 Repl
+  // Hood"). Without this the row anchor never opens: the line-number match
+  // needs a digit at position 0, so the whole row parsed as description with
+  // no line number. Deliberately narrow — a single digit followed by
+  // whitespace and a real 1-3 digit line number — so it can never consume the
+  // S01/S02 LABOR-CATEGORY marker handled below, which carries two digits and
+  // sits AFTER the line number.
+  const supplementMatch = body.match(/^S(\d)\s+(?=\d{1,3}(?:\D|$))/);
+  if (supplementMatch) {
+    supplementTag = `S${supplementMatch[1]}`;
+    body = body.slice(supplementMatch[0].length);
+  }
 
   // Leading line number — including glued no-delimiter forms ("6Repl…",
   // "8S02 Repl…") where no \b exists between the digit and the letter.
@@ -932,7 +957,7 @@ function stripLeadingMetadata(rawText: string): { body: string; lineNumber: numb
     }
   }
 
-  return { body: body.trim(), lineNumber };
+  return { body: body.trim(), lineNumber, supplementTag };
 }
 
 function extractTrailingColumns(body: string): {
@@ -1217,7 +1242,7 @@ export function parseCccEstimateRow(
     }
   );
 
-  const { body, lineNumber } = stripLeadingMetadata(text);
+  const { body, lineNumber, supplementTag } = stripLeadingMetadata(text);
   if (!body) return null;
 
   // Operation code is optional; capture it when present (glued or spaced).
@@ -1275,6 +1300,7 @@ export function parseCccEstimateRow(
     rawText: text,
     anchorId: context?.anchorId,
     pageNumber: context?.pageNumber ?? null,
+    supplementTag,
   };
 }
 
@@ -1543,7 +1569,29 @@ function boundRowsByPrintedSubtotals(
   return rows;
 }
 
-export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
+export interface ParseEstimateRowsOptions {
+  /**
+   * How far the preamble rule may reach (see `dropPreambleRows`).
+   *
+   * "operation-anchored" (default, unchanged): everything above the first
+   * row carrying a CCC operation code is preamble. That anchor assumes the
+   * document SPEAKS CCC vocabulary.
+   *
+   * "section-anchored": preamble is confined to rows printed above the first
+   * section header. Documents whose operations are spelled as words rather
+   * than CCC codes ("Remove / Replace", "Additional Cost") have few or no
+   * op-coded rows, so the operation anchor can land near the end of the
+   * document and take real cost lines with it. A section header is the
+   * measured start of scope on both platforms, which is why this variant is
+   * strictly NARROWER: it can only keep rows the other would drop.
+   */
+  preambleAnchor?: "operation-anchored" | "section-anchored";
+}
+
+export function parseCccEstimateRows(
+  text: string,
+  options?: ParseEstimateRowsOptions
+): EstimateDeltaRow[] {
   if (!text) return [];
   text = normalizeOverprintText(text);
   if (isFragmentedEstimateText(text)) {
@@ -1583,14 +1631,21 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
 
   // CCC line numbers are unique per estimate, but multi-page prints repeat
   // supplement summary pages — keep the first (usually fullest) copy.
-  const seenLineNumbers = new Set<number>();
+  // A Supplement of Record restarts line numbering per supplement, so the key
+  // is (supplement tag, line number) — identical behaviour on a document that
+  // prints no tags, where every tag is null.
+  const seenLineNumbers = new Set<string>();
   const deduped = rows.filter((row) => {
     if (row.lineNumber === null) return true;
-    if (seenLineNumbers.has(row.lineNumber)) return false;
-    seenLineNumbers.add(row.lineNumber);
+    const key = `${row.supplementTag ?? ""}:${row.lineNumber}`;
+    if (seenLineNumbers.has(key)) return false;
+    seenLineNumbers.add(key);
     return true;
   });
-  return boundRowsByPrintedSubtotals(dropPreambleRows(deduped), parseCccSubtotalsRule(text));
+  return boundRowsByPrintedSubtotals(
+    dropPreambleRows(deduped, options?.preambleAnchor ?? "operation-anchored"),
+    parseCccSubtotalsRule(text)
+  );
 }
 
 /**
@@ -1618,8 +1673,14 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
  * Six of the eight corpus documents have no preamble rows at all; this removes
  * 8 rows across the two that do, all of them boilerplate.
  */
-function dropPreambleRows(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
-  const firstOperation = rows.findIndex((row) => row.opCode !== null);
+function dropPreambleRows(
+  rows: EstimateDeltaRow[],
+  anchor: "operation-anchored" | "section-anchored"
+): EstimateDeltaRow[] {
+  const firstOperation =
+    anchor === "section-anchored"
+      ? rows.findIndex((row) => row.section !== null)
+      : rows.findIndex((row) => row.opCode !== null);
   if (firstOperation <= 0) return rows;
   return rows.filter((row, index) => {
     if (index >= firstOperation) return true;
