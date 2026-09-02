@@ -9,6 +9,7 @@
  */
 
 import jsPDF from "jspdf";
+import { withWinAnsiText } from "@/lib/pdf/winAnsiText";
 
 const MARGIN_X = 12;
 const TOP_Y = 16;
@@ -21,7 +22,7 @@ export function buildRekeyPdfBlob(params: {
   sheetText: string;
   verificationText?: string | null;
 }): Blob {
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const doc = withWinAnsiText(new jsPDF({ unit: "mm", format: "a4" }));
   const contentWidth = doc.internal.pageSize.getWidth() - MARGIN_X * 2;
   let y = TOP_Y;
 

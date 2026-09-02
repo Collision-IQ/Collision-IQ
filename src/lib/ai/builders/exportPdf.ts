@@ -1,4 +1,5 @@
 import jsPDF from "jspdf";
+import { withWinAnsiText } from "@/lib/pdf/winAnsiText";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { isNative, saveAndShareBlob } from "@/lib/native";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
@@ -47,10 +48,10 @@ const DEFAULT_TYPOGRAPHY = {
 export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise<Blob> {
   const redactedInput = redactCarrierReportDocument(input);
 
-  const doc = new jsPDF({
+  const doc = withWinAnsiText(new jsPDF({
     unit: "mm",
     format: "letter",
-  });
+  }));
 
   const layout = createPdfPageLayout(doc);
   console.info("[native-pdf-export] buildCarrierPdfBlob before await loadLogoDataUrl", {

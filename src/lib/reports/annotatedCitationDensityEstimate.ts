@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { withWinAnsiPage, toWinAnsiPdfText } from "@/lib/pdf/winAnsiText";
 import DELTA_RULES from "./data/deltaRules.json";
 import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
 import { redactAndRasterizePdf } from "@/lib/privacy/rasterRedactPdf";
@@ -2000,7 +2001,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let renderedPdfAnnotationCount = 0;
   matches.forEach((match, index) => {
     const sourcePdfPageNumber = match.anchor.pageNumber;
-    const page = pdfDoc.getPage(toSourcePdfPageIndex(sourcePdfPageNumber));
+    const page = withWinAnsiPage(pdfDoc.getPage(toSourcePdfPageIndex(sourcePdfPageNumber)));
     const renderResult = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
       mode,
       font,
@@ -2117,7 +2118,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         const noteInk = isOemReport ? rgb(0, 0.15, 0.75) : rgb(0.72, 0.12, 0.1);
         const placedIds = new Set<string>();
         for (const note of plan.placed) {
-          const page = pdfDoc.getPage(toSourcePdfPageIndex(note.rect.pageNumber));
+          const page = withWinAnsiPage(pdfDoc.getPage(toSourcePdfPageIndex(note.rect.pageNumber)));
           const pageWidth = page.getWidth();
           const pageHeight = page.getHeight();
           const rotation = normalizeRotation(page.getRotation().angle);
@@ -2345,7 +2346,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           const costInk = rgb(0.72, 0.12, 0.1);
           const costFill = rgb(1, 0.95, 0);
           const toPdfLib = (rect: { pageNumber: number; x: number; y: number; width: number; height: number }) => {
-            const page = pdfDoc.getPage(toSourcePdfPageIndex(rect.pageNumber));
+            const page = withWinAnsiPage(pdfDoc.getPage(toSourcePdfPageIndex(rect.pageNumber)));
             const pdfLibRect = topLeftRectToPdfLibRect(rect, {
               pdfWidth: page.getWidth(),
               pdfHeight: page.getHeight(),
@@ -8290,7 +8291,7 @@ function buildStoredTextAnchors(sourceText: string | null | undefined, pdfDoc: P
   const anchors: TextAnchor[] = [];
 
   pages.forEach((pageText, pageIndex) => {
-    const page = pdfDoc.getPage(Math.min(pageIndex, pageCount - 1));
+    const page = withWinAnsiPage(pdfDoc.getPage(Math.min(pageIndex, pageCount - 1)));
     const pageWidth = page.getWidth();
     const pageHeight = page.getHeight();
     const rawLines = pageText
@@ -9097,7 +9098,7 @@ function addLegendPage(
   }
 ) {
   const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
-  const page = pdfDoc.addPage();
+  const page = withWinAnsiPage(pdfDoc.addPage());
   const { width, height } = page.getSize();
   page.drawText(reportIdentity.legendTitle, {
     x: 48,
@@ -9165,7 +9166,7 @@ function addNoLineAnchorWarningPage(
   pdfDoc: PDFDocument,
   options: { font: PDFFont; boldFont: PDFFont; message: string; pageCalloutCount: number; appendixCount: number }
 ) {
-  const page = pdfDoc.addPage();
+  const page = withWinAnsiPage(pdfDoc.addPage());
   const { width, height } = page.getSize();
   page.drawText(options.message, {
     x: 48,
@@ -9205,7 +9206,7 @@ function addFindingsReportCoverPage(
     textLayerNotes?: string[];
   }
 ) {
-  const page = pdfDoc.addPage();
+  const page = withWinAnsiPage(pdfDoc.addPage());
   const { height } = page.getSize();
   page.drawText(`${options.reportIdentity.reportShortTitle} Findings Report`, {
     x: 48,
@@ -9252,7 +9253,7 @@ function addSummaryPage(
     warnings: string[];
   }
 ) {
-  const page = pdfDoc.addPage();
+  const page = withWinAnsiPage(pdfDoc.addPage());
   const { height } = page.getSize();
   page.drawText("Annotated Estimate Summary", {
     x: 48,
@@ -9441,7 +9442,7 @@ function createFindingDetailLayoutContext(
   detailPageNumber: number,
   continuationLabel?: string
 ): FindingDetailLayoutContext {
-  const page = pdfDoc.addPage();
+  const page = withWinAnsiPage(pdfDoc.addPage());
   const pageWidth = page.getWidth();
   const pageHeight = page.getHeight();
   const marginLeft = 54;
@@ -9660,7 +9661,7 @@ function addUnanchoredAppendix(
   }
 ) {
   const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
-  let page = pdfDoc.addPage();
+  let page = withWinAnsiPage(pdfDoc.addPage());
   let y = page.getHeight() - 54;
   page.drawText(reportIdentity.unanchoredTitle, {
     x: 48,
@@ -9673,7 +9674,7 @@ function addUnanchoredAppendix(
   findings.forEach((finding, index) => {
     const lines = buildCalloutLines(finding, index + 1, getProofBucketLabel(finding), options.redactSensitive, options.estimateRole, reportIdentity);
     if (y < 118) {
-      page = pdfDoc.addPage();
+      page = withWinAnsiPage(pdfDoc.addPage());
       y = page.getHeight() - 54;
     }
     drawWrappedLines(page, lines, {

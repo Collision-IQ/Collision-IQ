@@ -12,6 +12,7 @@ import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import { canAccessFeature } from "@/lib/featureAccess";
 import { cleanUserFacingPresentationText } from "@/lib/ui/presentationText";
 import { jsPDF } from "jspdf";
+import { withWinAnsiText } from "@/lib/pdf/winAnsiText";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,10 +195,10 @@ function buildChatExportPdf(text: string): ArrayBuffer {
   const BODY_FONT = 10.5;
   const HEADER_FONT = 14;
 
-  const doc = new jsPDF({
+  const doc = withWinAnsiText(new jsPDF({
     unit: "mm",
     format: "letter",
-  });
+  }));
 
   const marginX = 16;
   const topMargin = 18;

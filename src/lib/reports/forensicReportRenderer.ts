@@ -13,6 +13,7 @@
  * layout and wording, never arithmetic.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { withWinAnsiPage } from "@/lib/pdf/winAnsiText";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import {
@@ -63,7 +64,7 @@ class Writer {
   }
 
   private newPage(): Cursor {
-    const page = this.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const page = withWinAnsiPage(this.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
     const pageNumber = this.doc.getPageCount();
     return { page, y: PAGE_HEIGHT - MARGIN, pageNumber };
   }

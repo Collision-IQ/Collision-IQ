@@ -17,6 +17,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { rgb, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { flattenPunctuation, toWinAnsiPdfText } from "@/lib/pdf/winAnsiText";
+
+/** This renderer has always flattened punctuation as well as enforcing the
+ *  encoding; keeping both preserves its existing output exactly. */
+const toWinAnsi = (text: string): string => toWinAnsiPdfText(flattenPunctuation(text));
 import type {
   DeltaForensicReportModel,
   ForensicBlock,
@@ -634,24 +639,6 @@ function drawRightAligned(
     font: options.font,
     color: options.color,
   });
-}
-
-/**
- * WinAnsi is the only encoding the standard fonts carry, so any character
- * outside it would throw at draw time. Normalising here — not at the call
- * sites — means a curly quote in an estimate description can never take down
- * a report.
- */
-function toWinAnsi(text: string): string {
-  return text
-    .replace(/[‘’‛]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, "-")
-    .replace(/…/g, "...")
-    // Whitespace stays in the allowed class rather than being stripped:
-    // removing a newline here would glue two words together before the
-    // caller collapses runs of whitespace into single spaces.
-    .replace(/[^\s\x20-\x7E¡-ÿ•]/g, "");
 }
 
 export function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {

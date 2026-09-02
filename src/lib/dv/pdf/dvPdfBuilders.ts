@@ -11,6 +11,7 @@
 // format, they never calculate. Projected values are labeled as projected.
 
 import jsPDF from "jspdf";
+import { flattenPunctuation, toWinAnsiPdfText, withWinAnsiText } from "@/lib/pdf/winAnsiText";
 import { isNative, saveAndShareBlob } from "@/lib/native";
 import type { DvReportData } from "@/lib/dv/types";
 
@@ -80,14 +81,10 @@ function listingHref(url: string): string {
   return `https://www.collision-iq.ai/listing?u=${encodeURIComponent(url)}`;
 }
 
-/** jsPDF's built-in fonts are WinAnsi — U+2212/en/em dashes and curly quotes
- *  fall back to garbage glyphs and break line metrics. Normalize to ASCII. */
-function pdfSafe(text: string): string {
-  return text
-    .replace(/[−–—]/g, "-")
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"');
-}
+/** jsPDF's built-in fonts are WinAnsi. Kept as a local alias so the existing
+ *  call sites read unchanged; the rule itself lives in one place now, and the
+ *  document is guarded at construction so nothing depends on remembering it. */
+const pdfSafe = (text: string): string => toWinAnsiPdfText(flattenPunctuation(text));
 
 async function loadLogoDataUrl(path: string): Promise<string | null> {
   try {
@@ -258,7 +255,7 @@ async function markLinksOpenInNewWindow(blob: Blob): Promise<Blob> {
 export async function buildMarketValueReportBlob(data: DvReportData): Promise<Blob> {
   const { extraction, intake, result } = data;
   const calc = result.calculation;
-  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const doc = withWinAnsiText(new jsPDF({ unit: "mm", format: "letter" }));
   const logo = await loadLogoDataUrl(BRAND.logoPath);
 
   let y = PAGE.top;
@@ -573,7 +570,7 @@ export async function buildMarketValueReportBlob(data: DvReportData): Promise<Bl
 export async function buildDemandLetterBlob(data: DvReportData): Promise<Blob> {
   const { extraction, intake, result } = data;
   const calc = result.calculation;
-  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const doc = withWinAnsiText(new jsPDF({ unit: "mm", format: "letter" }));
   const logo = await loadLogoDataUrl(BRAND.logoPath);
 
   const vehicleLabel = extraction.vehicle.label ?? "the insured vehicle";
@@ -797,7 +794,7 @@ export async function buildTotalLossReportBlob(data: DvReportData): Promise<Blob
   const { extraction, intake, result } = data;
   const tl = result.totalLoss;
   if (!tl) throw new Error("This report has no total-loss result to render.");
-  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const doc = withWinAnsiText(new jsPDF({ unit: "mm", format: "letter" }));
   const logo = await loadLogoDataUrl(BRAND.logoPath);
 
   // ── Page 1: the answer ──
@@ -1136,7 +1133,7 @@ export async function buildTotalLossDemandLetterBlob(data: DvReportData): Promis
   const { extraction, intake, result } = data;
   const tl = result.totalLoss;
   if (!tl) throw new Error("This report has no total-loss result to render.");
-  const doc = new jsPDF({ unit: "mm", format: "letter" });
+  const doc = withWinAnsiText(new jsPDF({ unit: "mm", format: "letter" }));
   const logo = await loadLogoDataUrl(BRAND.logoPath);
 
   const claimant = intake.ownerName ?? extraction.ownerName ?? "Vehicle Owner";
