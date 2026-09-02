@@ -44,6 +44,9 @@ export interface RekeyLedgerRow {
   partNumber: string | null;
   /** As printed on the source ("M1PZ 17E810 AA"). */
   partNumberSource: string | null;
+  /** Supplier named on the source's parts-vendors pages for THIS part number.
+   *  Null when the pages name none — never inferred from a neighbouring row. */
+  vendor: string | null;
   qty: number | null;
   price: number | null;
   /** Per-line tax marker when the source prints one; null when it does not. */
@@ -96,6 +99,9 @@ export interface RekeySheet {
   groups: RekeyGroup[];
   rows: RekeyLedgerRow[];
   expectedTotals: RekeyExpectedTotals | null;
+  /** The source's parts-vendors pages verbatim, so every attached vendor can
+   *  be checked against the page it came from. Empty when the source has none. */
+  partsVendorsBlock: string[];
   stats: {
     sourceRows: number;
     keyableRows: number;
@@ -103,6 +109,7 @@ export interface RekeySheet {
     foldedRefinishRows: number;
     unmappedSections: number;
     unmappedOperations: number;
+    vendorsAttached: number;
   };
   warnings: string[];
 }
