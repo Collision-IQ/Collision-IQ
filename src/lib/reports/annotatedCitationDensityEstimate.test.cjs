@@ -5,8 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
 const ts = require("typescript");
-const { PDFDocument, StandardFonts } = require("pdf-lib");
-const { PDFName, PDFString, PDFHexString } = require("pdf-lib/cjs/core");
+// One specifier, so the test exercises the same pdf-lib classes the code
+// under test uses. See scripts/check-pdf-lib-imports.cjs.
+const { PDFDocument, StandardFonts, PDFName, PDFString, PDFHexString } = require("pdf-lib");
 
 const originalResolveFilename = Module._resolveFilename;
 Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
