@@ -32,6 +32,7 @@ import {
   Workflow,
   X,
   Briefcase,
+  KeyRound,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -48,6 +49,7 @@ import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
 import ToolboxPanel from "@/components/workspace/ToolboxPanel";
 import MyVehiclePanel from "@/components/workspace/MyVehiclePanel";
 import ScanIqPanel from "@/components/workspace/ScanIqPanel";
+import RekeyPanel from "@/components/workspace/RekeyPanel";
 import { MembershipPopup } from "@/components/MembershipPopup";
 import {
   WorkspaceCalibrationPanel,
@@ -92,6 +94,7 @@ type WorkspaceView =
   | "calibration"
   | "vehicle"
   | "scaniq"
+  | "rekey"
   | "toolbox";
 
 // In-workspace items switch the main content (`view`); items with `href`
@@ -116,6 +119,9 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
+  // Rekey sits beside Scan IQ: both are estimator tools that take their own
+  // uploads and run without an analysis session, so neither requires one.
+  { id: "rekey", label: "Rekey Sheet", icon: KeyRound, view: "rekey" },
   // Paid pay-per-report flow, deliberately a separate route (not a workspace
   // view): it has its own payment gate and must stay usable without an
   // analysis session.
@@ -139,6 +145,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   evidence: "nav-evidence",
   vehicle: "nav-my-vehicle",
   scaniq: "nav-scan-iq",
+  rekey: "nav-rekey-sheet",
   dvgenerator: "nav-dv-generator",
   history: "nav-history",
   toolbox: "nav-toolbox",
@@ -647,6 +654,8 @@ export default function CollisionWorkspaceV2({
               <MyVehiclePanel />
             ) : activeView === "scaniq" ? (
               <ScanIqPanel />
+            ) : activeView === "rekey" ? (
+              <RekeyPanel />
             ) : activeView === "evidence" ? (
               <WorkspaceEvidencePanel links={evidenceLinks} caseId={caseId} />
             ) : activeView === "calibration" ? (
