@@ -68,6 +68,11 @@
     { "group": "ENGINE / TRANSAXLE", "aliases": ["AIR CLEANER", "ENGINE", "TRANSAXLE", "TRANSMISSION", "ENGINE TRANSAXLE"] },
     { "group": "PILLARS, ROCKER & FLOOR", "aliases": ["ROCKER", "PILLARS", "PILLAR", "FLOOR", "ROCKER PILLARS FLOOR", "PILLARS ROCKER FLOOR"] },
     { "group": "COOLING SYSTEM", "aliases": ["COOLING", "COOLING SYSTEM", "RADIATOR"] },
+    { "group": "FENDER", "aliases": ["FENDER", "FRONT FENDER", "REAR FENDER"] },
+    { "group": "HOOD", "aliases": ["HOOD"] },
+    { "group": "WHEELS", "aliases": ["WHEEL", "WHEELS", "TIRES"] },
+    { "group": "FRAME", "aliases": ["FRONT INNER STRUCTURE", "INNER STRUCTURE", "STRUCTURE", "FRAME"] },
+    { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["BODY UNDER COVERS", "UNDER COVERS", "SPECIAL MANUAL ENTRY", "SPECIAL"] },
     { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["ADDITIONAL COSTS MATERIALS", "ADDITIONAL COSTS", "ADDITIONAL COST", "ADDITIONAL OPERATIONS", "ADDITIONAL OPERATION", "SPECIAL MANUAL ENTRY", "MANUAL ENTRY", "MISCELLANEOUS", "MISCELLANEOUS OPERATIONS"] }
   ],
 

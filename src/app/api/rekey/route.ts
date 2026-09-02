@@ -6,7 +6,7 @@ import { canUseProIntegrations, PRO_FEATURE_REQUIRED_MESSAGE } from "@/lib/billi
 import { extractPreviewDataFromBuffer } from "@/lib/attachments/extractPreviewData";
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
-import { buildRekeySheet } from "@/lib/rekey/rekeyLedger";
+import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
 import { readEmsBundle } from "@/lib/rekey/emsReader";
 import {
   keyedEstimateFromDocument,
@@ -188,14 +188,12 @@ export async function POST(request: NextRequest) {
     }
 
     const sheet = buildRekeySheet({ text: source.text, sourceFile: source.filename });
-    if (sheet.rows.length === 0) {
-      // Fail closed: a sheet with no rows is not a short sheet, it is a failed
-      // read, and printing it would invite keying from an empty page.
+    // Fail closed: an unreadable document yields a convincing-looking sheet of
+    // fragments, and a sheet is a thing people key from.
+    const quality = assessRekeySheet(sheet);
+    if (!quality.ok) {
       return NextResponse.json(
-        {
-          error:
-            "No estimate lines could be read from the estimate to rekey, so no sheet was produced. Your file was kept.",
-        },
+        { error: `${quality.reason} Your file was kept.` },
         { status: 422 }
       );
     }

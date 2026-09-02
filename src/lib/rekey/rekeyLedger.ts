@@ -26,6 +26,11 @@ import {
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
+import {
+  looksLikeMitchellLayout,
+  parseMitchellEstimateRows,
+  parseMitchellEstimateTotals,
+} from "./mitchellEstimateReader";
 import { normalizeOverprintText } from "@/lib/reports/overprintNormalize";
 import VOCABULARY from "./data/rekeyVocabulary.json";
 import {
@@ -53,6 +58,9 @@ const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string
 const AGGREGATE_REFINISH_LABELS = (VOCABULARY.aggregateRefinishLabels as string[]).map(normalizeVocabularyText);
 
 const MISCELLANEOUS_GROUP = "MISCELLANEOUS OPERATIONS";
+
+/** The manual-line marker printed ahead of a row's description. */
+const MANUAL_LINE_MARKER = /^\s*\d{1,4}\s*#/;
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
@@ -222,8 +230,43 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   if (row.taxable === true) flags.push("Tax");
   if (!row.sectionMapped) flags.push("group: verify");
   if (!row.operationMapped) flags.push("operation: verify");
+  if (row.operationCcc === "Manual") flags.push("manual line");
   if (row.partTypeCcc === UNMAPPED && row.partNumber) flags.push("part type: verify");
   return flags;
+}
+
+/** Words that identify a part rather than qualify it. */
+const DESCRIPTION_QUALIFIERS = new Set([
+  "LT", "RT", "LEFT", "RIGHT", "FRONT", "REAR", "UPPER", "LOWER", "INNER", "OUTER",
+  "FRT", "UPR", "LWR", "W", "WO", "AND", "THE", "FOR", "PER", "OF", "ASSY", "ONLY",
+  "PANEL", "NEW", "USED", "ADD",
+]);
+
+/**
+ * True when two descriptions name the same part.
+ *
+ * Only the part NAME counts, so the description is cut at the first trim
+ * qualifier the platform prints ("w/o performance", "(Alum)"). Without the
+ * cut, "Bumper cover w/o performance" and "Tow eye cap w/o performance" share
+ * the word "performance" and read as one part — which is exactly the pair that
+ * was wrongly merged.
+ */
+export function sharesPartNoun(parent: string, child: string): boolean {
+  const partName = (value: string) =>
+    (value ?? "")
+      .split(/\s(?:w\/o|w\/|wo|with|without)\s|\(/i)[0]
+      .trim();
+  const nouns = (value: string) =>
+    new Set(
+      normalizeVocabularyText(partName(value))
+        .split(" ")
+        .filter((word) => word.length >= 3 && !DESCRIPTION_QUALIFIERS.has(word))
+    );
+  const parentNouns = nouns(parent);
+  for (const noun of nouns(child)) {
+    if (parentNouns.has(noun)) return true;
+  }
+  return false;
 }
 
 function emptyGroupTotals(): RekeyGroup["totals"] {
@@ -264,6 +307,8 @@ function findCategory(
 export function buildProfileBlock(params: {
   text: string;
   totals: RekeyExpectedTotals | null;
+  /** Read off the totals block when that layout prints one there. */
+  deductible?: number | null;
 }): RekeyProfileField[] {
   const { text, totals } = params;
   const fields: RekeyProfileField[] = [];
@@ -292,6 +337,25 @@ export function buildProfileBlock(params: {
   rateField("Body rate (LAB)", /body/i);
   rateField("Paint rate (LAR)", /refinish|paint labor/i);
   rateField("Mechanical rate (LAM)", /mechanical/i);
+
+  // Any OTHER rate the totals page prints is a profile setting too. A real
+  // estimate carried an "Aluminum Or Steel Repair" category at its own rate;
+  // printing only the canonical three left a rate the estimator had to set and
+  // was never told about, and the totals cannot close without it.
+  const canonical = /body|refinish|paint labor|mechanical/i;
+  for (const category of totals?.categories ?? []) {
+    if (category.rate === null || canonical.test(category.category)) continue;
+    if (/paint (?:supplies|materials?)/i.test(category.category)) continue;
+    fields.push({
+      field: `${category.category} rate`,
+      value: category.rate,
+      display: `${money(category.rate)}/hr`,
+      basis: "printed",
+      note: `Source totals: ${category.category}${
+        category.hours === null ? "" : ` (${category.hours} h)`
+      }`,
+    });
+  }
 
   // Paint supplies: CCC computes materials as rate x refinish hours. When the
   // source prints the materials line as a flat amount with no basis, the rate
@@ -357,7 +421,7 @@ export function buildProfileBlock(params: {
     note: "Source part prices are net. Any profile markup inflates every recycled and aftermarket line.",
   });
 
-  const deductible = readDeductible(text);
+  const deductible = params.deductible ?? readDeductible(text);
   fields.push(
     deductible === null
       ? { field: "Deductible", value: null, display: "not printed", basis: "unavailable" }
@@ -389,6 +453,111 @@ function toExpectedTotals(text: string): RekeyExpectedTotals | null {
   };
 }
 
+function toMitchellExpectedTotals(text: string): RekeyExpectedTotals | null {
+  const parsed = parseMitchellEstimateTotals(text);
+  if (!parsed) return null;
+  return {
+    categories: parsed.categories,
+    subtotal: parsed.subtotal,
+    tax: parsed.tax,
+    grandTotal: parsed.grandTotal,
+    taxLanes: parsed.taxLanes,
+  };
+}
+
+/**
+ * Line numbers the source prints that produced no keying row.
+ *
+ * A row can be lost inside extraction for reasons this module cannot fix —
+ * one real estimate wrapped a line's quantity onto its own printed line and
+ * the shared reader dropped it whole. Losing a line silently is the failure
+ * that matters: the estimator keys the sheet and the totals never close, with
+ * nothing pointing at why. So the sheet counts what it did not read.
+ *
+ * Numbers consumed by section headings are not losses — the heading is printed
+ * in the same numbered sequence as the rows — so a number whose text matches a
+ * section this sheet already carries is excluded.
+ */
+export function findUnreadLineNumbers(params: {
+  text: string;
+  rows: RekeyLedgerRow[];
+  /** Lines folded into another row are read, not lost. */
+  foldedLines: number[];
+  mitchellLayout: boolean;
+}): number[] {
+  const read = new Set<number>([
+    ...params.rows.map((row) => row.sourceLine).filter((line): line is number => line !== null),
+    ...params.foldedLines,
+  ]);
+  const anchor = params.mitchellLayout
+    ? /^(\d{1,3})(?:\d{6}|AUTO)(?=[A-Za-z$])/
+    : /^(\d{1,3})\s*(?=[#*A-Za-z])/;
+
+  const lines = normalizeOverprintText(params.text)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((value) => value.replace(/\s+/g, " ").trim());
+
+  const unread: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = anchor.exec(lines[index]);
+    if (!match) continue;
+    const number = Number(match[1]);
+    if (read.has(number) || unread.includes(number)) continue;
+
+    // Test the whole PRINTED BLOCK, not the anchor line alone: the row whose
+    // loss this check exists to catch is exactly the one whose value columns
+    // wrapped onto their own line.
+    let block = lines[index].slice(match[0].length);
+    for (let ahead = index + 1; ahead < lines.length && !anchor.test(lines[ahead]); ahead += 1) {
+      block += ` ${lines[ahead]}`;
+    }
+
+    // A numbered block that bills NOTHING is a heading or a boilerplate note,
+    // not a lost row — both platforms number their section headings in the
+    // same sequence as their rows. Money or hours is what an estimate line
+    // always carries; a bare quantity is not enough, because the boilerplate
+    // the preamble numbers carries one too.
+    if (!/\$?\d[\d,]*\.\d{2}|(?:^|\s)\d{1,3}\.\d(?:\s|$)/.test(block)) continue;
+    unread.push(number);
+  }
+  return unread.sort((a, b) => a - b);
+}
+
+export interface RekeySheetQuality {
+  ok: boolean;
+  reason: string | null;
+}
+
+/**
+ * Whether the sheet is fit to key from.
+ *
+ * A sheet is not merely "short" when extraction fails — it is wrong, and it
+ * looks convincing. Run against a layout its reader could not handle, one real
+ * estimate produced a sheet whose rows were fragments of the document's own
+ * totals pages ("Gross Total", "Deductible - $400.00"), every one of them
+ * presented as a keyable line. Printing that invites an estimator to key it.
+ *
+ * The measure is structural: a real line item carries the line number the
+ * source printed against it. When most rows have none, the row structure was
+ * never found, whatever else was.
+ */
+export function assessRekeySheet(sheet: RekeySheet): RekeySheetQuality {
+  const rows = sheet.rows.filter((row) => row.keyable);
+  if (rows.length === 0) {
+    return { ok: false, reason: "No estimate lines could be read from this document." };
+  }
+  const numbered = rows.filter((row) => row.sourceLine !== null).length;
+  if (numbered / rows.length < 0.5) {
+    return {
+      ok: false,
+      reason:
+        "The line items in this document could not be read reliably — most of what was found carries no line number, which means the row structure was never located. No sheet was produced rather than one that cannot be trusted.",
+    };
+  }
+  return { ok: true, reason: null };
+}
+
 export interface BuildRekeySheetParams {
   text: string;
   sourceFile: string;
@@ -400,7 +569,13 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // words carries few CCC op codes, and the default anchor would treat real
   // cost lines below the last op-coded row as boilerplate.
   const partsVendors = harvestPartsVendors(text);
-  const parsedRows = parseCccEstimateRows(text, { preambleAnchor: "section-anchored" }).filter((row) => {
+  // Two print layouts, two readers. The shared reader assumes a row's columns
+  // survive extraction as separate tokens, which the Mitchell print does not
+  // do — see mitchellEstimateReader for what that costs.
+  const mitchellLayout = looksLikeMitchellLayout(text);
+  const parsedRows = mitchellLayout
+    ? parseMitchellEstimateRows(text)
+    : parseCccEstimateRows(text, { preambleAnchor: "section-anchored" }).filter((row) => {
     // Rows read out of the ESTIMATE TOTALS block are totals, never keying
     // rows; they are reconciled separately and must not be keyed twice.
     if (/\bESTIMATE TOTALS\b|\bTOTALS\b/i.test(row.section ?? "")) return false;
@@ -416,35 +591,30 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     return ![...partsVendors.signatures].some(
       (candidate) => candidate.includes(signature) || signature.includes(candidate)
     );
-  });
-  const expectedTotals = toExpectedTotals(text);
+      });
+  const expectedTotals = mitchellLayout ? toMitchellExpectedTotals(text) : toExpectedTotals(text);
   const identity = readClaimIdentity(text);
   const notesByLine = harvestRowNotes(text);
   const warnings: string[] = [];
 
   const ledger: RekeyLedgerRow[] = [];
-  const aggregateRefinish: { hours: number; sourceLines: number[] } = { hours: 0, sourceLines: [] };
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
 
   parsedRows.forEach((row, index) => {
     const judgment = judgmentValues(row.rawText ?? "");
     const stripped = stripManualEntryCode(row.description ?? "");
-    const operation = resolveOperation({ opCode: row.opCode, description: stripped.description });
+    let operation = resolveOperation({ opCode: row.opCode, description: stripped.description });
+    // The platform prints its own manual-line marker ahead of the description,
+    // and its printed legend defines it. A marked row with no operation code
+    // is a manual entry BY THE DOCUMENT'S OWN NOTATION, not by inference — so
+    // it is named as one instead of being reported as untranslatable, which is
+    // what the estimator has to key either way.
+    if (!operation.mapped && MANUAL_LINE_MARKER.test(row.rawText ?? "")) {
+      operation = { ...operation, ccc: "Manual", laborOpCode: "OP0", mapped: true };
+    }
     const description = operation.description || stripped.description;
 
-    // Aggregate clear-coat allowance: one manual refinish row, never spread
-    // across panels. CCC only auto-computes clear coat for database lines, and
-    // rekeyed lines are manual, so nothing generates it — but distributing it
-    // is an allocation the source never made.
-    if (matchesLabel(description, AGGREGATE_REFINISH_LABELS)) {
-      const hours = row.paint ?? row.labor ?? 0;
-      if (hours > 0) {
-        aggregateRefinish.hours = round1(aggregateRefinish.hours + hours);
-        if (row.lineNumber !== null) aggregateRefinish.sourceLines.push(row.lineNumber);
-        return;
-      }
-    }
 
     // A spaced OEM part number left in the description is recovered before
     // anything keys off the description.
@@ -467,7 +637,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     const labor = buildLaborEntries({
       row,
       judgment,
-      forceRefinish: operation.refinishOnly || operation.ccc === "Blnd",
+      // Refinish-only, blend and clear-coat rows bill refinish time by
+      // definition, whichever column the printed hours landed in.
+      forceRefinish:
+        operation.refinishOnly ||
+        operation.ccc === "Blnd" ||
+        matchesLabel(keyedDescription, AGGREGATE_REFINISH_LABELS),
     });
 
     const miscAmount = sublet || costOnly ? row.price : null;
@@ -529,6 +704,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // same section, mirroring how CCC's own EMS splits one line into LAB + LAR
   // records. A refinish-only row with no such parent stands on its own.
   const folded: RekeyLedgerRow[] = [];
+  const foldedLines: number[] = [];
   for (const row of ledger) {
     const previous = folded[folded.length - 1];
     const isRefinishOnly =
@@ -542,7 +718,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       previous &&
       previous.keyable &&
       previous.sectionSource === row.sectionSource &&
-      normalizeVocabularyText(previous.operationCcc) !== "REFN"
+      normalizeVocabularyText(previous.operationCcc) !== "REFN" &&
+      // The two rows must describe the SAME part. "Hood Outside" folds into
+      // "Hood Panel" because both name the hood; "Tow eye cap" does not fold
+      // into "Bumper cover", and folding it there merged two different parts
+      // into one keying row and lost the tow eye cap entirely.
+      sharesPartNoun(previous.descriptionCcc, row.descriptionCcc)
     ) {
       previous.labor.push(...row.labor);
       previous.notes.push(
@@ -552,45 +733,29 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       );
       previous.flags = flagsFor(previous);
       foldedRefinishRows += 1;
+      if (row.sourceLine !== null) foldedLines.push(row.sourceLine);
       continue;
     }
     folded.push(row);
   }
 
-  if (aggregateRefinish.hours > 0) {
-    const aggregateRow: RekeyLedgerRow = {
-      id: `row-clear-coat`,
-      sourceLine: aggregateRefinish.sourceLines[0] ?? null,
-      supplementTag: null,
-      sectionSource: null,
-      sectionCcc: MISCELLANEOUS_GROUP,
-      sectionMapped: true,
-      descriptionSource: "Add for Clear Coat",
-      descriptionCcc: "Add for Clear Coat (source aggregate)",
-      operationSource: "Refinish",
-      operationCcc: "Refn",
-      operationMapped: true,
-      laborOpCode: "OP0",
-      partTypeSource: null,
-      partTypeCcc: "None",
-      partTypeEms: null,
-      partNumber: null,
-      partNumberSource: null,
-      vendor: null,
-      qty: null,
-      price: null,
-      taxable: null,
-      labor: [{ type: "LAR", hours: aggregateRefinish.hours, included: false, judgment: false }],
-      misc: null,
-      notes: [
-        `Manual refinish entry. The source prints one aggregate allowance (source line${
-          aggregateRefinish.sourceLines.length === 1 ? "" : "s"
-        } ${aggregateRefinish.sourceLines.join(", ") || "—"}); key it as ONE line and do not distribute it across panels.`,
-      ],
-      keyable: true,
-      flags: ["aggregate"],
-    };
-    folded.push(aggregateRow);
+  // Clear coat is a MANUAL entry once the lines are rekeyed — CCC computes it
+  // only for database lines — so every such row is annotated. What is NOT done
+  // is merging them: an earlier version collapsed every clear-coat line into
+  // one aggregate row in the miscellaneous group, which on a source that
+  // prints clear coat PER PANEL destroyed the panel each allowance belongs to
+  // and moved refinish hours out of their own section. The source's own
+  // structure is evidence; flattening it is a loss, and re-distributing a
+  // single aggregate would be an invention. Both are refused: the rows are
+  // carried exactly as printed.
+  const clearCoatRows = folded.filter((row) => matchesLabel(row.descriptionCcc, AGGREGATE_REFINISH_LABELS));
+  for (const row of clearCoatRows) {
+    row.notes.push(
+      clearCoatRows.length === 1
+        ? "Manual refinish entry — CCC does not generate clear coat for a manually keyed line. The source prints one allowance for the whole estimate; key it as ONE line and do not distribute it across panels."
+        : "Manual refinish entry — CCC does not generate clear coat for a manually keyed line. The source prints clear coat per panel; key this one against the panel it is printed under."
+    );
+    if (!row.flags.includes("manual refinish")) row.flags.push("manual refinish");
   }
 
   for (const row of folded) {
@@ -634,6 +799,17 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       `${unmappedOperations} line${unmappedOperations === 1 ? "" : "s"} carry an operation this build does not translate. The source wording is printed verbatim.`
     );
   }
+  const unread = findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout });
+  if (unread.length > 0) {
+    warnings.push(
+      `${unread.length} line${unread.length === 1 ? "" : "s"} printed on the source produced no keying row (line${
+        unread.length === 1 ? "" : "s"
+      } ${unread.join(", ")}). Key ${
+        unread.length === 1 ? "it" : "them"
+      } from the source document — the totals below include ${unread.length === 1 ? "it" : "them"}.`
+    );
+  }
+
   const nonOemRowsNeedingVendor = folded.filter(
     (row) => ["A/M", "CAPA A/M", "LKQ", "Recond"].includes(row.partTypeCcc) && row.partNumber && !row.vendor
   );
@@ -657,7 +833,11 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       roNumber: identity.roNumber,
       vehicle: identity.vehicle,
     },
-    profile: buildProfileBlock({ text, totals: expectedTotals }),
+    profile: buildProfileBlock({
+      text,
+      totals: expectedTotals,
+      deductible: mitchellLayout ? (parseMitchellEstimateTotals(text)?.deductible ?? null) : null,
+    }),
     groups,
     rows: folded,
     expectedTotals,

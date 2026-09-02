@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildRekeySheet, harvestRowNotes, recoverSpacedPartNumber } from "../rekeyLedger";
+import {
+  assessRekeySheet,
+  buildRekeySheet,
+  findUnreadLineNumbers,
+  harvestRowNotes,
+  recoverSpacedPartNumber,
+  sharesPartNoun,
+} from "../rekeyLedger";
 import { SOURCE_ESTIMATE_TEXT } from "./fixtures";
 
 const sheet = buildRekeySheet({ text: SOURCE_ESTIMATE_TEXT, sourceFile: "source.pdf" });
@@ -75,12 +82,32 @@ describe("rekey ledger — special cases", () => {
     expect(refinish.map((entry) => entry.hours).reduce((a, b) => a + b, 0)).toBeCloseTo(7.0, 5);
   });
 
-  it("emits ONE aggregate clear-coat row and never distributes it", () => {
+  it("keeps a single clear-coat allowance as one row and forbids distributing it", () => {
     const aggregate = sheet.rows.filter((candidate) => /clear coat/i.test(candidate.descriptionCcc));
     expect(aggregate).toHaveLength(1);
     expect(aggregate[0].labor).toEqual([{ type: "LAR", hours: 3.1, included: false, judgment: false }]);
-    expect(aggregate[0].sectionCcc).toBe("MISCELLANEOUS OPERATIONS");
     expect(aggregate[0].notes.join(" ")).toMatch(/do not distribute/i);
+    expect(aggregate[0].flags).toContain("manual refinish");
+  });
+
+  it("never merges per-panel clear-coat lines into one aggregate", () => {
+    // A source that already prints clear coat per panel has made the
+    // allocation itself; collapsing it discards the panel each allowance
+    // belongs to and moves refinish hours out of their own section.
+    const perPanel = buildRekeySheet({
+      text: `HOOD
+1 Rpr Hood 4.0 2.6
+2 Add for Clear Coat 1.0
+FRONT BUMPER
+3 Rpr Bumper cover 2.0 3.0
+4 Add for Clear Coat 1.2
+`,
+      sourceFile: "x.pdf",
+    });
+    const clearCoat = perPanel.rows.filter((row) => /clear coat/i.test(row.descriptionCcc));
+    expect(clearCoat).toHaveLength(2);
+    expect(clearCoat.map((row) => row.sectionCcc)).toEqual(["HOOD", "FRONT BUMPER & GRILLE"]);
+    expect(clearCoat[0].notes.join(" ")).toMatch(/per panel/i);
   });
 
   it("routes paint materials to the profile block instead of a keying row", () => {
@@ -103,7 +130,132 @@ describe("rekey ledger — special cases", () => {
   });
 });
 
+describe("rekey ledger — folding only merges the same part", () => {
+  it("folds a refinish-only line into the part line above it", () => {
+    expect(sharesPartNoun("Hood Panel Alum", "Hood Outside")).toBe(true);
+  });
+
+  it("refuses to fold a refinish line for a DIFFERENT part", () => {
+    // A real estimate printed "Refn Tow eye cap" directly under a bumper-cover
+    // repair. Folding merged two different parts into one keying row and the
+    // tow eye cap disappeared from the sheet entirely.
+    expect(sharesPartNoun("Bumper cover w/o performance", "Tow eye cap w/o performance")).toBe(false);
+    const sheetWithNeighbour = buildRekeySheet({
+      text: `FRONT BUMPER
+1 Rpr Bumper cover 2.0 3.0
+2 Refn Tow eye cap 0.2
+`,
+      sourceFile: "x.pdf",
+    });
+    expect(sheetWithNeighbour.stats.foldedRefinishRows).toBe(0);
+    expect(sheetWithNeighbour.rows).toHaveLength(2);
+  });
+
+  it("ignores side and position words when deciding whether two rows name one part", () => {
+    expect(sharesPartNoun("LT Front Fender", "RT Rear Quarter")).toBe(false);
+  });
+});
+
+describe("rekey ledger — manual line entries", () => {
+  it("names a line the source marks as a manual entry instead of calling it untranslatable", () => {
+    const manual = buildRekeySheet({
+      text: `MISCELLANEOUS OPERATIONS
+50 #Pre wash vehicle 1 5.00 T 0.5
+`,
+      sourceFile: "x.pdf",
+    });
+    const row = manual.rows[0];
+    expect(row.operationCcc).toBe("Manual");
+    expect(row.laborOpCode).toBe("OP0");
+    expect(row.flags).toContain("manual line");
+    expect(row.flags).not.toContain("operation: verify");
+  });
+
+  it("still prefers a printed operation code over the manual marker", () => {
+    const manual = buildRekeySheet({
+      text: `VEHICLE DIAGNOSTICS
+44 #Rpr Pre repair scan 1.0 M
+`,
+      sourceFile: "x.pdf",
+    });
+    expect(manual.rows[0].operationCcc).toBe("Rpr");
+  });
+});
+
+describe("rekey ledger — lines the reader could not read", () => {
+  it("reports a numbered line that produced no keying row", () => {
+    const dropped = findUnreadLineNumbers({
+      text: `FRONT BUMPER
+7 Rpr Bumper cover 2.0 3.0
+8 #Neutralize static charge on panel
+quantity: 1.0
+1 14.00 T
+`,
+      rows: [{ sourceLine: 7, sectionSource: "FRONT BUMPER" } as never],
+      foldedLines: [],
+      mitchellLayout: false,
+    });
+    expect(dropped).toEqual([8]);
+  });
+
+  it("does not report a numbered section heading as a lost line", () => {
+    const dropped = findUnreadLineNumbers({
+      text: `6 FRONT BUMPER & GRILLE
+7 Rpr Bumper cover 2.0 3.0
+`,
+      rows: [{ sourceLine: 7, sectionSource: "FRONT BUMPER & GRILLE" } as never],
+      foldedLines: [],
+      mitchellLayout: false,
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  it("does not report a line that was folded into another row", () => {
+    const dropped = findUnreadLineNumbers({
+      text: `HOOD
+1 Rpr Hood 4.0 2.6
+2 Refn Hood Outside 2.5
+`,
+      rows: [{ sourceLine: 1, sectionSource: "HOOD" } as never],
+      foldedLines: [2],
+      mitchellLayout: false,
+    });
+    expect(dropped).toEqual([]);
+  });
+});
+
+describe("rekey sheet quality gate", () => {
+  it("refuses a sheet whose rows mostly carry no line number", () => {
+    const broken = assessRekeySheet({
+      rows: [
+        { keyable: true, sourceLine: null },
+        { keyable: true, sourceLine: null },
+        { keyable: true, sourceLine: 7 },
+      ],
+    } as never);
+    expect(broken.ok).toBe(false);
+    expect(broken.reason).toMatch(/could not be read reliably/i);
+  });
+
+  it("accepts a sheet read from a document whose rows are numbered", () => {
+    expect(assessRekeySheet(sheet).ok).toBe(true);
+  });
+});
+
 describe("rekey ledger — profile block and totals", () => {
+  it("carries every labor rate the source prints, not a fixed three", () => {
+    const extra = buildRekeySheet({
+      text: SOURCE_ESTIMATE_TEXT.replace(
+        "Refinish Labor 10.1 hrs @ $ 61.00 /hr 616.10",
+        "Refinish Labor 10.1 hrs @ $ 61.00 /hr 616.10\nAluminum Or Steel Repair 1.0 hrs @ $ 135.00 /hr 135.00"
+      ),
+      sourceFile: "source.pdf",
+    });
+    const aluminium = extra.profile.find((field) => /aluminum/i.test(field.field));
+    expect(aluminium?.value).toBe(135);
+    expect(aluminium?.basis).toBe("printed");
+  });
+
   it("reads the labor rates the estimator must set before keying", () => {
     const field = (name: string) => sheet.profile.find((entry) => entry.field === name);
     expect(field("Body rate (LAB)")?.value).toBe(61);
