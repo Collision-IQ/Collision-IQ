@@ -460,7 +460,7 @@ export default function RekeyPanel() {
                     </span>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-left text-xs">
+                    <table className="w-full min-w-[820px] text-left text-xs">
                       <thead className="bg-muted/30 text-muted-foreground">
                         <tr>
                           <th className="px-2.5 py-1.5 font-medium">Line</th>
@@ -468,6 +468,7 @@ export default function RekeyPanel() {
                           <th className="px-2.5 py-1.5 font-medium">Description</th>
                           <th className="px-2.5 py-1.5 font-medium">Part #</th>
                           <th className="px-2.5 py-1.5 font-medium">Type</th>
+                          <th className="px-2.5 py-1.5 font-medium">Vendor</th>
                           <th className="px-2.5 py-1.5 font-medium">Qty</th>
                           <th className="px-2.5 py-1.5 font-medium">Price</th>
                           <th className="px-2.5 py-1.5 font-medium">Labor</th>
@@ -501,6 +502,7 @@ export default function RekeyPanel() {
                             </td>
                             <td className="px-2.5 py-1.5 font-mono">{row.partNumber ?? "—"}</td>
                             <td className="px-2.5 py-1.5">{row.partTypeCcc === "None" ? "—" : row.partTypeCcc}</td>
+                            <td className="px-2.5 py-1.5 text-[11px]">{row.vendor ?? "—"}</td>
                             <td className="px-2.5 py-1.5">{row.qty ?? "—"}</td>
                             <td className="px-2.5 py-1.5 font-mono">{money(row.price)}</td>
                             <td className="px-2.5 py-1.5 font-mono">
@@ -525,6 +527,17 @@ export default function RekeyPanel() {
               ))}
             </div>
           </div>
+
+          {result.sheet.partsVendorsBlock.length > 0 ? (
+            <details className="ci-card rounded-lg border border-border bg-card p-4">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                Parts vendors as printed on the source ({result.sheet.stats.vendorsAttached} attached to lines)
+              </summary>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">
+                {result.sheet.partsVendorsBlock.join("\n")}
+              </pre>
+            </details>
+          ) : null}
 
           {result.sheet.expectedTotals ? (
             <div className="ci-card rounded-lg border border-border bg-card p-4">

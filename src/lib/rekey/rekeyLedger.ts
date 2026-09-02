@@ -25,6 +25,7 @@ import {
 } from "@/lib/reports/estimateDeltaMatcher";
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
+import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
 import { normalizeOverprintText } from "@/lib/reports/overprintNormalize";
 import VOCABULARY from "./data/rekeyVocabulary.json";
 import {
@@ -398,11 +399,24 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // Section-anchored preamble: a source estimate that spells its operations as
   // words carries few CCC op codes, and the default anchor would treat real
   // cost lines below the last op-coded row as boilerplate.
-  const parsedRows = parseCccEstimateRows(text, { preambleAnchor: "section-anchored" }).filter(
+  const partsVendors = harvestPartsVendors(text);
+  const parsedRows = parseCccEstimateRows(text, { preambleAnchor: "section-anchored" }).filter((row) => {
     // Rows read out of the ESTIMATE TOTALS block are totals, never keying
     // rows; they are reconciled separately and must not be keyed twice.
-    (row) => !/\bESTIMATE TOTALS\b|\bTOTALS\b/i.test(row.section ?? "")
-  );
+    if (/\bESTIMATE TOTALS\b|\bTOTALS\b/i.test(row.section ?? "")) return false;
+    // Same rule for the parts-vendors pages, joined on the row's own text.
+    // The join is exact rather than positional, and a row that bills hours is
+    // kept whatever it matches — a vendors listing bills none, so a row that
+    // does cannot have come off one.
+    const signature = vendorLineSignature(row.rawText ?? "");
+    if (!signature) return true;
+    const billsTime =
+      row.labor !== null || row.paint !== null || row.laborIncluded || row.paintIncluded;
+    if (billsTime) return true;
+    return ![...partsVendors.signatures].some(
+      (candidate) => candidate.includes(signature) || signature.includes(candidate)
+    );
+  });
   const expectedTotals = toExpectedTotals(text);
   const identity = readClaimIdentity(text);
   const notesByLine = harvestRowNotes(text);
@@ -475,6 +489,9 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       partTypeEms: partType.ems,
       partNumber: partNumberSource ? partNumberSource.replace(/\s+/g, "") : null,
       partNumberSource,
+      vendor: partNumberSource
+        ? (partsVendors.byPartNumber.get(partNumberSource.replace(/\s+/g, "").toUpperCase()) ?? null)
+        : null,
       qty: row.qty,
       price: miscAmount === null ? row.price : null,
       taxable,
@@ -559,6 +576,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       partTypeEms: null,
       partNumber: null,
       partNumberSource: null,
+      vendor: null,
       qty: null,
       price: null,
       taxable: null,
@@ -616,9 +634,18 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       `${unmappedOperations} line${unmappedOperations === 1 ? "" : "s"} carry an operation this build does not translate. The source wording is printed verbatim.`
     );
   }
-  if (folded.some((row) => ["A/M", "CAPA A/M", "LKQ"].includes(row.partTypeCcc))) {
+  const nonOemRowsNeedingVendor = folded.filter(
+    (row) => ["A/M", "CAPA A/M", "LKQ", "Recond"].includes(row.partTypeCcc) && row.partNumber && !row.vendor
+  );
+  if (nonOemRowsNeedingVendor.length > 0) {
     warnings.push(
-      "Vendor names for aftermarket and recycled parts are not attached — this build does not read the parts-vendors pages. Take the vendor from the source estimate when CCC asks for it."
+      partsVendors.lines.length === 0
+        ? `${nonOemRowsNeedingVendor.length} aftermarket or recycled line${
+            nonOemRowsNeedingVendor.length === 1 ? "" : "s"
+          } need a vendor when keyed, and this document carries no parts-vendors page — take the vendor from the source estimate.`
+        : `${nonOemRowsNeedingVendor.length} aftermarket or recycled line${
+            nonOemRowsNeedingVendor.length === 1 ? "" : "s"
+          } are not named on the parts-vendors page by part number, so no vendor was attached to them. The page is reproduced at the end of the sheet.`
     );
   }
 
@@ -634,6 +661,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     groups,
     rows: folded,
     expectedTotals,
+    partsVendorsBlock: partsVendors.lines,
     stats: {
       sourceRows: parsedRows.length,
       keyableRows: folded.filter((row) => row.keyable).length,
@@ -641,6 +669,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       foldedRefinishRows,
       unmappedSections,
       unmappedOperations,
+      vendorsAttached: folded.filter((row) => row.vendor !== null).length,
     },
     warnings,
   };

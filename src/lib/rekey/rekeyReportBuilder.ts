@@ -70,6 +70,7 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
         row.descriptionCcc,
         row.partNumber ? `#${row.partNumber}` : null,
         row.partTypeCcc !== "None" ? row.partTypeCcc : null,
+        row.vendor ? `vendor ${row.vendor}` : null,
         row.qty !== null ? `qty ${row.qty}` : null,
         row.price !== null ? money(row.price) : null,
         labor || null,
@@ -98,6 +99,12 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
     }
     lines.push(`  Tax: ${money(sheet.expectedTotals.tax)}`);
     lines.push(`  Gross total: ${money(sheet.expectedTotals.grandTotal)}`);
+    lines.push("");
+  }
+
+  if (sheet.partsVendorsBlock.length > 0) {
+    lines.push("PARTS VENDORS AS PRINTED ON THE SOURCE");
+    for (const line of sheet.partsVendorsBlock) lines.push(`  ${line}`);
     lines.push("");
   }
 
