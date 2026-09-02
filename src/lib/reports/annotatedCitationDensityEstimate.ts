@@ -11,18 +11,40 @@ import {
 import { buildForensicReportPdf } from "./forensicReportRenderer";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import { normalizeOverprintLine, normalizeOverprintText } from "./overprintNormalize";
+/**
+ * EVERY pdf-lib value must come from this one specifier.
+ *
+ * PDFHexString, PDFName and PDFRef used to be imported from
+ * "pdf-lib/cjs/core". pdf-lib ships two builds — package main is cjs/index.js
+ * and package module is es/index.js — so a bundler resolves "pdf-lib" to the
+ * ESM copy while a deep "pdf-lib/cjs/*" path is always the CJS copy. That is
+ * two module instances and two sets of classes.
+ *
+ * PDFContext.obj() decides what to do with a value by `instanceof PDFObject`,
+ * and that test FAILS across instances. A PDFHexString built from the other
+ * copy was therefore treated as a plain JavaScript object and serialized by
+ * walking its own fields, so every annotation string was written as
+ * `<< /value /FEFF0046... >>` — a dictionary containing a name — where the
+ * spec requires a string object. Acrobat builds its comments list from markup
+ * annotations when the file opens, reads /Contents expecting a string, finds a
+ * dictionary, and refuses the document with "Expected a string object."
+ *
+ * It was invisible everywhere it was tested: under Node both specifiers
+ * resolve to the SAME cjs build, so instanceof holds and the output is
+ * correct. Only the browser bundle, which is where these reports are actually
+ * produced, splits them. scripts/check-pdf-lib-imports.cjs now fails the build
+ * on any deep pdf-lib path so this cannot come back.
+ */
 import {
   PDFDocument,
+  PDFHexString,
+  PDFName,
   StandardFonts,
   rgb,
   type PDFPage,
   type PDFFont,
-} from "pdf-lib";
-import {
-  PDFHexString,
-  PDFName,
   type PDFRef,
-} from "pdf-lib/cjs/core";
+} from "pdf-lib";
 import { redactDownloadContent, redactInsurersForExport } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationDensityAuthority, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
