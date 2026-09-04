@@ -57,6 +57,7 @@ const FURNITURE = [
   /^\s*labor\s+part\s*$/i,
   /^oem\s+[a-z]{3}_\d{2}_v/i,
   /^mitchell\b/i,
+  /^system\s+profile$/i,
   /^\*+\s*judgment\s+item/i,
   /^[a-z]{2}\s+[a-z]+\s+all\s+part\s+types$/i,
 ];
@@ -147,6 +148,18 @@ const FLAG_BEFORE_PART_TYPE = new RegExp(
   "gi"
 );
 
+/** A value welded to the column keyword that follows it. Vocabulary-driven for
+ *  the same reason GLUED_KEYWORD is: a part number must survive intact. */
+const VALUE_BEFORE_KEYWORD = new RegExp(
+  `(\\d)(?=(?:${[...LABOR_TYPES, "INC", "YES", "NO"]
+    .concat(PART_TYPE_PHRASES.flatMap((phrase) => phrase.split(" ")))
+    .map((word) => word.replace(/[^A-Z0-9]/g, ""))
+    .filter((word) => word.length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .join("|")})(?![a-z]))`,
+  "gi"
+);
+
 /** Insert a space wherever the print glues two columns into one run. */
 export function unglue(value: string): string {
   return value
@@ -162,9 +175,18 @@ export function unglue(value: string): string {
     // "1.6#Existing" -> "1.6# Existing"; "Mechanical*0.3*" -> "Mechanical *0.3*"
     .replace(/([#*])([A-Za-z])/g, "$1 $2")
     .replace(/([A-Za-z])([#*])/g, "$1 $2")
-    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    // A value welded to the COLUMN WORD that follows it ("0.0New", "2.64Yes").
+    // This was a blanket digit-then-letter split, which also cut every
+    // alphanumeric part number in half ("15369-0P0101" -> "15369-0 P0101").
+    // The debris then trailed into the section heading and cost the sheet its
+    // sections as well as its part numbers.
+    .replace(VALUE_BEFORE_KEYWORD, "$1 ")
     .replace(/(\S)(\$)/g, "$1 $2")
     // "Body1.6" -> "Body 1.6", but "TA1228103" untouched.
+    // RS-4: a part number too long for its column wraps onto the next printed
+    // line ("90467-" / "07049-23"). Joining on the digit-dash-digit seam puts
+    // it back; nothing else in the row has that shape.
+    .replace(/(\d)-\s+(\d)/g, "$1-$2")
     .replace(GLUED_KEYWORD, "$1 ")
     .replace(FLAG_BEFORE_PART_TYPE, "$1 ")
     .replace(/\s+/g, " ")
@@ -179,18 +201,34 @@ interface MitchellBlock {
 }
 
 /** Split the line-item region into one block per printed row. */
+/**
+ * The column header, which differs between Mitchell prints.
+ *
+ * Some estimates carry a CEG column between Total Units and Type. Extraction
+ * welds it onto the units cell ("2.6#2.6", "INC#0.2", "*0.0*0.0"), and a units
+ * pattern that does not expect it matches nothing — which is how a real
+ * estimate reached the sheet with 3.1 of its 24.6 body hours.
+ */
+const HEADER_LINE = /^line\s*#.*total\s*units/i;
+/** The header is one glued run ("Total UnitsCEGType"), so CEG carries no word
+ *  boundary; anchoring it to the column it follows is what makes it findable. */
+const CEG_COLUMN = /UNITS\s*CEG/i;
+
 export function readMitchellBlocks(text: string): {
   blocks: MitchellBlock[];
   regionFound: boolean;
   openingHeading: string | null;
+  hasCegColumn: boolean;
 } {
   const lines = splitLines(text);
   const blocks: MitchellBlock[] = [];
   let current: MitchellBlock | null = null;
   let started = false;
   let openingHeading: string | null = null;
+  let hasCegColumn = false;
 
   for (const line of lines) {
+    if (HEADER_LINE.test(line)) hasCegColumn = hasCegColumn || CEG_COLUMN.test(line);
     if (REGION_END.test(line)) {
       if (started) break;
       continue;
@@ -215,7 +253,7 @@ export function readMitchellBlocks(text: string): {
     else if (!started && !/\d/.test(line) && line.length <= 60) openingHeading = line;
   }
   if (current) blocks.push(current);
-  return { blocks, regionFound: blocks.length > 0, openingHeading };
+  return { blocks, regionFound: blocks.length > 0, openingHeading, hasCegColumn };
 }
 
 interface ParsedMitchellRow {
@@ -255,6 +293,17 @@ function findPhrase(
   return null;
 }
 
+/**
+ * Remove a CEG value welded onto the end of the units cell.
+ *
+ * Only strips when what remains still reads as a units cell, so a plain
+ * "2.6" is never mistaken for units "2" plus a CEG of ".6".
+ */
+export function stripCegSuffix(token: string): string {
+  const split = /^(\*?\d+\.\d\*?[#*rCTA]*|INC[#*rCTA]*)(\d+\.\d)$/i.exec(token);
+  return split ? split[1] : token;
+}
+
 function findOperation(tokens: string[]): { start: number; end: number; phrase: string } | null {
   let fallback: { start: number; end: number; phrase: string } | null = null;
   let from = 0;
@@ -269,7 +318,11 @@ function findOperation(tokens: string[]): { start: number; end: number; phrase: 
   return fallback;
 }
 
-function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchellRow | null {
+function parseBlock(
+  block: MitchellBlock,
+  section: string | null,
+  hasCegColumn: boolean
+): ParsedMitchellRow | null {
   // Punctuation-only tokens are dropped from BOTH streams in step, so the
   // separator the print puts inside an operation ("Remove / Replace") cannot
   // break the phrase, while the raw stream still spells the description as
@@ -296,7 +349,18 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
   //    billing no time ("Additional Cost / Paint Materials") looks like.
   const operation = findOperation(tokens);
   if (!operation) return null;
-  const description = raw.slice(0, operation.start).join(" ").trim();
+
+  // RK-07: the print spells a multi-quantity line in the description
+  // ("Frt Bumper Clip (2 @ $1.98)"), which is the only place the quantity
+  // appears in full when the Number and Qty columns weld together.
+  const perUnit = /\((\d{1,3})\s*@\s*\$([\d,]+\.\d{2})\)/.exec(block.text);
+  const declaredQty = perUnit ? Number(perUnit[1]) : null;
+  const declaredUnit = perUnit ? Number(perUnit[2].replace(/,/g, "")) : null;
+  const description = raw
+    .slice(0, operation.start)
+    .join(" ")
+    .replace(/\s*\(\s*\d{1,3}\s*@?\s*\$?[\d,]+\.\d{2}\s*\)/, "")
+    .trim();
   if (!description) return null;
 
   let cursor = operation.end;
@@ -313,7 +377,10 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
   let units: number | null = null;
   let included = false;
   if (cursor < tokens.length) {
-    const token = raw[cursor];
+    // On a print with a CEG column the two cells arrive as one token, so the
+    // trailing CEG value is removed before the units are read. CEG is the
+    // guide's own time and is not what the estimate bills.
+    const token = hasCegColumn ? stripCegSuffix(raw[cursor]) : raw[cursor];
     const numeric = /^\*?(\d+\.\d)\*?[#*rCTA]*$/.exec(token);
     const inc = /^INC[#*rCTA]*$/i.test(token);
     if (numeric) {
@@ -324,8 +391,17 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
       cursor += 1;
     }
   }
-  // Stray flag tokens printed apart from the units ("0.8 C").
-  while (cursor < tokens.length && /^[#*rCTA]+$/.test(raw[cursor])) cursor += 1;
+  // Step over what trails the units cell: stray flag tokens printed apart from
+  // the value ("0.8 C"), and the CEG value where ungluing split it off rather
+  // than leaving it welded ("INC" then "#2.6", "0.1" then "r" then "#0.1").
+  // Both shapes are unambiguous here — a part type is alphabetic, a quantity a
+  // bare integer, a price opens with a currency mark.
+  while (
+    cursor < tokens.length &&
+    (/^[#*rCTA]+$/.test(raw[cursor]) || (hasCegColumn && /^[#*rCTA]*\d+\.\d$/.test(raw[cursor])))
+  ) {
+    cursor += 1;
+  }
 
   // 4. Part type.
   const partType = findPhrase(tokens, PART_TYPE_PHRASES, cursor);
@@ -336,7 +412,7 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
   let qty: number | null = null;
   let price: number | null = null;
   let taxed = false;
-  let glued = false;
+  let qtyStoodAlone = false;
   while (cursor < tokens.length) {
     const token = raw[cursor];
     const money = /^\$([\d,]+\.\d{2})\*?$/.exec(token);
@@ -356,31 +432,47 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
       cursor += 1;
       continue;
     }
+    // A bare integer standing on its own IS the quantity column, which also
+    // proves it was NOT welded onto the part number.
     if (/^\d{1,3}$/.test(token) && qty === null) {
       qty = Number(token);
+      qtyStoodAlone = true;
       cursor += 1;
       continue;
     }
     // A part number carries digits and is not a bare quantity or a decimal.
     if (partNumber === null && /\d/.test(token) && /^[A-Za-z0-9][A-Za-z0-9-]{4,}$/.test(token)) {
-      // The print welds the quantity column onto the part number
-      // ("1694511-00-C1" is part 1694511-00-C, quantity 1). Splitting it is
-      // only safe when what remains still ends in a non-digit; on
-      // "TA12281031" the same split could mean quantity 1 or 31, so the token
-      // is kept exactly as printed and the row is flagged instead of guessing.
-      const split = /^(.*[A-Za-z-])(\d{1,2})$/.exec(token);
-      if (split) {
-        partNumber = split[1];
-        if (qty === null) qty = Number(split[2]);
-      } else {
-        partNumber = token;
-        if (/\d$/.test(token)) glued = true;
-      }
+      partNumber = token;
       cursor += 1;
       continue;
     }
     break;
   }
+
+  // RK-03 (text lane): separate the quantity the print welds onto the part
+  // number. Every branch below is driven by something the document states, and
+  // where it states nothing the token is left exactly as printed and flagged —
+  // the columns are only truly separable from their header x-positions, which
+  // this text lane does not have.
+  let partQtyGlued = false;
+  if (partNumber !== null && !qtyStoodAlone) {
+    if (declaredQty !== null) {
+      // The description declared the quantity; remove exactly those digits.
+      const suffix = String(declaredQty);
+      if (partNumber.endsWith(suffix) && partNumber.length > suffix.length) {
+        partNumber = partNumber.slice(0, -suffix.length);
+      }
+      qty = declaredQty;
+    } else if (/\d$/.test(partNumber) && partNumber.length > 1) {
+      // No declaration means a single unit — the print spells out any larger
+      // quantity — so the one trailing digit is that quantity.
+      qty = qty ?? 1;
+      partNumber = partNumber.slice(0, -1);
+      partQtyGlued = true;
+    }
+  }
+  if (declaredQty !== null && qty === null) qty = declaredQty;
+  const unitPrice = declaredUnit ?? (price !== null && (qty ?? 1) > 1 ? price / (qty ?? 1) : price);
 
   const trailing = raw.slice(cursor).join(" ").trim();
 
@@ -397,7 +489,7 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
     partNumber,
     section,
     qty,
-    price,
+    price: unitPrice,
     labor: isRefinish ? null : units,
     laborIncluded: isRefinish ? false : included,
     paint: isRefinish ? units : null,
@@ -407,7 +499,7 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
     // Keeping the row's own printed text lets the judgment-marker and tax
     // readers work off the source rather than off this parse.
     rawText: `${block.lineNumber}${block.operationCode}${block.text}${taxed ? " T" : ""}${
-      glued ? " [part number and quantity printed together — verify]" : ""
+      partQtyGlued ? " [part number and quantity printed together — verify]" : ""
     }`,
     pageNumber: null,
     supplementTag: null,
@@ -424,12 +516,12 @@ function parseBlock(block: MitchellBlock, section: string | null): ParsedMitchel
  * and falls out once that row's columns are consumed.
  */
 export function parseMitchellEstimateRows(text: string): EstimateDeltaRow[] {
-  const { blocks, openingHeading } = readMitchellBlocks(text);
+  const { blocks, openingHeading, hasCegColumn } = readMitchellBlocks(text);
   const rows: EstimateDeltaRow[] = [];
   let section: string | null = openingHeading;
 
   for (const block of blocks) {
-    const parsed = parseBlock(block, section);
+    const parsed = parseBlock(block, section, hasCegColumn);
     if (!parsed) continue;
     rows.push(parsed.row);
     if (parsed.trailing && !/\d/.test(parsed.trailing) && parsed.trailing.length <= 60) {

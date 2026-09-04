@@ -30,6 +30,19 @@ const TOTALS_CATEGORIES = VOCABULARY.totalsCategories as Array<{
   aliases: string[];
 }>;
 
+/**
+ * RK-08: the part-number key.
+ *
+ * The two platforms print the same part differently — Mitchell writes
+ * "53101-06650", a CCC EMS export writes "5310106650" — so any key that keeps
+ * punctuation matches nothing. On a real pair this alone accounted for every
+ * one of 24 identical parts failing to pair.
+ */
+export function partNumberKey(value: string | null | undefined): string | null {
+  const key = String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return key.length >= 4 ? key : null;
+}
+
 const MONEY_TOLERANCE = 0.005;
 const HOURS_TOLERANCE = 0.05;
 
@@ -322,11 +335,21 @@ function descriptionKeys(
   description: string | null,
   group: string | null,
   operation: string | null
-): { withOperation: string; withoutOperation: string } {
+): { withOperation: string; withoutOperation: string; withoutGroup: string } {
   const canon = canonKey(description ?? "");
   const side = detectSide(description ?? "");
-  const base = [normalizeVocabularyText(group ?? ""), side, canon.key].join("|");
-  return { withOperation: `${normalizeVocabularyText(operation ?? "")}|${base}`, withoutOperation: base };
+  const grouped = [normalizeVocabularyText(group ?? ""), side, canon.key].join("|");
+  const ungrouped = [side, canon.key].join("|");
+  return {
+    withOperation: `${normalizeVocabularyText(operation ?? "")}|${grouped}`,
+    withoutOperation: grouped,
+    // RV-3: the two platforms group work differently BY DESIGN, so a source
+    // row whose group did not map could never match anything while group
+    // equality was a precondition. It is a tie-breaker: tried first, then
+    // dropped, with the side token still keeping a left part off its right
+    // twin.
+    withoutGroup: ungrouped,
+  };
 }
 
 function laborByType(entries: Array<{ type: string | null; hours: number; included: boolean }>): Map<string, { hours: number; included: boolean }> {
@@ -563,15 +586,18 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
   const byPartNumber = new Map<string, string[]>();
   const byOperationDescription = new Map<string, string[]>();
   const byDescription = new Map<string, string[]>();
+  const byDescriptionNoGroup = new Map<string, string[]>();
   const byMisc = new Map<string, string[]>();
   const append = (index: Map<string, string[]>, key: string, id: string) => {
     index.set(key, [...(index.get(key) ?? []), id]);
   };
   for (const line of keyed.lines) {
-    if (line.partNumber) append(byPartNumber, line.partNumber, line.id);
+    const partKey = partNumberKey(line.partNumber);
+    if (partKey) append(byPartNumber, partKey, line.id);
     const keys = descriptionKeys(line.description, line.group, line.operation);
     append(byOperationDescription, keys.withOperation, line.id);
     append(byDescription, keys.withoutOperation, line.id);
+    append(byDescriptionNoGroup, keys.withoutGroup, line.id);
     if (line.misc) {
       append(byMisc, `${normalizeVocabularyText(line.group ?? "")}|${line.misc.amount.toFixed(2)}`, line.id);
     }
@@ -590,14 +616,16 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     let match: KeyedLine | null = null;
     let matchedBy: RekeyLineFinding["matchedBy"] = null;
 
-    if (row.partNumber) {
-      match = takeFirstAvailable(byPartNumber.get(row.partNumber));
+    const rowPartKey = partNumberKey(row.partNumber);
+    if (rowPartKey) {
+      match = takeFirstAvailable(byPartNumber.get(rowPartKey));
       if (match) matchedBy = "part number";
     }
     if (!match) {
       const keys = descriptionKeys(row.descriptionCcc, row.sectionCcc, row.operationCcc);
       match = takeFirstAvailable(byOperationDescription.get(keys.withOperation));
       if (!match) match = takeFirstAvailable(byDescription.get(keys.withoutOperation));
+      if (!match) match = takeFirstAvailable(byDescriptionNoGroup.get(keys.withoutGroup));
       if (match) matchedBy = "description";
     }
     if (!match && row.misc) {
