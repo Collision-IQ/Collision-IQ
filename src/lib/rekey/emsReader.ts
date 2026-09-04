@@ -383,6 +383,16 @@ export function gateEmsEstimate(estimate: EmsEstimate): EmsGateResult {
   if (!estimate.estimatingSystem) {
     return { ok: false, reason: "The export does not identify an estimating system, so it cannot be verified." };
   }
+  // RV-7: verification proves a CCC rekey against its source, so the keyed
+  // side must be the CCC workfile's own export. A real CCC export writes the
+  // CIECA code "C" (F-RK1a); the platform name is accepted as well. An export
+  // from another platform is a cross-platform comparison, not a rekey.
+  if (!/^c$|ccc/i.test(estimate.estimatingSystem.trim())) {
+    return {
+      ok: false,
+      reason: `The export was written by estimating system "${estimate.estimatingSystem.trim()}", not CCC ONE. Verification proves a CCC rekey against its source; an export from another platform is a cross-platform comparison, which is the Estimate Delta report.`,
+    };
+  }
   if (!estimate.emsVersion) {
     return { ok: false, reason: "The export does not carry an EMS version, so it cannot be verified." };
   }

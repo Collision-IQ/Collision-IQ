@@ -26,6 +26,7 @@ import {
   normalizeVocabularyText,
 } from "./rekeyVocabulary";
 import { buildRekeySheet } from "./rekeyLedger";
+import { looksLikeMitchellLayout } from "./mitchellEstimateReader";
 import { gateEmsEstimate, normalizeEmsEstimate, type EmsBundle, type EmsEstimate } from "./emsReader";
 import type { RekeyLedgerRow, RekeySheet } from "./rekeyTypes";
 
@@ -252,6 +253,22 @@ export function keyedEstimateFromDocument(params: { text: string; sourceFile: st
   };
 }
 
+/**
+ * RV-7: why a second estimate DOCUMENT is not run through verification.
+ *
+ * Verification exists to prove a rekey closed to $0.00 against its source,
+ * and the only artifact that states what was keyed is the EMS export of the
+ * rekeyed CCC workfile. A second estimate document for the same VIN — the
+ * shop's own estimate against the carrier's — is a shop-versus-carrier
+ * comparison: the Estimate Delta report, not a rekey verification. Run
+ * through this module it can only ever fail, and every "finding" would be a
+ * scope difference reported as a keying error.
+ */
+export function explainDocumentIsNotVerification(params: { keyedText: string }): string {
+  const platform = looksLikeMitchellLayout(params.keyedText) ? "a Mitchell estimate" : "an estimate document";
+  return `The second upload is ${platform}, so no verification was produced. Verification proves a rekey closed against its source and takes the EMS export (ZIP) of the rekeyed CCC workfile as the keyed side. Two estimates for the same vehicle are a shop-versus-carrier comparison — run them through the Estimate Delta report instead. The rekey sheet above is complete and unaffected.`;
+}
+
 export type RekeyLineResolution = "exact" | "value_delta" | "missing_in_keyed" | "unmatched";
 
 export interface RekeyFieldDelta {
@@ -423,7 +440,15 @@ function laborByType(entries: Array<{ type: string | null; hours: number; includ
   return map;
 }
 
-function compareFields(row: RekeyLedgerRow, keyed: KeyedLine): RekeyFieldDelta[] {
+/**
+ * Field-by-field comparison of one matched pair.
+ *
+ * RV-10: a difference is only reported where BOTH sides made a claim. A
+ * quantity the source never printed against a keyed 1 is the platform's
+ * default, not a keying error; a manual source line carries no operation of
+ * its own, so the operation the estimator keyed it under is not a difference.
+ */
+export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): RekeyFieldDelta[] {
   const deltas: RekeyFieldDelta[] = [];
   const showMoney = (value: number | null) => (value === null ? "not keyed" : `$${value.toFixed(2)}`);
   const showHours = (value: number | null) => (value === null ? "not keyed" : `${value.toFixed(1)} h`);
@@ -431,11 +456,14 @@ function compareFields(row: RekeyLedgerRow, keyed: KeyedLine): RekeyFieldDelta[]
   if (!sameMoney(row.price, keyed.price)) {
     deltas.push({ field: "price", expected: showMoney(row.price), found: showMoney(keyed.price) });
   }
-  if ((row.qty ?? null) !== (keyed.qty ?? null)) {
+  const sourceQty = row.qty ?? null;
+  const keyedQty = keyed.qty ?? null;
+  const defaultQuantity = (sourceQty === null && keyedQty === 1) || (keyedQty === null && sourceQty === 1);
+  if (sourceQty !== keyedQty && !defaultQuantity) {
     deltas.push({
       field: "quantity",
-      expected: row.qty === null ? "not printed" : String(row.qty),
-      found: keyed.qty === null ? "not keyed" : String(keyed.qty),
+      expected: sourceQty === null ? "not printed" : String(sourceQty),
+      found: keyedQty === null ? "not keyed" : String(keyedQty),
     });
   }
   if (row.partNumber && keyed.partNumber && row.partNumber !== keyed.partNumber) {
@@ -464,7 +492,7 @@ function compareFields(row: RekeyLedgerRow, keyed: KeyedLine): RekeyFieldDelta[]
     if (row.laborOpCode && row.laborOpCode.toUpperCase() !== keyedOperation.toUpperCase()) {
       deltas.push({ field: "operation", expected: row.laborOpCode, found: keyedOperation });
     }
-  } else if (keyedOperation && row.operationMapped && row.operationCcc !== "UNMAPPED") {
+  } else if (keyedOperation && row.operationMapped && row.operationCcc !== "UNMAPPED" && row.operationCcc !== "Manual") {
     if (normalizeVocabularyText(row.operationCcc) !== normalizeVocabularyText(keyedOperation)) {
       deltas.push({ field: "operation", expected: row.operationCcc, found: keyedOperation });
     }
@@ -562,6 +590,26 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       "Only one of the two documents prints a VIN or claim number, so the pair could not be confirmed as the same vehicle.";
   }
 
+  // RV-9: the claim number is compared whenever both sides print one, even
+  // after the VIN has settled the pair; when only one side prints one, the
+  // gate says so instead of silently skipping the comparison.
+  if (verdict === "match" && sourceVin && keyedVin) {
+    if (sourceClaim && keyedClaim) {
+      if (sameClaimTolerant(sourceClaim, keyedClaim)) {
+        detail += ` Claim ${sourceClaim} agrees.`;
+      } else {
+        detail += ` The claim numbers differ (${sourceClaim} and ${keyedClaim}).`;
+        notes.push(
+          `The VIN matches but the claim numbers differ (${sourceClaim} and ${keyedClaim}). Confirm the keyed estimate belongs to this claim before relying on the findings.`
+        );
+      }
+    } else if (sourceClaim && !keyedClaim) {
+      detail += " The keyed side prints no claim number, so the claim was not compared.";
+    } else if (keyedClaim && !sourceClaim) {
+      detail += " The source prints no claim number, so the claim was not compared.";
+    }
+  }
+
   const identity = { sourceVin, keyedVin, sourceClaim, keyedClaim, verdict, detail };
 
   if (verdict === "conflict") {
@@ -629,10 +677,14 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
   }
   for (const markup of keyed.profile?.partsMarkups ?? []) {
     if (markup.markupPct !== null && markup.markupPct !== 0) {
+      // A real CCC export writes the markup as a fraction ("0.2500" for 25%,
+      // F-RK1a); a value below one is read that way, so the finding does not
+      // say "0.25%" for a quarter markup.
+      const percent = Math.abs(markup.markupPct) < 1 ? markup.markupPct * 100 : markup.markupPct;
       profileFindings.push({
         field: `Parts markup (${markup.code})`,
         expected: "0%",
-        found: `${markup.markupPct}%`,
+        found: `${Number(percent.toFixed(2))}%`,
       });
     }
   }
@@ -693,26 +745,35 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     // gates below are what keep a score from becoming a guess.
     if (!match) {
       const rowSide = detectSide(row.descriptionCcc ?? "");
+      const rowGroup = normalizeVocabularyText(row.sectionCcc);
       let best: { line: KeyedLine; score: number } | null = null;
-      for (const line of remaining.values()) {
-        const group = normalizeVocabularyText(line.group ?? "");
-        const rowGroup = normalizeVocabularyText(row.sectionCcc);
-        // Group: a rename never moves a line to another section.
-        if (group !== rowGroup && group !== UNMAPPED && rowGroup !== UNMAPPED) continue;
-        // Side: a left part is never its right-hand twin. One side unprinted
-        // is not a disagreement — Mitchell prints some sided parts unsided.
-        const lineSide = detectSide(line.description ?? "");
-        if (rowSide && lineSide && rowSide !== lineSide) continue;
-        // Operation, or failing that the numbers. Requiring one of the two is
-        // what stops two unrelated leftovers from pairing on a shared word.
-        if (!operationsCompatible(row, line) && !numbersAgree(row, line)) continue;
-        const score = nomenclatureOverlap(
-          canonicalizeNomenclature(row.descriptionCcc, row.sectionCcc, line.group),
-          canonicalizeNomenclature(line.description, line.group, row.sectionCcc)
-        );
-        if (score >= NOMENCLATURE_MATCH_THRESHOLD && (best === null || score > best.score)) {
-          best = { line, score };
+      // RV-8: the two platforms group work differently BY DESIGN, so the
+      // group is a tie-breaker, not a precondition. Same-group candidates are
+      // tried first; a candidate in another group is accepted only when its
+      // numbers already agree, which is the stronger evidence a cross-group
+      // pair needs.
+      for (const pass of ["same group", "any group"] as const) {
+        for (const line of remaining.values()) {
+          const group = normalizeVocabularyText(line.group ?? "");
+          const sameGroup = group === rowGroup || group === UNMAPPED || rowGroup === UNMAPPED;
+          if (pass === "same group" && !sameGroup) continue;
+          if (pass === "any group" && (sameGroup || !numbersAgree(row, line))) continue;
+          // Side: a left part is never its right-hand twin. One side unprinted
+          // is not a disagreement — Mitchell prints some sided parts unsided.
+          const lineSide = detectSide(line.description ?? "");
+          if (rowSide && lineSide && rowSide !== lineSide) continue;
+          // Operation, or failing that the numbers. Requiring one of the two is
+          // what stops two unrelated leftovers from pairing on a shared word.
+          if (!operationsCompatible(row, line) && !numbersAgree(row, line)) continue;
+          const score = nomenclatureOverlap(
+            canonicalizeNomenclature(row.descriptionCcc, row.sectionCcc, line.group),
+            canonicalizeNomenclature(line.description, line.group, row.sectionCcc)
+          );
+          if (score >= NOMENCLATURE_MATCH_THRESHOLD && (best === null || score > best.score)) {
+            best = { line, score };
+          }
         }
+        if (best) break;
       }
       if (best) {
         match = best.line;
@@ -748,7 +809,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     }
 
     remaining.delete(match.id);
-    const deltas = compareFields(row, match);
+    const deltas = compareRekeyFields(row, match);
     lineFindings.push({
       ...base,
       resolution: deltas.length === 0 ? "exact" : "value_delta",

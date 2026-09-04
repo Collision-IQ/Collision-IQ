@@ -162,8 +162,10 @@ export default function RekeyPanel() {
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
         Upload the estimate that has to be rekeyed. Collision iQ translates every line into the receiving
-        system&apos;s vocabulary, groups them in keying order, and prints the profile settings to set first. Add
-        the shop&apos;s estimate as a second upload and it is reconciled against the sheet, line by line.
+        system&apos;s vocabulary, groups them in keying order, and prints the profile settings to set first. Once
+        the sheet has been keyed, add the EMS export of the rekeyed CCC workfile and it is verified against the
+        sheet, line by line. Two estimates for the same vehicle are a comparison, not a rekey — use the Estimate
+        Delta report for that.
       </p>
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -175,8 +177,8 @@ export default function RekeyPanel() {
           onFile={setSourceFile}
         />
         <RekeyFilePicker
-          label="2 · Shop estimate to rekey to it (optional)"
-          hint="PDF, text export, or a ZIP of an EMS export"
+          label="2 · EMS export of the rekeyed workfile (optional)"
+          hint="ZIP of the CCC EMS export — a second estimate document is routed to comparison instead"
           accept=".pdf,.txt,.csv,.zip,image/*,application/pdf,text/plain,text/csv,application/zip"
           file={keyedFile}
           onFile={setKeyedFile}
@@ -564,6 +566,44 @@ export default function RekeyPanel() {
                       <td className="px-2.5 py-1.5">Gross total</td>
                       <td className="px-2.5 py-1.5 font-mono">{money(result.sheet.expectedTotals.grandTotal)}</td>
                     </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {result.sheet.reconciliation && result.sheet.reconciliation.rows.length > 0 ? (
+            <div className="ci-card rounded-lg border border-border bg-card p-4">
+              <div className="ci-eyebrow mb-2 flex items-center gap-1.5">
+                <FileText size={13} />{" "}
+                {result.sheet.reconciliation.closes
+                  ? "The rows add up to the printed totals"
+                  : "The rows do not add up to the printed totals"}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] text-left text-xs">
+                  <thead className="text-muted-foreground">
+                    <tr>
+                      <th className="px-2.5 py-1.5 font-medium">Category</th>
+                      <th className="px-2.5 py-1.5 font-medium">Rows</th>
+                      <th className="px-2.5 py-1.5 font-medium">Printed</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-foreground">
+                    {result.sheet.reconciliation.rows.map((row) => {
+                      const format = (value: number | null) =>
+                        value === null ? "not printed" : row.unit === "hours" ? `${value.toFixed(1)} h` : money(value);
+                      return (
+                        <tr
+                          key={row.category}
+                          className={`border-t border-border ${row.closes ? "" : "text-red-600 dark:text-red-300"}`}
+                        >
+                          <td className="px-2.5 py-1.5">{row.category}</td>
+                          <td className="px-2.5 py-1.5 font-mono">{format(row.derived)}</td>
+                          <td className="px-2.5 py-1.5 font-mono">{format(row.printed)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

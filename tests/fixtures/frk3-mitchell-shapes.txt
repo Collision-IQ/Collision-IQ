@@ -1,0 +1,188 @@
+Test Body Shop
+1 Example Street, Anytown, PA 00000
+Estimate ID
+12345678
+Original
+Claim Number
+00-000000000-00
+Owner
+TEST OWNER
+Appraiser
+Test Appraiser
+Loss Date
+06/25/2025
+Inspection Site
+Test Body Shop
+Deductible
+$500.00
+Repair Facility
+Test Body Shop
+2016 Audi A6 Premium 4 Door Sedan 2.0L 4 Cyl Turbo Gas 7 Speed Auto Trans AWD
+Exterior Color
+LY9B (Brilliant Black)
+License
+PA-TEST000
+VIN
+1FTFW1E84PKE00000
+Condition
+Very Good
+Drivable
+Yes
+Committed On
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+Printed On
+7/1/2025
+9:15 AM
+Profile (Modified)
+ZZ TESTSHOP ALL PART TYPES
+Profile Version
+4.0
+ Page  1  of 3
+
+TEST  OWNERTEST  OWNER 2016 Audi A6 Premium2016 Audi A6 Premium
+Parts Profile
+N/A
+Parts Profile Version
+N/A
+ LABOR  PART
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Wheel
+1AUTOAlloy WheelRemove /
+Install
+Body0.3Existing
+Electrical
+2AUTOBatteryRepairMechanical*0.3*Existing
+Windshield
+3AUTOW/Shield GlassRepairGlass1.5*Existing
+4900501Mask for primer
+5AUTOR W/Shield DeflectorRemove /
+Install
+Body0.2Existing
+Back Window
+6AUTOBack Window GlassRepairGlass1.5*Existing
+Side Body
+7AUTOR Quarter Outer Panel AssyRepairBody14.0*Existing
+8201234R Quarter Fuel Filler HousingRemove /
+Replace
+Body0.7New4K0 809 999 A1$212.55Yes
+9201235R Rocker MouldingRemove /
+Replace
+Body0.6New4K0 853 855 B GRU1$252.00Yes
+10AUTOR Rocker MouldingRefinish
+Only
+Refinish1.8
+11900500Buff and cut clear coatAdditional
+Labor
+Refinish*1.0*Existing
+Quarter Glass
+12AUTOR Quarter GlassRemove /
+Install
+Glass0.8Existing
+ LABOR  PART
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Committed On
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+Printed On
+7/1/2025
+9:15 AM
+Profile (Modified)
+ZZ TESTSHOP ALL PART TYPES
+Profile Version
+4.0
+ Page  2  of 3
+
+TEST  OWNERTEST  OWNER 2016 Audi A6 Premium2016 Audi A6 Premium
+Rear Bumper
+13AUTORear Bumper Cover AssyOverhaulBody3.0Existing
+14201236Rear Bumper CoverRemove /
+Replace
+BodyINCNew4K0 807 511 A GRU1$1,570.81Yes
+15AUTORear Bumper CoverRefinish
+Only
+Refinish3.0
+Additional Costs & Materials
+16AUTOPaint/MaterialsAdditional
+Cost
+$344.40Yes
+17900500Hazardous Waste DisposalAdditional
+Cost
+$4.00*Yes
+Additional Operations
+18AUTOClear CoatAdditional
+Operation
+Refinish1.8
+19900500Pre Repair ScanAdditional
+Operation
+Mechanical*0.5*$0.00
+20900501Reconcile with invoice
+Special / Manual Entry
+21900500CORROSION
+PROTECTION
+Additional
+Labor
+Body*0.2*SubletSublet1$15.00*
+22900500CAR COVERAdditional
+Labor
+Body*0.2*SubletSublet1$6.00*
+23900500FLEX ADDITIVERemove /
+Replace
+Refinish*0.0*SubletSublet1$12.00*Yes
+24900500Mask JambsAdditional
+Labor
+Body*0.5*Existing
+** Judgment Item CC Included in Clear Coat Calculation
+TT Included in Two Tone Calculation AA Included in Clear Coat and Two Tone Calculation
+## Labor Note Applies rr CEG R&R Time Used for this Labor Operation
+dd Discontinued by Manufacturer [  ][  ] Verify the part number and price before ordering
+Estimate TotalsEstimate Totals
+LaborU n itsU n itsR ateR ateSu b letSu b letAd d ' l Amo u n tAd d ' l Amo u n tTo talsTo tals
+Body Labor19.719.7$61.00$61.00$21.00$21.00$1,222.70$1,222.70
+Refinish Labor7.67.6$61.00$61.00$463.60$463.60
+Mechanical Labor0.80.8$100.00$100.00$80.00$80.00
+Glass Labor3.83.8$61.00$61.00$231.80$231.80
+To tal Lab o rTo tal Lab o r31.931.9$1,998.10$1,998.10
+Taxable$ 1 , 9 9 8 . 1 0$ 1 , 9 9 8 . 1 0
+Tax 6.0000%$ 1 1 9 . 8 9$ 1 1 9 . 8 9
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+L a bor  T ota lL a bor  T ota l$ 2 , 1 1 7 . 9 9$ 2 , 1 1 7 . 9 9
+PartsAmo u n tAmo u n t
+Taxable Parts$2,047.36$2,047.36$2,047.36$2,047.36
+Tax 6.0000%$ 1 2 2 . 8 4$ 1 2 2 . 8 4
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Pa rts   T ota lPa rts   T ota l$ 2 , 1 7 0 . 2 0$ 2 , 1 7 0 . 2 0
+CostsAmo u n tAmo u n t
+Paint Materials$344.40$344.40$344.40$344.40
+Shop Materials$0.00$0.00$0.00$0.00
+Other Additional
+Costs
+$4.00$4.00$4.00$4.00
+Paint Materials:
+      - Refinish Units: 7.6 units
+      - Rate: $42.00
+      - Rate Max: 99.9 units
+Taxable$ 3 4 8 . 4 0$ 3 4 8 . 4 0
+Tax 6.0000%$ 2 0 . 9 0$ 2 0 . 9 0
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Cos ts   T ota lCos ts   T ota l$ 3 6 9 . 3 0$ 3 6 9 . 3 0
+Gross TotalsAmo u n tAmo u n t
+Gross Total$4,657.49$4,657.49$4,657.49$4,657.49
+Taxable$ 4 , 3 9 3 . 8 6$ 4 , 3 9 3 . 8 6
+Tax$ 2 6 3 . 6 3$ 2 6 3 . 6 3
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+G ros s   T ota lG ros s   T ota l$ 4 , 6 5 7 . 4 9$ 4 , 6 5 7 . 4 9
+AdjustmentsAmo u n tAmo u n t
+Deductible- $500.00- $500.00
+Net Estimate TotalNet Estimate Total$4,157.49$4,157.49
+Estimate TotalsEstimate Totals
