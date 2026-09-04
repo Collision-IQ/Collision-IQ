@@ -248,6 +248,21 @@ export default function RekeyPanel() {
 
       {result ? (
         <div className="mt-6 space-y-5">
+          {result.sheet.reconciliation && result.sheet.reconciliation.unreadLines.length > 0 ? (
+            <div className="ci-card rounded-lg border border-red-500/40 bg-red-500/5 p-4 text-sm text-red-700 dark:text-red-300">
+              <div className="font-semibold">
+                Incomplete — {result.sheet.reconciliation.unreadLines.length} printed line
+                {result.sheet.reconciliation.unreadLines.length === 1 ? "" : "s"} not read (line
+                {result.sheet.reconciliation.unreadLines.length === 1 ? "" : "s"}{" "}
+                {result.sheet.reconciliation.unreadLines.join(", ")})
+              </div>
+              <p className="mt-1">
+                Every printed total closes against the rows below, so the rows are trustworthy. Key the listed line
+                {result.sheet.reconciliation.unreadLines.length === 1 ? "" : "s"} from the source document before relying
+                on the totals.
+              </p>
+            </div>
+          ) : null}
           {result.sheet.warnings.length > 0 ? (
             <div className="ci-card rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
               <div className="ci-eyebrow mb-2 flex items-center gap-1.5 text-amber-600 dark:text-amber-300">

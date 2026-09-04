@@ -43,6 +43,18 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
   if (identity.length > 0) lines.push(identity.join(" · "));
   lines.push("");
 
+  // RK-09: a printed line the sheet could not read is the sheet's headline,
+  // never a footnote — it is the first thing the estimator reads.
+  if (sheet.reconciliation && sheet.reconciliation.unreadLines.length > 0) {
+    const lost = sheet.reconciliation.unreadLines;
+    lines.push(
+      `INCOMPLETE — ${lost.length} PRINTED LINE${lost.length === 1 ? "" : "S"} NOT READ (LINE${
+        lost.length === 1 ? "" : "S"
+      } ${lost.join(", ")}). KEY ${lost.length === 1 ? "IT" : "THEM"} FROM THE SOURCE BEFORE RELYING ON THE TOTALS.`
+    );
+    lines.push("");
+  }
+
   lines.push("SET THESE PROFILE VALUES BEFORE KEYING");
   for (const field of sheet.profile) {
     const basis =
