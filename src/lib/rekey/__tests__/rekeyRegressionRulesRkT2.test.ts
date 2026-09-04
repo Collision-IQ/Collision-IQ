@@ -17,6 +17,7 @@ import {
   type KeyedLine,
 } from "../rekeyVerification";
 import { readEmsBundle } from "../emsReader";
+import { buildRekeySheetText } from "../rekeyReportBuilder";
 import { buildEmsExportFiles } from "./emsFixture";
 import { SOURCE_ESTIMATE_TEXT } from "./fixtures";
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
@@ -209,13 +210,30 @@ describe("RK-09 — a lost line fails the sheet", () => {
     sourceFile: "frk3.pdf",
   });
 
-  it("refuses the sheet and names the line and the category that does not close", () => {
+  it("refuses the sheet when the lost line leaves a category open", () => {
     expect(broken.reconciliation.closes).toBe(false);
+    expect(broken.reconciliation.totalsClose).toBe(false);
     expect(broken.reconciliation.unreadLines).toEqual([24]);
+    expect(broken.reconciliation.failures.join(" ")).toMatch(/line 24/);
     const quality = assessRekeySheet(broken);
     expect(quality.ok).toBe(false);
-    expect(quality.reason).toMatch(/line 24/);
     expect(quality.reason).toMatch(/Body Labor hours/);
+  });
+
+  it("headlines, rather than refuses, a lost line the totals do not miss", () => {
+    // A zero-value line the reader cannot place leaves every total closed:
+    // the rows are proven, the loss is not, so the sheet is delivered with
+    // the lost line as its first line. A real CCC print was refused over
+    // exactly this the day the gate shipped.
+    const zero = buildRekeySheet({
+      text: TEXT.replace("Special / Manual Entry\n", "Special / Manual Entry\n25900500Mystery lineFrobnicate1$0.00\n"),
+      sourceFile: "frk3.pdf",
+    });
+    expect(zero.reconciliation.totalsClose).toBe(true);
+    expect(zero.reconciliation.closes).toBe(false);
+    expect(zero.reconciliation.unreadLines).toEqual([25]);
+    expect(assessRekeySheet(zero).ok).toBe(true);
+    expect(buildRekeySheetText(zero).split("\n").slice(0, 6).join("\n")).toMatch(/INCOMPLETE — 1 PRINTED LINE NOT READ \(LINE 25\)/);
   });
 });
 

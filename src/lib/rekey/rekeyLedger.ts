@@ -60,6 +60,13 @@ const MANUAL_ENTRY_CODES = new Set((VOCABULARY.manualEntryCodes as string[]).map
 const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string[]).map(normalizeVocabularyText);
 const AGGREGATE_REFINISH_LABELS = (VOCABULARY.aggregateRefinishLabels as string[]).map(normalizeVocabularyText);
 const CLEAR_COAT_EXCLUSIONS = (VOCABULARY.clearCoatExclusions as string[]).map(normalizeVocabularyText);
+/** Printed names of the CCC sublet / miscellaneous totals category. */
+const MISC_CATEGORY_ALIASES = new Set(
+  (VOCABULARY.totalsCategories as Array<{ ems: string; aliases: string[] }>)
+    .filter((entry) => entry.ems === "PAS")
+    .flatMap((entry) => entry.aliases)
+    .map(normalizeVocabularyText)
+);
 
 const MISCELLANEOUS_GROUP = "MISCELLANEOUS OPERATIONS";
 
@@ -641,6 +648,15 @@ export function reconcileRekeySheet(params: {
     }
     if (params.mitchellLayout && /other additional costs/i.test(category.category)) {
       check("Other additional costs", "amount", category.cost, otherCosts);
+      continue;
+    }
+    // The CCC print books sublet and other charges to their own category
+    // ("Miscellaneous", "Sublet", "Other Charges"); the rows' misc amounts
+    // must reproduce it, so a lost sublet line cannot hide behind closing
+    // labor and parts.
+    if (!params.mitchellLayout && MISC_CATEGORY_ALIASES.has(normalizeVocabularyText(category.category))) {
+      const misc = round2([...extraByType.values()].reduce((total, amount) => total + amount, 0) + otherCosts);
+      check(category.category, "amount", category.cost, misc);
     }
   }
   // Hours or sublet dollars the rows bill to a labor category the totals page
@@ -653,6 +669,7 @@ export function reconcileRekeySheet(params: {
     if (checkedLaborTypes.has(laborType)) continue;
     out.push({ category: `${laborType} sublet / additional`, unit: "amount", printed: null, derived: amount, delta: null, closes: true });
   }
+  const totalsClose = failures.length === 0;
   if (params.unreadLines.length > 0) {
     failures.push(
       `${params.unreadLines.length} line${params.unreadLines.length === 1 ? "" : "s"} printed on the source produced no keying row (line${
@@ -660,7 +677,7 @@ export function reconcileRekeySheet(params: {
       } ${params.unreadLines.join(", ")}).`
     );
   }
-  return { rows: out, unreadLines: params.unreadLines, closes: failures.length === 0, failures };
+  return { rows: out, unreadLines: params.unreadLines, totalsClose, closes: failures.length === 0, failures };
 }
 
 export interface RekeySheetQuality {
@@ -694,15 +711,18 @@ export function assessRekeySheet(sheet: RekeySheet): RekeySheetQuality {
         "The line items in this document could not be read reliably — most of what was found carries no line number, which means the row structure was never located. No sheet was produced rather than one that cannot be trusted.",
     };
   }
-  // RK-02 / RK-09: a sheet whose rows do not add up to the totals it prints,
-  // or that lost a printed line, is wrong in a way that looks right. It is
-  // refused, and the reasons are the message.
-  if (sheet.reconciliation && !sheet.reconciliation.closes) {
+  // RK-02: a sheet whose rows do not add up to the totals it prints is wrong
+  // in a way that looks right. It is refused, and the reasons are the message.
+  // A printed line the count could not place while every total closes is NOT
+  // grounds to refuse: the rows are proven by arithmetic and the loss is
+  // unproven, so it is headlined on the sheet (RK-09) rather than blocking
+  // the estimator — a real print was refused over one such line in
+  // production the day the gate shipped.
+  if (sheet.reconciliation && !sheet.reconciliation.totalsClose) {
+    const arithmetic = sheet.reconciliation.failures.filter((failure) => !/produced no keying row/.test(failure));
     return {
       ok: false,
-      reason: `The sheet's rows do not reproduce the totals the source prints, so no sheet was produced. ${sheet.reconciliation.failures.join(
-        " "
-      )}`,
+      reason: `The sheet's rows do not reproduce the totals the source prints, so no sheet was produced. ${arithmetic.join(" ")}`,
     };
   }
   return { ok: true, reason: null };

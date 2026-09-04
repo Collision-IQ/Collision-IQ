@@ -115,7 +115,13 @@ export interface RekeyReconciliation {
   rows: RekeyReconciliationRow[];
   /** Printed line numbers that produced no keying row (RK-09). */
   unreadLines: number[];
-  /** True only when every checked total closes and no line was lost. */
+  /** True when every checked total closes — the arithmetic proof that the
+   *  rows are the estimate. A sheet whose totals do not close is refused. */
+  totalsClose: boolean;
+  /** True only when every checked total closes AND no printed line was lost.
+   *  A lost line with closing totals is headlined on the sheet, not refused:
+   *  the loss is unproven (a zero-value line, or a line the count read that
+   *  the totals did not), and the rows themselves are proven. */
   closes: boolean;
   /** Plain-language reasons the sheet does not close, empty when it does. */
   failures: string[];
