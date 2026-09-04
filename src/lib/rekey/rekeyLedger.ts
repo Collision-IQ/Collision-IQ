@@ -1012,12 +1012,15 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       `${unmappedOperations} line${unmappedOperations === 1 ? "" : "s"} carry an operation this build does not translate. The source wording is printed verbatim.`
     );
   }
-  const unread = [
-    ...new Set([
-      ...findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout }),
-      ...(mitchellRead?.unreadable ?? []),
-    ]),
-  ].sort((a, b) => a - b);
+  // The Mitchell reader accounts for every anchored block itself — row, note
+  // or unreadable — so its list is authoritative. The text scan is for the
+  // CCC path only: run on a Mitchell print it joined a page footer onto a
+  // note row and read "Mitchell Estimating 25.2" as that note's hours, which
+  // reported a note as a lost line on a real estimate.
+  const unread = (mitchellRead
+    ? [...mitchellRead.unreadable]
+    : findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout })
+  ).sort((a, b) => a - b);
   const reconciliation = reconcileRekeySheet({
     rows: folded,
     totals: expectedTotals,

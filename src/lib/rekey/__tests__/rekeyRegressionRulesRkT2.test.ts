@@ -147,6 +147,20 @@ describe("RK-05 — notes are never keyed", () => {
     expect(row(19)?.notes).toContain("Reconcile with invoice");
   });
 
+  it("never reports a note row followed by the page footer as a lost line", () => {
+    // A real estimate printed "47 900501 Mask for refinish" as the last row
+    // of a page. The text scan joined the footer onto it and read "Mitchell
+    // Estimating 25.2" as hours, so a note was reported as a lost line and
+    // the sheet was refused in production.
+    const withNote = buildRekeySheet({
+      text: TEXT.replace("Glass0.8Existing\n LABOR  PART", "Glass0.8Existing\n25900501Mask for refinish\n LABOR  PART"),
+      sourceFile: "frk3.pdf",
+    });
+    expect(withNote.reconciliation.unreadLines).toEqual([]);
+    expect(withNote.reconciliation.closes).toBe(true);
+    expect(withNote.rows.find((candidate) => candidate.sourceLine === 12)?.notes).toContain("Mask for refinish");
+  });
+
   it("recovers a section heading printed inside a note block", () => {
     expect(row(21)?.sectionSource).toBe("Special / Manual Entry");
     expect(row(21)?.sectionCcc).toBe("MISCELLANEOUS OPERATIONS");
