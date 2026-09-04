@@ -173,5 +173,56 @@
     "INITIALIZE",
     "RELEARN",
     "MODULE SETUP"
-  ]
+  ],
+
+  "partNomenclature": {
+    "$comment": [
+      "MOTOR <-> CEG part nomenclature (WO-RK1 v3).",
+      "",
+      "The two estimating databases name the same physical part differently:",
+      "MOTOR prints 'Side support' where CEG prints 'Frt Bumper Cover Support'.",
+      "Keyed correctly, those are the SAME line, but they key differently and",
+      "the verification pass reported each of them twice — once as never keyed",
+      "and once as keyed but absent from the source. This table pairs them.",
+      "",
+      "Database vocabulary only, same universality directive as the rest of",
+      "this file: no carrier, shop, make, model, claim or RO literal.",
+      "",
+      "'scope' restricts an entry to one CCC group so a generic word",
+      "('Protector') cannot rewrite a line in an unrelated section. An UNMAPPED",
+      "group on either side satisfies any scope. 'fixture' names the document",
+      "that proved the pairing — entries are earned from a document, never",
+      "assumed. Synonyms are written in the normalized form (uppercased,",
+      "punctuation collapsed); side words and the noise tokens below are",
+      "removed before the table is consulted, so write the bare part name."
+    ],
+
+    "sideTokens": ["L", "R", "LT", "RT", "LH", "RH", "LEFT", "RIGHT", "DRIVER", "PASSENGER"],
+
+    "noiseTokens": ["ASSY", "ASSEMBLY", "US", "BUILT", "W", "WO", "OF", "THE", "AND", "REPORT"],
+
+    "abbreviations": {
+      "FRT": "FRONT",
+      "RR": "REAR",
+      "UPR": "UPPER",
+      "LWR": "LOWER",
+      "INR": "INNER",
+      "OTR": "OUTER",
+      "OTSD": "OUTSIDE",
+      "MLDG": "MOLDING",
+      "BRKT": "BRACKET",
+      "SUPT": "SUPPORT",
+      "RPR": "REPAIR"
+    },
+
+    "entries": [
+      { "canonical": "SIDE SUPPORT",   "synonyms": ["FRONT BUMPER COVER SUPPORT"],            "scope": "FRONT BUMPER & GRILLE", "fixture": "F-RK2" },
+      { "canonical": "ABSORBER CLIP",  "synonyms": ["FRONT BUMPER CLIP"],                     "scope": "FRONT BUMPER & GRILLE", "fixture": "F-RK2" },
+      { "canonical": "HEADLAMP",       "synonyms": ["FRONT COMBINATION LAMP", "COMBINATION LAMP"], "scope": "FRONT LAMPS",     "fixture": "F-RK2" },
+      { "canonical": "UPPER ARM",      "synonyms": ["UPPER FRONT BODY SUPPORT"],              "scope": "RADIATOR SUPPORT",      "fixture": "F-RK2" },
+      { "canonical": "DIAGONAL BRACE", "synonyms": ["FRONT BODY BRACKET"],                    "scope": "RADIATOR SUPPORT",      "fixture": "F-RK2" },
+      { "canonical": "PROTECTOR",      "synonyms": ["FENDER SEAL"],                           "scope": "FENDER",               "fixture": "F-RK2" },
+      { "canonical": "REVV ADAS",      "synonyms": ["REVVADAS"],                              "scope": "VEHICLE DIAGNOSTICS",  "fixture": "F-RK2" }
+    ]
+  }
 }

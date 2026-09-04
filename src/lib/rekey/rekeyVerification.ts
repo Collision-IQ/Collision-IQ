@@ -18,7 +18,13 @@
 
 import { canonKey, detectSide } from "@/lib/reports/deltaEngine/estimateNormalize";
 import VOCABULARY from "./data/rekeyVocabulary.json";
-import { normalizeVocabularyText } from "./rekeyVocabulary";
+import {
+  NOMENCLATURE_MATCH_THRESHOLD,
+  UNMAPPED,
+  canonicalizeNomenclature,
+  nomenclatureOverlap,
+  normalizeVocabularyText,
+} from "./rekeyVocabulary";
 import { buildRekeySheet } from "./rekeyLedger";
 import { gateEmsEstimate, normalizeEmsEstimate, type EmsBundle, type EmsEstimate } from "./emsReader";
 import type { RekeyLedgerRow, RekeySheet } from "./rekeyTypes";
@@ -249,7 +255,7 @@ export interface RekeyLineFinding {
   operation: string;
   description: string;
   partNumber: string | null;
-  matchedBy: "part number" | "description" | "misc amount" | null;
+  matchedBy: "part number" | "description" | "nomenclature" | "misc amount" | null;
   deltas: RekeyFieldDelta[];
 }
 
@@ -327,6 +333,58 @@ function descriptionKeys(
   const side = detectSide(description ?? "");
   const base = [normalizeVocabularyText(group ?? ""), side, canon.key].join("|");
   return { withOperation: `${normalizeVocabularyText(operation ?? "")}|${base}`, withoutOperation: base };
+}
+
+/**
+ * Operations that can name the same physical line.
+ *
+ * Two databases can book one operation under different words — a panel
+ * replacement that carries its own refinish, a sublet booked as a manual
+ * charge — so the nomenclature pass treats those as compatible rather than as
+ * evidence the lines are different. An unmapped or unread operation on either
+ * side is a gap in the READING, never a difference in the keying, so it never
+ * blocks a pair; the difference, if there is one, still surfaces as a field
+ * delta on the matched pair where the estimator can act on it.
+ */
+function operationsCompatible(row: RekeyLedgerRow, keyed: KeyedLine): boolean {
+  const keyedOperation = (keyed.operation ?? "").trim();
+  if (!keyedOperation) return true;
+  // An EMS export speaks labor-op CODES, so compare in that vocabulary.
+  if (/^OP\d+$/i.test(keyedOperation)) {
+    if (!row.laborOpCode) return true;
+    return row.laborOpCode.toUpperCase() === keyedOperation.toUpperCase();
+  }
+  const left = normalizeVocabularyText(row.operationCcc);
+  const right = normalizeVocabularyText(keyedOperation);
+  if (!left || !right || left === UNMAPPED || right === UNMAPPED) return true;
+  if (left === right) return true;
+  return EQUIVALENT_OPERATION_SETS.some((set) => set.has(left) && set.has(right));
+}
+
+const EQUIVALENT_OPERATION_SETS: ReadonlyArray<Set<string>> = [
+  new Set(["REPL", "REFN", "SUBL"]),
+  new Set(["RPR", "ALGN"]),
+];
+
+/**
+ * The numbers on both sides already agree.
+ *
+ * A nomenclature pair is a claim about NAMING, and the strongest evidence
+ * that two differently-named lines are one line is that their money and hours
+ * already match. It is not required — a line can be renamed AND mis-keyed,
+ * which is exactly what the report exists to catch — but where the operation
+ * words disagree it is what carries the pair.
+ */
+function numbersAgree(row: RekeyLedgerRow, keyed: KeyedLine): boolean {
+  if (row.price !== null && keyed.price !== null && sameMoney(row.price, keyed.price)) return true;
+  if (row.misc && keyed.misc && sameMoney(row.misc.amount, keyed.misc.amount)) return true;
+  const expected = laborByType(row.labor);
+  const found = laborByType(keyed.labor);
+  if (expected.size === 0 || expected.size !== found.size) return false;
+  for (const [type, entry] of expected) {
+    if (!sameHours(entry.hours, found.get(type)?.hours ?? null)) return false;
+  }
+  return true;
 }
 
 function laborByType(entries: Array<{ type: string | null; hours: number; included: boolean }>): Map<string, { hours: number; included: boolean }> {
@@ -599,6 +657,39 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       match = takeFirstAvailable(byOperationDescription.get(keys.withOperation));
       if (!match) match = takeFirstAvailable(byDescription.get(keys.withoutOperation));
       if (match) matchedBy = "description";
+    }
+    // §4.3d nomenclature — the same line under the other database's name.
+    // Scored, not keyed: MOTOR's "Side support" and CEG's "Frt Bumper Cover
+    // Support" share no key, so the only way to pair them is to compare their
+    // canonicalized names against every line the exact passes left over. The
+    // gates below are what keep a score from becoming a guess.
+    if (!match) {
+      const rowSide = detectSide(row.descriptionCcc ?? "");
+      let best: { line: KeyedLine; score: number } | null = null;
+      for (const line of remaining.values()) {
+        const group = normalizeVocabularyText(line.group ?? "");
+        const rowGroup = normalizeVocabularyText(row.sectionCcc);
+        // Group: a rename never moves a line to another section.
+        if (group !== rowGroup && group !== UNMAPPED && rowGroup !== UNMAPPED) continue;
+        // Side: a left part is never its right-hand twin. One side unprinted
+        // is not a disagreement — Mitchell prints some sided parts unsided.
+        const lineSide = detectSide(line.description ?? "");
+        if (rowSide && lineSide && rowSide !== lineSide) continue;
+        // Operation, or failing that the numbers. Requiring one of the two is
+        // what stops two unrelated leftovers from pairing on a shared word.
+        if (!operationsCompatible(row, line) && !numbersAgree(row, line)) continue;
+        const score = nomenclatureOverlap(
+          canonicalizeNomenclature(row.descriptionCcc, row.sectionCcc, line.group),
+          canonicalizeNomenclature(line.description, line.group, row.sectionCcc)
+        );
+        if (score >= NOMENCLATURE_MATCH_THRESHOLD && (best === null || score > best.score)) {
+          best = { line, score };
+        }
+      }
+      if (best) {
+        match = best.line;
+        matchedBy = "nomenclature";
+      }
     }
     if (!match && row.misc) {
       const key = `${normalizeVocabularyText(row.sectionCcc)}|${row.misc.amount.toFixed(2)}`;

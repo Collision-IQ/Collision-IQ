@@ -342,3 +342,160 @@ export function groupSortIndex(group: string): number {
 }
 
 export const REKEY_GROUP_ORDER: ReadonlyArray<string> = GROUP_ORDER;
+
+/* ------------------------------------------------------------------ *
+ * MOTOR <-> CEG part nomenclature (WO-RK1 v3)
+ *
+ * The two estimating databases give the same physical part different
+ * names. MOTOR prints "Side support", CEG prints "Frt Bumper Cover
+ * Support"; the estimator keyed one line, but the two descriptions key
+ * differently, so the verification pass reported the line TWICE — once as
+ * never keyed, once as keyed but not in the source. That is the same
+ * double-report failure the operation-free description key already exists
+ * to prevent, one layer deeper: there the wording differed by operation,
+ * here it differs by database.
+ *
+ * This is deliberately the LAST description-level resolver. Part number
+ * and the two description keys run first and are exact; nomenclature only
+ * ever sees lines those passes could not place, so it can convert an
+ * unmatched line into a pair but can never take a pair away from an exact
+ * key.
+ *
+ * Scope, side and operation gates keep it from inventing pairs — see
+ * `nomenclatureMatchScore`. Everything the table knows is in
+ * data/rekeyVocabulary.json and every entry names the document that proved
+ * it; nothing here is assumed.
+ * ------------------------------------------------------------------ */
+
+type NomenclatureEntry = {
+  canonical: string;
+  synonyms: string[];
+  scope?: string;
+  fixture?: string;
+};
+
+const NOMENCLATURE = VOCABULARY.partNomenclature as {
+  sideTokens: string[];
+  noiseTokens: string[];
+  abbreviations: Record<string, string>;
+  entries: NomenclatureEntry[];
+};
+
+const NOMENCLATURE_SIDE_TOKENS = new Set(NOMENCLATURE.sideTokens.map(normalizeVocabularyText));
+const NOMENCLATURE_NOISE_TOKENS = new Set(NOMENCLATURE.noiseTokens.map(normalizeVocabularyText));
+const NOMENCLATURE_ABBREVIATIONS = new Map<string, string>(
+  Object.entries(NOMENCLATURE.abbreviations).map(([from, to]) => [
+    normalizeVocabularyText(from),
+    normalizeVocabularyText(to),
+  ])
+);
+
+/** Every synonym phrase (and each canonical, implied) indexed to its entry,
+ *  longest phrase first so the most specific naming always wins. */
+const NOMENCLATURE_PHRASE_INDEX: Array<[string, NomenclatureEntry]> = NOMENCLATURE.entries
+  .flatMap((entry): Array<[string, NomenclatureEntry]> =>
+    [entry.canonical, ...entry.synonyms].map((phrase) => [normalizeVocabularyText(phrase), entry])
+  )
+  .sort((a, b) => b[0].length - a[0].length);
+
+/**
+ * Remove a trailing print artifact from a description.
+ *
+ * CCC appends free text after " - " and truncates a parenthetical at the
+ * column width ("Mask jambs (0.3 Hours and $3.00 per pane"). Neither is part
+ * of the part's name — they are what the PRINT did to it — so both are cut
+ * before the name is read. Document-shape only; no carrier wording.
+ *
+ * Distinct from the delta engine's `stripNote`, which cuts at the word
+ * "note"; this cuts the two artifacts the estimate print itself introduces.
+ */
+export function stripPrintArtifacts(description: string | null | undefined): string {
+  return (description ?? "").replace(/\s+-\s+.*$|\s*\(.*$/, "").trim();
+}
+
+/** A side word at the head of a description, built from the table's own side
+ *  tokens. It must be followed by WHITESPACE: "R&I headlamp" opens with an
+ *  operation whose first letter is a side word, and cutting the R off it would
+ *  leave the operation unreadable. */
+const LEADING_SIDE_WORD = new RegExp(
+  `^\\s*(?:${NOMENCLATURE.sideTokens
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map((token) => escapeRegExp(token))
+    .join("|")})\\s+`,
+  "i"
+);
+
+/**
+ * Reduce a description to the tokens that carry its NAME: print artifacts
+ * cut, leading operation removed, side words and noise dropped, abbreviations
+ * expanded. "LT R&I headlamp assy" and "L Front Combination Lamp" both come
+ * back as the tokens their databases disagree about, and nothing else.
+ *
+ * The leading side word comes off BEFORE the operation is read, because the
+ * platforms print them in that order ("LT R&I headlamp assy") and the
+ * operation resolver anchors at the head — with the side word still there it
+ * would find no operation at all.
+ */
+function nomenclatureTokens(description: string | null | undefined): string[] {
+  const named = stripPrintArtifacts(description).replace(LEADING_SIDE_WORD, "");
+  const withoutOperation = resolveOperation({ description: named }).description;
+  return normalizeVocabularyText(withoutOperation)
+    .split(" ")
+    .filter(Boolean)
+    .map((token) => NOMENCLATURE_ABBREVIATIONS.get(token) ?? token)
+    .filter((token) => !NOMENCLATURE_SIDE_TOKENS.has(token) && !NOMENCLATURE_NOISE_TOKENS.has(token));
+}
+
+/**
+ * Rewrite a description's tokens through the nomenclature table.
+ *
+ * A scope is satisfied when EITHER line's group is the scoped group, or is
+ * UNMAPPED — a Mitchell section with no CCC counterpart must not be barred
+ * from a table its own group cannot name. With no group on either side there
+ * is nothing to gate against, so the scope is not enforced; the rekey ledger
+ * always carries a group (UNMAPPED at worst), so that case does not arise
+ * here and exists only so a caller without groups still gets an answer.
+ */
+export function canonicalizeNomenclature(
+  description: string | null | undefined,
+  group: string | null | undefined,
+  otherGroup?: string | null | undefined
+): string[] {
+  const groups = [group, otherGroup].map((value) => normalizeVocabularyText(value ?? "")).filter(Boolean);
+  let phrase = nomenclatureTokens(description).join(" ");
+  if (!phrase) return [];
+  for (const [synonym, entry] of NOMENCLATURE_PHRASE_INDEX) {
+    if (!phrase.includes(synonym)) continue;
+    const scope = normalizeVocabularyText(entry.scope ?? "");
+    if (scope && groups.length > 0 && !groups.some((value) => value === scope || value === UNMAPPED)) continue;
+    phrase = phrase.replace(new RegExp(`(?<![A-Z0-9])${escapeRegExp(synonym)}(?![A-Z0-9])`, "g"), normalizeVocabularyText(entry.canonical));
+  }
+  return phrase.split(" ").filter(Boolean);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Token overlap between two canonicalized names, scored against the SHORTER
+ * name and gated by the longer one.
+ *
+ * Scoring against the shorter name is what lets "Finish sand & polish" pair
+ * with "Sand & polish" — one database prints a qualifier the other does not.
+ * The gate against the longer name is what stops that generosity from pairing
+ * a two-word name with any long description that happens to contain it.
+ */
+export function nomenclatureOverlap(a: string[], b: string[]): number {
+  const left = new Set(a);
+  const right = new Set(b);
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  for (const token of left) if (right.has(token)) shared += 1;
+  if (shared / Math.max(left.size, right.size) < 0.4) return 0;
+  return shared / Math.min(left.size, right.size);
+}
+
+/** Overlap at or above which two differently-named lines are the same line. */
+export const NOMENCLATURE_MATCH_THRESHOLD = 0.6;
