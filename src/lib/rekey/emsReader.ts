@@ -31,6 +31,27 @@ export interface EmsBundle {
   errors: string[];
 }
 
+/**
+ * Field-name candidates, in preference order.
+ *
+ * Every name here was read off a real CCC EMS v2.01 export. The guesses this
+ * module shipped with matched almost none of them, so a line's part number,
+ * price and hours all came back null even though the line itself collapsed
+ * correctly. Order matters as much as spelling:
+ *
+ *   - ACT_PRICE is what the estimate BILLS, DB_PRICE what the database
+ *     suggested; they differ wherever a price was overridden.
+ *   - MOD_LB_HRS is the modified (billed) time, DB_HRS the database time. An
+ *     included operation carries DB_HRS 4.6 with MOD_LB_HRS 0 and LBR_INC
+ *     true, so reading DB_HRS would bill 4.6 hours the estimate never charged.
+ */
+const LINE_DESCRIPTION_FIELDS = ["LINE_DESC", "DESC", "LIN_DESC", "PART_DESC"];
+const PART_NUMBER_FIELDS = ["OEM_PARTNO", "ALT_PARTNO", "PART_NO", "PART_NUM", "OEM_PART_NO"];
+const PART_TYPE_FIELDS = ["PART_TYPE", "PRT_TYPE"];
+const QTY_FIELDS = ["PART_QTY", "QTY", "UNITS"];
+const PRICE_FIELDS = ["ACT_PRICE", "DB_PRICE", "PRICE", "PART_PRICE", "UNT_PRICE"];
+const HOURS_FIELDS = ["MOD_LB_HRS", "LBR_HRS", "DB_HRS", "LABOR_HRS", "HRS"];
+
 const DELETED_FLAG = 0x2a;
 const FIELD_TERMINATOR = 0x0d;
 const HEADER_FIELD_START = 32;
@@ -123,6 +144,10 @@ export function readEmsBundle(files: Array<{ filename: string; bytes: Uint8Array
   for (const file of files) {
     const extension = (file.filename.split(".").pop() ?? "").toLowerCase();
     if (!extension || extension === file.filename.toLowerCase()) continue;
+    // A .dbt is the dBase MEMO side-file, not a table. The EMS spec lists it
+    // as optional and it carries no fields of its own, so skipping it is
+    // normal and must not be reported as a fault in the export.
+    if (extension === "dbt") continue;
     const table = parseDbaseTable(extension, file.bytes);
     if (!table) {
       errors.push(`${file.filename} is not a readable dBase table.`);
@@ -230,11 +255,11 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
     if (!line) {
       line = {
         lineNumber,
-        description: pickString(record, ["LINE_DESC", "DESC", "LIN_DESC", "PART_DESC"]),
-        partNumber: pickString(record, ["PART_NO", "PART_NUM", "OEM_PART_NO"]),
-        partType: pickString(record, ["PART_TYPE", "PRT_TYPE"]),
-        qty: pickNumber(record, ["QTY", "PART_QTY", "UNITS"]),
-        price: pickNumber(record, ["PRICE", "PART_PRICE", "UNT_PRICE"]),
+        description: pickString(record, LINE_DESCRIPTION_FIELDS),
+        partNumber: pickString(record, PART_NUMBER_FIELDS),
+        partType: pickString(record, PART_TYPE_FIELDS),
+        qty: pickNumber(record, QTY_FIELDS),
+        price: pickNumber(record, PRICE_FIELDS),
         labor: [],
         misc: null,
         recordCount: 0,
@@ -245,7 +270,7 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
     line.recordCount += 1;
 
     const laborType = pickString(record, ["MOD_LBR_TY", "LBR_TYPE", "LBR_TY"]);
-    const hours = pickNumber(record, ["LBR_HRS", "LABOR_HRS", "HRS"]);
+    const hours = pickNumber(record, HOURS_FIELDS);
     const included = pickBoolean(record, ["LBR_INC", "LABOR_INC"]);
     const opCode = pickString(record, ["LBR_OP", "LABOR_OP", "OP_CODE"]);
     if (laborType || hours !== null || included !== null || opCode) {
@@ -261,28 +286,40 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
       };
     }
     // A later record may be the one carrying the part or price columns.
-    if (line.partNumber === null) line.partNumber = pickString(record, ["PART_NO", "PART_NUM", "OEM_PART_NO"]);
-    if (line.price === null) line.price = pickNumber(record, ["PRICE", "PART_PRICE", "UNT_PRICE"]);
-    if (line.qty === null) line.qty = pickNumber(record, ["QTY", "PART_QTY", "UNITS"]);
-    if (line.partType === null) line.partType = pickString(record, ["PART_TYPE", "PRT_TYPE"]);
-    if (line.description === null) {
-      line.description = pickString(record, ["LINE_DESC", "DESC", "LIN_DESC", "PART_DESC"]);
-    }
+    if (line.partNumber === null) line.partNumber = pickString(record, PART_NUMBER_FIELDS);
+    if (line.price === null) line.price = pickNumber(record, PRICE_FIELDS);
+    if (line.qty === null) line.qty = pickNumber(record, QTY_FIELDS);
+    if (line.partType === null) line.partType = pickString(record, PART_TYPE_FIELDS);
+    if (line.description === null) line.description = pickString(record, LINE_DESCRIPTION_FIELDS);
   }
 
-  const subtotals = (bundle.tables.get("stl")?.records ?? []).map((record) => ({
-    code: (pickString(record, ["TTL_TYPE", "STL_TYPE", "TYPE", "CATEGORY"]) ?? "").toUpperCase(),
-    hours: pickNumber(record, ["T_HRS", "TTL_HRS", "HOURS"]),
-    amount: pickNumber(record, ["TTL_AMT", "T_AMT", "AMOUNT"]),
-  }));
+  // The subtotal table carries the GROUP in TTL_TYPE ("LA", "PA") and the
+  // specific category in TTL_TYPECD ("LAB", "LAR", "PAT"). Reading the group
+  // gave fourteen rows all labelled "LA", so body and refinish were
+  // indistinguishable and nothing could reconcile against a source category.
+  //
+  // Rows whose hours and amount are both zero are dropped: a CCC export writes
+  // the full grid of category codes whether or not the estimate uses them, and
+  // on a real file that is 20-odd empty rows of noise in the totals table.
+  const subtotals = (bundle.tables.get("stl")?.records ?? [])
+    .map((record) => ({
+      code: (pickString(record, ["TTL_TYPECD", "TTL_TYPE", "STL_TYPE", "TYPE", "CATEGORY"]) ?? "").toUpperCase(),
+      hours: pickNumber(record, ["TTL_HRS", "T_HRS", "HOURS"]),
+      amount: pickNumber(record, ["TTL_AMT", "T_AMT", "AMOUNT"]),
+    }))
+    .filter((entry) => entry.code && ((entry.hours ?? 0) !== 0 || (entry.amount ?? 0) !== 0));
 
   const ttl = bundle.tables.get("ttl")?.records[0];
   const profileLabor = (bundle.tables.get("pfl")?.records ?? []).map((record) => ({
     code: (pickString(record, ["LBR_TYPE", "MOD_LBR_TY", "TYPE"]) ?? "").toUpperCase(),
     rate: pickNumber(record, ["LBR_RATE", "CAL_LBRRTE", "RATE"]),
   }));
+  // Paint materials sit under MATL_TYPE "MAPA" with the rate in CAL_LBRRTE.
+  // The candidate list originally omitted MATL_TYPE, so on a real export the
+  // record was never found and the materials rate — the setting §4.6 exists to
+  // check — silently read as null.
   const materialsRecord = (bundle.tables.get("pfm")?.records ?? []).find((record) =>
-    /MAPA/i.test(pickString(record, ["MTL_TYPE", "TYPE", "MOD_LBR_TY"]) ?? "")
+    /MAPA/i.test(pickString(record, ["MATL_TYPE", "MTL_TYPE", "TYPE", "MOD_LBR_TY"]) ?? "")
   );
   const partsMarkups = (bundle.tables.get("pfp")?.records ?? []).map((record) => ({
     code: (pickString(record, ["PART_TYPE", "PRT_TYPE", "TYPE"]) ?? "").toUpperCase(),
@@ -304,10 +341,32 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
       laborRates: profileLabor,
       materialsRate: pickNumber(materialsRecord, ["CAL_LBRRTE", "MTL_RATE", "RATE"]),
       partsMarkups,
-      taxRate: pickNumber(bundle.tables.get("pft")?.records[0], ["TAX_PCT", "TAX_RATE", "RATE"]),
+      taxRate: readTaxRate(bundle.tables.get("pft")?.records[0]),
     },
     recordCounts: Object.fromEntries([...bundle.tables].map(([name, table]) => [name, table.records.length])),
   };
+}
+
+/**
+ * Effective tax rate from the profile's tax table.
+ *
+ * The table is not a single percentage: it holds up to six tax TYPES, each
+ * with five threshold tiers (TAX_TYPE1 / TY1_RATE1, TAX_TYPE2 / TY2_RATE1 …).
+ * A jurisdiction that stacks a state and a county tax populates two of them,
+ * so the rate that actually applies is the sum of the first-tier rates of
+ * every populated type. Reading a "TAX_RATE" field that no export has
+ * returned null on every real file.
+ */
+export function readTaxRate(record: EmsRecord | undefined): number | null {
+  if (!record) return null;
+  let total: number | null = null;
+  for (let type = 1; type <= 6; type += 1) {
+    if (!pickString(record, [`TAX_TYPE${type}`])) continue;
+    const rate = pickNumber(record, [`TY${type}_RATE1`]);
+    if (rate === null || rate === 0) continue;
+    total = (total ?? 0) + rate;
+  }
+  return total ?? pickNumber(record, ["TAX_PCT", "TAX_RATE", "RATE"]);
 }
 
 export interface EmsGateResult {
