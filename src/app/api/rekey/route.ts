@@ -9,7 +9,7 @@ import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
 import { readEmsBundle } from "@/lib/rekey/emsReader";
 import {
-  keyedEstimateFromDocument,
+  explainDocumentIsNotVerification,
   keyedEstimateFromEms,
   verifyRekey,
   type RekeyVerification,
@@ -221,9 +221,11 @@ export async function POST(request: NextRequest) {
         keyedNotice =
           "No readable text was found in the second document, so no verification was produced. Your file was kept.";
       } else {
-        const result = keyedEstimateFromDocument({ text: keyed.text, sourceFile: keyed.filename });
-        if (!result.ok) keyedNotice = result.reason;
-        else verification = verifyRekey({ sheet, keyed: result.estimate });
+        // RV-7: a second estimate DOCUMENT is not a rekey verification — it
+        // is a shop-versus-carrier comparison of two estimates, which is the
+        // Estimate Delta report. Verification takes only the EMS export of
+        // the rekeyed CCC workfile; a document is explained and left out.
+        keyedNotice = explainDocumentIsNotVerification({ keyedText: keyed.text });
       }
     }
 

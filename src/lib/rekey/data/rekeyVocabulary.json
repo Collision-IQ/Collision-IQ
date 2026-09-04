@@ -51,13 +51,18 @@
     { "ccc": "LKQ", "ems": "PAL", "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
     { "ccc": "Recond", "ems": "PAR", "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
     { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"] },
-    { "ccc": "Sublet", "ems": null, "miscOnly": true, "aliases": ["SUBLET"] }
+    { "ccc": "Sublet", "ems": "PAS", "miscOnly": true, "aliases": ["SUBLET"] }
   ],
 
   "laborTypes": [
     { "ccc": "LAB", "aliases": ["BODY", "BODY LABOR", "SHEET METAL", "B"] },
     { "ccc": "LAR", "aliases": ["REFINISH", "REFINISH LABOR", "PAINT", "PAINT LABOR", "R"] },
-    { "ccc": "LAM", "aliases": ["MECHANICAL", "MECHANICAL LABOR", "MECH", "M"] }
+    { "ccc": "LAM", "aliases": ["MECHANICAL", "MECHANICAL LABOR", "MECH", "M"] },
+    { "ccc": "LAG", "aliases": ["GLASS", "GLASS LABOR", "G"] },
+    { "ccc": "LAF", "aliases": ["FRAME", "FRAME LABOR", "F"] },
+    { "ccc": "LAS", "aliases": ["STRUCTURAL", "STRUCTURAL LABOR", "S"] },
+    { "ccc": "LAD", "aliases": ["DIAGNOSTIC", "DIAGNOSTIC LABOR", "D"] },
+    { "ccc": "LAE", "aliases": ["ELECTRICAL", "ELECTRICAL LABOR", "E"] }
   ],
 
   "sectionGroups": [
@@ -71,6 +76,12 @@
     { "group": "FENDER", "aliases": ["FENDER", "FRONT FENDER", "REAR FENDER"] },
     { "group": "HOOD", "aliases": ["HOOD"] },
     { "group": "WHEELS", "aliases": ["WHEEL", "WHEELS", "TIRES"] },
+    { "group": "QUARTER PANEL", "aliases": ["QUARTER PANEL", "SIDE BODY", "QUARTER GLASS", "QUARTER"] },
+    { "group": "REAR BODY & FLOOR", "aliases": ["REAR BODY FLOOR", "REAR BODY", "BACK WINDOW", "BACK GLASS"] },
+    { "group": "GLASS", "aliases": ["GLASS", "WINDSHIELD", "W SHIELD", "WINDSHIELD GLASS"] },
+    { "group": "ROOF", "aliases": ["ROOF"] },
+    { "group": "DECK LID", "aliases": ["DECK LID", "TRUNK LID", "LUGGAGE LID"] },
+    { "group": "TAILGATE", "aliases": ["TAILGATE", "LIFTGATE", "LIFT GATE"] },
     { "group": "FRAME", "aliases": ["FRONT INNER STRUCTURE", "INNER STRUCTURE", "STRUCTURE", "FRAME"] },
     { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["BODY UNDER COVERS", "UNDER COVERS", "SPECIAL MANUAL ENTRY", "SPECIAL"] },
     { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["ADDITIONAL COSTS MATERIALS", "ADDITIONAL COSTS", "ADDITIONAL COST", "ADDITIONAL OPERATIONS", "ADDITIONAL OPERATION", "SPECIAL MANUAL ENTRY", "MANUAL ENTRY", "MISCELLANEOUS", "MISCELLANEOUS OPERATIONS"] }
@@ -144,6 +155,9 @@
     { "ems": "LAM", "label": "Mechanical labor", "unit": "hours", "aliases": ["MECHANICAL LABOR", "MECHANICAL"] },
     { "ems": "LAF", "label": "Frame labor", "unit": "hours", "aliases": ["FRAME LABOR", "FRAME"] },
     { "ems": "LAG", "label": "Glass labor", "unit": "hours", "aliases": ["GLASS LABOR", "GLASS"] },
+    { "ems": "LAS", "label": "Structural labor", "unit": "hours", "aliases": ["STRUCTURAL LABOR", "STRUCTURAL"] },
+    { "ems": "LAD", "label": "Diagnostic labor", "unit": "hours", "aliases": ["DIAGNOSTIC LABOR", "DIAGNOSTIC"] },
+    { "ems": "LAE", "label": "Electrical labor", "unit": "hours", "aliases": ["ELECTRICAL LABOR", "ELECTRICAL"] },
     { "ems": "PAT", "label": "Parts", "unit": "amount", "aliases": ["PARTS", "TOTAL PARTS", "PART TOTAL"] },
     { "ems": "MAPA", "label": "Paint materials", "unit": "amount", "aliases": ["PAINT SUPPLIES", "PAINT MATERIALS", "PAINT MATERIAL", "PAINT AND MATERIALS"] },
     { "ems": "PAS", "label": "Sublet / miscellaneous", "unit": "amount", "aliases": ["SUBLET", "MISCELLANEOUS", "OTHER CHARGES", "MISCELLANEOUS OPERATIONS"] },
@@ -157,6 +171,8 @@
   "profileRoutedCostLabels": ["PAINT MATERIALS", "PAINT AND MATERIALS", "PAINT SUPPLIES", "PAINT MATERIAL"],
 
   "aggregateRefinishLabels": ["ADD FOR CLEAR COAT", "CLEAR COAT", "CLEARCOAT"],
+
+  "clearCoatExclusions": ["BUFF", "SAND", "POLISH", "CUT", "DENIB", "NIB", "COMPOUND", "WET SAND"],
 
   "diagnosticsKeywords": [
     "SCAN",

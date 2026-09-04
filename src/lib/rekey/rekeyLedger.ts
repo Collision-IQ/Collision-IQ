@@ -28,8 +28,9 @@ import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
 import {
   looksLikeMitchellLayout,
-  parseMitchellEstimateRows,
   parseMitchellEstimateTotals,
+  readMitchellEstimate,
+  readMitchellVehicle,
 } from "./mitchellEstimateReader";
 import { normalizeOverprintText } from "@/lib/reports/overprintNormalize";
 import VOCABULARY from "./data/rekeyVocabulary.json";
@@ -49,6 +50,8 @@ import type {
   RekeyLaborEntry,
   RekeyLedgerRow,
   RekeyProfileField,
+  RekeyReconciliation,
+  RekeyReconciliationRow,
   RekeySheet,
 } from "./rekeyTypes";
 
@@ -56,6 +59,7 @@ const NOTE_CODES = new Set((VOCABULARY.noteCodes as string[]).map((code) => code
 const MANUAL_ENTRY_CODES = new Set((VOCABULARY.manualEntryCodes as string[]).map((code) => code.trim()));
 const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string[]).map(normalizeVocabularyText);
 const AGGREGATE_REFINISH_LABELS = (VOCABULARY.aggregateRefinishLabels as string[]).map(normalizeVocabularyText);
+const CLEAR_COAT_EXCLUSIONS = (VOCABULARY.clearCoatExclusions as string[]).map(normalizeVocabularyText);
 
 const MISCELLANEOUS_GROUP = "MISCELLANEOUS OPERATIONS";
 
@@ -93,6 +97,17 @@ function matchesLabel(description: string, labels: string[]): boolean {
   if (!normalized) return false;
   const padded = ` ${normalized} `;
   return labels.some((label) => label && (normalized === label || padded.includes(` ${label} `)));
+}
+
+/**
+ * RK-12: a clear-coat allowance, as distinct from a sand-and-buff operation
+ * that merely names the clear coat it works on. "Buff and cut clear coat" is
+ * not-included finishing labor; keyed on the words "clear coat" alone it was
+ * annotated as a second clear-coat allowance, which also changed the wording
+ * on the real one.
+ */
+export function isClearCoatAllowance(description: string): boolean {
+  return matchesLabel(description, AGGREGATE_REFINISH_LABELS) && !matchesLabel(description, CLEAR_COAT_EXCLUSIONS);
 }
 
 /**
@@ -227,6 +242,7 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   if (row.labor.some((entry) => entry.judgment) || row.misc?.judgment) flags.push("judgment");
   if (row.labor.some((entry) => entry.included)) flags.push("Incl.");
   if (row.misc?.sublet) flags.push("Subl");
+  if (row.misc === null && row.partTypeCcc === "Sublet") flags.push("sublet part");
   if (row.taxable === true) flags.push("Tax");
   if (!row.sectionMapped) flags.push("group: verify");
   if (!row.operationMapped) flags.push("operation: verify");
@@ -270,7 +286,7 @@ export function sharesPartNoun(parent: string, child: string): boolean {
 }
 
 function emptyGroupTotals(): RekeyGroup["totals"] {
-  return { lines: 0, body: 0, paint: 0, mech: 0, parts: 0, misc: 0 };
+  return { lines: 0, body: 0, paint: 0, mech: 0, other: 0, parts: 0, misc: 0 };
 }
 
 function accumulate(totals: RekeyGroup["totals"], row: RekeyLedgerRow): void {
@@ -279,10 +295,16 @@ function accumulate(totals: RekeyGroup["totals"], row: RekeyLedgerRow): void {
     if (entry.included) continue;
     if (entry.type === "LAR") totals.paint = round1(totals.paint + entry.hours);
     else if (entry.type === "LAM") totals.mech = round1(totals.mech + entry.hours);
-    else totals.body = round1(totals.body + entry.hours);
+    else if (entry.type === "LAB") totals.body = round1(totals.body + entry.hours);
+    else totals.other = round1(totals.other + entry.hours);
   }
-  if (row.price !== null) totals.parts = round2(totals.parts + row.price);
+  if (row.price !== null) totals.parts = round2(totals.parts + extendedPrice(row));
   if (row.misc) totals.misc = round2(totals.misc + row.misc.amount);
+}
+
+/** What the row bills for its part: the unit price times the printed quantity. */
+function extendedPrice(row: { price: number | null; qty: number | null }): number {
+  return row.price === null ? 0 : round2(row.price * (row.qty ?? 1));
 }
 
 function readDeductible(text: string): number | null {
@@ -309,6 +331,9 @@ export function buildProfileBlock(params: {
   totals: RekeyExpectedTotals | null;
   /** Read off the totals block when that layout prints one there. */
   deductible?: number | null;
+  /** Taxed sublet-type part dollars on the rows, the base the platform marks
+   *  up when it prints a parts adjustment. */
+  subletPartsTotal?: number;
 }): RekeyProfileField[] {
   const { text, totals } = params;
   const fields: RekeyProfileField[] = [];
@@ -421,6 +446,25 @@ export function buildProfileBlock(params: {
     note: "Source part prices are net. Any profile markup inflates every recycled and aftermarket line.",
   });
 
+  // A parts adjustment is the platform's markup on sublet-type parts. The
+  // percentage is derived from the rows' own taxed sublet dollars and labelled
+  // as derived; the amount is stated as printed either way.
+  const adjustments = findCategory(totals, /parts adjustments?/i);
+  if (adjustments?.cost) {
+    const base = params.subletPartsTotal ?? 0;
+    const pct = base > 0 ? round2((adjustments.cost / base) * 100) : null;
+    fields.push({
+      field: "Sublet parts markup",
+      value: pct ?? adjustments.cost,
+      display: pct === null ? money(adjustments.cost) : `${pct.toFixed(2)}% (${money(adjustments.cost)})`,
+      basis: pct === null ? "printed" : "derived",
+      note:
+        pct === null
+          ? "Source totals: Parts Adjustments. The rows carry no taxed sublet parts to derive a rate from."
+          : `${money(adjustments.cost)} ÷ ${money(base)} of taxed sublet parts on the rows — the source prints the amount, not the rate.`,
+    });
+  }
+
   const deductible = params.deductible ?? readDeductible(text);
   fields.push(
     deductible === null
@@ -490,7 +534,7 @@ export function findUnreadLineNumbers(params: {
     ...params.foldedLines,
   ]);
   const anchor = params.mitchellLayout
-    ? /^(\d{1,3})(?:\d{6}|AUTO)(?=[A-Za-z$])/
+    ? /^(?:S\d\s*)?(\d{1,3})(?:\d{6}|AUTO)(?=[A-Za-z$(])/
     : /^(\d{1,3})\s*(?=[#*A-Za-z])/;
 
   const lines = normalizeOverprintText(params.text)
@@ -524,6 +568,101 @@ export function findUnreadLineNumbers(params: {
   return unread.sort((a, b) => a - b);
 }
 
+/**
+ * RK-02 / RK-09: the sheet's rows against the totals the source prints.
+ *
+ * Every number the sheet asks the estimator to key is re-added here and set
+ * beside the printed total for its category: hours by labor type, the
+ * sublet / additional dollars a labor category carries, taxed parts, other
+ * costs. A category that does not close, or a printed line that produced no
+ * row, fails the sheet — a footnote under a sheet that is short by a labor
+ * category is exactly what an estimator does not read.
+ */
+export function reconcileRekeySheet(params: {
+  rows: RekeyLedgerRow[];
+  totals: RekeyExpectedTotals | null;
+  unreadLines: number[];
+  /** Mitchell books sublet dollars inside its labor categories and prints an
+   *  "Other Additional Costs" line; the CCC print does neither. */
+  mitchellLayout: boolean;
+}): RekeyReconciliation {
+  const rows = params.rows.filter((row) => row.keyable);
+  const hoursByType = new Map<string, number>();
+  const extraByType = new Map<string, number>();
+  let parts = 0;
+  let otherCosts = 0;
+  for (const row of rows) {
+    for (const entry of row.labor) {
+      if (entry.included) continue;
+      hoursByType.set(entry.type, round1((hoursByType.get(entry.type) ?? 0) + entry.hours));
+    }
+    if (row.misc) {
+      const laborType = row.labor[0]?.type ?? null;
+      if (row.misc.sublet && laborType) {
+        extraByType.set(laborType, round2((extraByType.get(laborType) ?? 0) + row.misc.amount));
+      } else {
+        otherCosts = round2(otherCosts + row.misc.amount);
+      }
+    } else if (row.price !== null) {
+      parts = round2(parts + extendedPrice(row));
+    }
+  }
+
+  const out: RekeyReconciliationRow[] = [];
+  const failures: string[] = [];
+  const check = (category: string, unit: "hours" | "amount", printed: number | null, derived: number) => {
+    const tolerance = unit === "hours" ? 0.05 : 0.011;
+    const delta = printed === null ? null : round2(derived - printed);
+    const closes = printed === null ? true : Math.abs(derived - printed) < tolerance;
+    out.push({ category, unit, printed, derived: unit === "hours" ? round1(derived) : round2(derived), delta, closes });
+    if (!closes) {
+      const show = (value: number) => (unit === "hours" ? `${value.toFixed(1)} h` : money(value));
+      failures.push(`${category}: the rows add to ${show(derived)}, the source prints ${show(printed as number)}.`);
+    }
+  };
+
+  const checkedLaborTypes = new Set<string>();
+  for (const category of params.totals?.categories ?? []) {
+    const laborWord = /^(.+?)\s+labor$/i.exec(category.category)?.[1] ?? null;
+    const laborType = laborWord ? resolveLaborType(laborWord) : null;
+    if (laborType) {
+      checkedLaborTypes.add(laborType);
+      if (category.hours !== null) {
+        check(`${category.category} hours`, "hours", category.hours, hoursByType.get(laborType) ?? 0);
+      }
+      if (params.mitchellLayout && (category.hours !== null || category.extra)) {
+        check(`${category.category} sublet / additional`, "amount", category.extra ?? 0, extraByType.get(laborType) ?? 0);
+      }
+      continue;
+    }
+    if (/^(?:taxable\s+)?parts$/i.test(category.category)) {
+      check("Parts", "amount", category.cost, parts);
+      continue;
+    }
+    if (params.mitchellLayout && /other additional costs/i.test(category.category)) {
+      check("Other additional costs", "amount", category.cost, otherCosts);
+    }
+  }
+  // Hours or sublet dollars the rows bill to a labor category the totals page
+  // never printed cannot be checked against anything — they are still shown.
+  for (const [laborType, hoursValue] of hoursByType) {
+    if (checkedLaborTypes.has(laborType)) continue;
+    out.push({ category: `${laborType} hours`, unit: "hours", printed: null, derived: hoursValue, delta: null, closes: true });
+  }
+  for (const [laborType, amount] of extraByType) {
+    if (checkedLaborTypes.has(laborType)) continue;
+    out.push({ category: `${laborType} sublet / additional`, unit: "amount", printed: null, derived: amount, delta: null, closes: true });
+  }
+  if (params.unreadLines.length > 0) {
+    failures.push(
+      `${params.unreadLines.length} line${params.unreadLines.length === 1 ? "" : "s"} printed on the source produced no keying row (line${
+        params.unreadLines.length === 1 ? "" : "s"
+      } ${params.unreadLines.join(", ")}).`
+    );
+  }
+  return { rows: out, unreadLines: params.unreadLines, closes: failures.length === 0, failures };
+}
+
 export interface RekeySheetQuality {
   ok: boolean;
   reason: string | null;
@@ -555,6 +694,17 @@ export function assessRekeySheet(sheet: RekeySheet): RekeySheetQuality {
         "The line items in this document could not be read reliably — most of what was found carries no line number, which means the row structure was never located. No sheet was produced rather than one that cannot be trusted.",
     };
   }
+  // RK-02 / RK-09: a sheet whose rows do not add up to the totals it prints,
+  // or that lost a printed line, is wrong in a way that looks right. It is
+  // refused, and the reasons are the message.
+  if (sheet.reconciliation && !sheet.reconciliation.closes) {
+    return {
+      ok: false,
+      reason: `The sheet's rows do not reproduce the totals the source prints, so no sheet was produced. ${sheet.reconciliation.failures.join(
+        " "
+      )}`,
+    };
+  }
   return { ok: true, reason: null };
 }
 
@@ -573,8 +723,9 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // survive extraction as separate tokens, which the Mitchell print does not
   // do — see mitchellEstimateReader for what that costs.
   const mitchellLayout = looksLikeMitchellLayout(text);
-  const parsedRows = mitchellLayout
-    ? parseMitchellEstimateRows(text)
+  const mitchellRead = mitchellLayout ? readMitchellEstimate(text) : null;
+  const parsedRows = mitchellRead
+    ? mitchellRead.rows
     : parseCccEstimateRows(text, { preambleAnchor: "section-anchored" }).filter((row) => {
     // Rows read out of the ESTIMATE TOTALS block are totals, never keying
     // rows; they are reconciled separately and must not be keyed twice.
@@ -595,9 +746,19 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   const expectedTotals = mitchellLayout ? toMitchellExpectedTotals(text) : toExpectedTotals(text);
   const identity = readClaimIdentity(text);
   const notesByLine = harvestRowNotes(text);
+  for (const [line, notes] of mitchellRead?.notes ?? []) {
+    notesByLine.set(line, [...(notesByLine.get(line) ?? []), ...notes]);
+  }
   const warnings: string[] = [];
 
   const ledger: RekeyLedgerRow[] = [];
+  /** Rows whose quantity the print welded onto the part number — a short
+   *  flag rather than a note, because it is the print's normal shape. */
+  const weldedQtyRows = new Set<string>();
+  const finishFlags = (row: RekeyLedgerRow) => {
+    row.flags = flagsFor(row);
+    if (weldedQtyRows.has(row.id)) row.flags.push("qty welded: verify");
+  };
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
 
@@ -631,21 +792,34 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       hasPartNumber: Boolean(partNumberSource),
     });
     const costOnly = isCostOnlyRow(row);
-    const sublet = operation.sublet || partType.miscOnly;
-    const taxable = /\bT\s*$/.test(row.rawText ?? "") ? true : null;
+    const taxable = /\bT(?:\s+\[[^\]]*\])*\s*$/.test(row.rawText ?? "") ? true : null;
+    const billsTime = row.labor !== null || row.laborIncluded || row.paint !== null || row.paintIncluded;
+    // RS-21: a TAXED sublet-type line is a part on both platforms — the CIECA
+    // sublet part type — and the source books it into its parts total. An
+    // untaxed one is sublet dollars booked to the labor category the row
+    // bills. On F-RK2 the taxed sublet lines are exactly what closes the
+    // printed parts total.
+    const taxedSubletPart = partType.miscOnly && taxable === true && row.price !== null;
+    // The Mitchell print types every part line, so a priced row WITHOUT a part
+    // type is not a part: it is dollars booked to the labor category the row
+    // bills (a scan billed as an additional operation), or, with no labor
+    // type, to the platform's other costs.
+    const pricedWithoutPart = mitchellLayout && row.price !== null && !partNumberSource && !partType.mapped;
+    // A "$0.00" total on an untyped Mitchell row (a scan billed as hours) is
+    // not a value to key; carrying it printed a price on a labor-only line.
+    if (pricedWithoutPart && row.price === 0) row.price = null;
+    const sublet =
+      !taxedSubletPart && (operation.sublet || partType.miscOnly || (pricedWithoutPart && billsTime));
 
     const labor = buildLaborEntries({
       row,
       judgment,
       // Refinish-only, blend and clear-coat rows bill refinish time by
       // definition, whichever column the printed hours landed in.
-      forceRefinish:
-        operation.refinishOnly ||
-        operation.ccc === "Blnd" ||
-        matchesLabel(keyedDescription, AGGREGATE_REFINISH_LABELS),
+      forceRefinish: operation.refinishOnly || operation.ccc === "Blnd" || isClearCoatAllowance(keyedDescription),
     });
 
-    const miscAmount = sublet || costOnly ? row.price : null;
+    const miscAmount = taxedSubletPart ? null : sublet || costOnly || pricedWithoutPart ? row.price : null;
     const ledgerRow: RekeyLedgerRow = {
       id: `row-${index + 1}`,
       sourceLine: row.lineNumber,
@@ -685,9 +859,28 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       flags: [],
     };
 
+    if (taxedSubletPart) {
+      ledgerRow.notes.push(
+        "Taxed sublet: key as a Sublet-type part line, not a sublet labor entry — both platforms book taxed sublet dollars under parts."
+      );
+    }
+    // The reader carries what it could not read cleanly as a bracketed marker
+    // on the row text; it is an instruction to the estimator, so it is a note.
+    for (const marker of (row.rawText ?? "").matchAll(/\[([^\]]+)\]/g)) {
+      const text = marker[1].trim();
+      if (!text) continue;
+      // A quantity welded onto the number is the print's normal shape, so it
+      // is a short flag; anything else the reader could not settle is a note.
+      if (/^part number and quantity printed together/i.test(text)) {
+        weldedQtyRows.add(ledgerRow.id);
+      } else {
+        ledgerRow.notes.push(`Verify: ${text.replace(/\s*—\s*verify$/i, "")}.`);
+      }
+    }
+
     // Paint materials are a PROFILE setting, not a keyed line — keying them as
     // a line double-counts against CCC's own materials calculation.
-    if (costOnly && matchesLabel(keyedDescription, PROFILE_ROUTED_COST_LABELS)) {
+    if ((costOnly || pricedWithoutPart) && matchesLabel(keyedDescription, PROFILE_ROUTED_COST_LABELS)) {
       ledgerRow.keyable = false;
       ledgerRow.misc = null;
       ledgerRow.price = row.price;
@@ -696,7 +889,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       ledgerRow.sectionMapped = true;
     }
 
-    ledgerRow.flags = flagsFor(ledgerRow);
+    finishFlags(ledgerRow);
     ledger.push(ledgerRow);
   });
 
@@ -731,7 +924,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
           .map((entry) => entry.hours.toFixed(1))
           .join(" + ")} h).`
       );
-      previous.flags = flagsFor(previous);
+      finishFlags(previous);
       foldedRefinishRows += 1;
       if (row.sourceLine !== null) foldedLines.push(row.sourceLine);
       continue;
@@ -748,7 +941,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // structure is evidence; flattening it is a loss, and re-distributing a
   // single aggregate would be an invention. Both are refused: the rows are
   // carried exactly as printed.
-  const clearCoatRows = folded.filter((row) => matchesLabel(row.descriptionCcc, AGGREGATE_REFINISH_LABELS));
+  const clearCoatRows = folded.filter((row) => isClearCoatAllowance(row.descriptionCcc));
   for (const row of clearCoatRows) {
     row.notes.push(
       clearCoatRows.length === 1
@@ -799,7 +992,21 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       `${unmappedOperations} line${unmappedOperations === 1 ? "" : "s"} carry an operation this build does not translate. The source wording is printed verbatim.`
     );
   }
-  const unread = findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout });
+  const unread = [
+    ...new Set([
+      ...findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout }),
+      ...(mitchellRead?.unreadable ?? []),
+    ]),
+  ].sort((a, b) => a - b);
+  const reconciliation = reconcileRekeySheet({
+    rows: folded,
+    totals: expectedTotals,
+    unreadLines: unread,
+    mitchellLayout,
+  });
+  if (!reconciliation.closes) {
+    warnings.push(`This sheet does not close against the source's printed totals. ${reconciliation.failures.join(" ")}`);
+  }
   if (unread.length > 0) {
     warnings.push(
       `${unread.length} line${unread.length === 1 ? "" : "s"} printed on the source produced no keying row (line${
@@ -831,16 +1038,24 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       vin: identity.vin,
       claimNumber: identity.claimNumber,
       roNumber: identity.roNumber,
-      vehicle: identity.vehicle,
+      // RK-11: the vehicle line comes from the header block, never from a
+      // year-anchored search that can land on a loss date.
+      vehicle: (mitchellLayout ? readMitchellVehicle(text) : null) ?? identity.vehicle,
     },
     profile: buildProfileBlock({
       text,
       totals: expectedTotals,
       deductible: mitchellLayout ? (parseMitchellEstimateTotals(text)?.deductible ?? null) : null,
+      subletPartsTotal: round2(
+        folded
+          .filter((row) => row.keyable && row.misc === null && row.partTypeCcc === "Sublet")
+          .reduce((total, row) => total + extendedPrice(row), 0)
+      ),
     }),
     groups,
     rows: folded,
     expectedTotals,
+    reconciliation,
     partsVendorsBlock: partsVendors.lines,
     stats: {
       sourceRows: parsedRows.length,

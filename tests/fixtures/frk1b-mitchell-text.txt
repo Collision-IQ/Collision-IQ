@@ -1,0 +1,1115 @@
+
+
+Progressive Specialty Insurance CoProgressive Specialty Insurance Co
+Estimate ID
+25-743062003-01
+S2
+Claim Number
+25-743062003-01
+Owner
+LUKE KRAUTER
+ 
+Insured
+LUKE KRAUTER
+ 
+Appraiser
+WADE MAGER
+(610) 276-3105 (Work)
+rmager1@progressive.com
+Supplemented By
+WADE MAGER
+(610) 276-3105 (Work)
+rmager1@progressive.com
+ 
+Underwriter
+Progressive Specialty Insurance Co
+Progressive Specialty Insurance Co
+Claim Number
+25-743062003-01
+ 
+Adjuster
+MICHAELA PURGAR
+(610) 276-4753 (Work)
+michaela_m_purgar@progress
+ive.com
+ 
+Deductible
+1000.00 - Waived
+ 
+Reported Date
+08/24/2025
+Loss Date
+08/23/2025
+ 
+Inspection Site
+Conestoga Autobody
+961 Lancaster Ave
+Berwyn, PA 19312
+2022 Ford Bronco Sport Outer Banks 4 Door Utility 1.5L 3 Cyl Gas Injected Turbocharged Base 4WD
+Exterior Color
+JS (Iconic Silver Metallic)
+ 
+VIN
+3FMCR9C69NRD12862
+ 
+Drivable
+No
+ 
+Odometer
+59724
+Mitchell Service Code
+912377
+Primary Point of Impact
+Left Front Corner (11)
+Options
+4 Wheel Drive
+ 
+Air Conditioning
+ 
+Alum/Alloy Wheels
+ 
+AM-FM Stereo
+ 
+Anti-Lock Brake Sys. (ABS)
+Auto Air Condition
+ 
+Automatic Headlights
+ 
+Auxiliary Input
+ 
+Bluetooth Wireless
+Connectivity
+ 
+Cloth Seat
+Cruise Control
+ 
+Daytime Running Lights
+ 
+Driver Seat With Power
+Lumbar Support
+ 
+Driver-Front Air Bag
+ 
+Dual A/C
+Electric Defogger
+ 
+Electronic Parking Aid
+ 
+Electronic Stability Control
+ 
+First Row Bucket Seat
+ 
+Fog Lights
+Front Heated Seats
+ 
+Heated Mirror
+ 
+Heated Steering Wheel
+ 
+Interior Automatic
+Day/Night Or
+Electrochromatic Mirror
+ 
+Keyless Entry System
+Leather Seats
+ 
+Leather Steering Wheel
+ 
+Left-Curtain Air Bag
+ 
+MP3 Player
+ 
+Passenger-Front Air Bag
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  1  of 13
+
+Power Door Locks
+ 
+Power Driver Seat
+ 
+Power Passenger Seat
+ 
+Power Remote Mirror
+ 
+Power Steering
+Power Windows
+ 
+Privacy Glass
+ 
+Rain Sensing Wipers
+ 
+Rear Bench Seat
+ 
+Rear Gate Wiper
+Rearview Camera
+ 
+Remote Vehicle Starter
+System
+ 
+Satellite Radio
+ 
+Second Row Side Airbag With
+Head Protection
+ 
+Side Airbags
+Side Blind Zone Alert
+ 
+Smart Key System
+ 
+Steering Wheel Mounted
+Audio Control
+ 
+Telematic Systems
+ 
+Theft Deterrent Sys.
+Tilt Steering Wheel
+ 
+Tire Pressure Monitoring
+System
+ 
+Traction Control/Electronic
+ 
+Trip Computer
+Options
+LUKE KRAUTERLUKE KRAUTER
+ 
+2022 Ford Bronco Sport Outer Banks2022 Ford Bronco Sport Outer Banks
+Parts Profile
+PA MALV ALL PART TYPES
+ 
+Parts Profile Version
+7.0
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Front Bumper
+1AUTOFrt Bumper Cover AssyOverhaulBody4.5Existing
+S12200886Frt Upr Bumper CoverRemove /
+Replace
+BodyINC#Qual Recycled
+Part
+~4211286811$270.00Yes
+S13AUTOFrt Upr Bumper CoverRefinish
+Only
+Refinish1.7 C
+S14200887Frt Upr Bumper RivetRemove /
+Replace
+BodyINCNew* W706737
+S300
+1$4.00Yes
+5201993Frt Lwr Bumper Cover
+Assy
+Remove /
+Replace
+BodyINCAftermarket
+New
+FO10151481$467.00Yes
+S16200335Frt Bumper Access Hole
+Cover
+Remove /
+Replace
+BodyINCNewM1PZ 17E810
+AA
+1$15.98Yes
+S17200336Frt Lwr Bumper GrilleRemove /
+Replace
+BodyINC#Aftermarket
+New
+21123141$166.11Yes
+S18AUTOFrt Lwr Bumper GrilleRefinish
+Only
+Refinish0.8 C
+S19200339Frt Bumper RivetRemove /
+Replace
+BodyINCNew* W706737
+S300
+1$4.00Yes
+S110202144Frt Bumper Impact Bar
+(UHSS)
+Remove /
+Replace
+BodyINC#Qual Recycled
+Part
+107-Y25H80-
+10322
+1$737.50Yes
+S111AUTOCooling Unit Assy -MRemove /
+Install
+Mechanical2.6#
+S212900500Aim Distance SensorRemove /
+Replace
+Body*INC*New1$350.00*Yes
+Grille
+13202815Grille AssemblyRemove /
+Replace
+BodyINC#Aftermarket
+Certified
+FO1200710C1$681.00Yes
+14AUTOFrt Bumper CoverRemove /
+Install
+BodyINC
+15AUTOGrilleRefinish
+Only
+Refinish1.4 C
+S116200385L Grille BracketRemove /
+Replace
+Body0.0#Aftermarket
+New
+FO12071381$20.00Yes
+S117201049Grille LetterRemove /
+Replace
+Body0.4#Aftermarket
+New
+M1PZ8A224B-
+AT
+1$14.00Yes
+Front Lamps
+18202603L Frt Combination LampRemove /
+Replace
+Body0.2#Qual Recycled
+Part
+114-X0665A-
+12381
+1$625.00Yes
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  2  of 13
+
+19AUTOHeadlampsCheck /
+Adjust
+Body0.4
+20200394L Front Side Marker Lamp
+Assembly
+Remove /
+Replace
+BodyINC#Aftermarket
+New
+21123721$30.15Yes
+Hood
+21200397Hood Panel (Alum)Remove /
+Replace
+Body1.6Aftermarket
+Certified
+FO1230344C1$776.00Yes
+22AUTOHood OutsideRefinish
+Only
+Refinish2.8 C
+23AUTOAdd For Hood UndersideRefinish
+Only
+Refinish1.4 C
+24900500Emissions LabelRemove /
+Replace
+Body*0.2*New1$0.00*Yes
+25900501Reconcile with invoice
+S126200403R Hood HingeRepairBody0.5*#Existing
+27900501align
+S128200412L Hood HingeRepairBody0.5*#Existing
+29900501align
+Cooling
+S130200415Cooling Radiator ShutterRemove /
+Replace
+Body1.8#Qual Recycled
+Part
+~4340583151$455.00Yes
+S131200346Upr Cooling Air DeflectorRemove /
+Replace
+BodyINC#Aftermarket
+New
+FO12181801$150.00Yes
+S132200353Lwr Cooling Air DeflectorRemove /
+Replace
+Body0.0NewM1PZ 8327 B1$58.00Yes
+A/C / Heater / Ventilation
+S133200520A/C Condenser AssyRemove /
+Replace
+BodyINC#Aftermarket
+New
+AC301961$146.00Yes
+S134AUTOEvacuate & Recharge A/C -
+M
+Remove /
+Replace
+Mechanical1.4
+Front Fender
+35200556R Fender PanelRepairBody1.0*#Existing
+36AUTOR Fender OutsideRefinish
+Only
+Refinish1.6 CExisting
+37200557L Fender PanelRemove /
+Replace
+Body1.8#Qual Recycled
+Part
+110-Y25F193-
+10586
+1$168.75Yes
+38AUTOL Fender OutsideRefinish
+Only
+Refinish1.6 C
+39AUTOL Add To Edge FenderRefinish
+Only
+Refinish0.5 C
+40AUTOL Windshield MldgRemove /
+Install
+Body0.3
+S141200570L Fender Front BracketRemove /
+Replace
+Body0.1#Aftermarket
+New
+T2FO12441201$39.00Yes
+42200558R Fender LinerRemove /
+Install
+Body1.0r#Existing
+43200571L Fender LinerRemove /
+Install
+BodyINCr#Existing
+44200761R Fender GrilleRemove /
+Install
+Body0.2Existing
+S145200573R Fender Wheel Opening
+Mldg
+Remove /
+Replace
+BodyINCAftermarket
+Certified
+FO1291143C1$82.00Yes
+S146200575L Fender Wheel Opening
+Mldg
+Remove /
+Replace
+BodyINCAftermarket
+New
+FO12901431$78.00Yes
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  3  of 13
+
+Air Bag System
+S147200596Disable & Enable Air Bag
+System -M
+Remove /
+Replace
+MechanicalINC
+S148200597Air Bag System Diagnosis -
+M
+Remove /
+Replace
+Mechanical1.0#
+S149200606R Frt Air Bag Impact Sensor
+-M
+Remove /
+Replace
+Mechanical0.3#NewHS7Z 14B004
+A
+1$67.80Yes
+S150200607L Frt Air Bag Impact Sensor
+-M
+Remove /
+Replace
+Mechanical0.2#NewHS7Z 14B004
+A
+1$67.80Yes
+S251900500Seatbelt Dynamic Function
+Test
+Remove /
+Replace
+Body*INC*New1$67.50*Yes
+Air Cleaner
+52201142Air Cleaner Intake DuctRemove /
+Install
+BodyINCrExisting
+S153201144Air Cleaner HoseRemove /
+Install
+Body0.2rExisting
+Electrical
+S154201826L Low Note Horn AssyRemove /
+Replace
+BodyINC#NewLX6Z 13832 D1$58.00Yes
+Rocker / Pillars / Floor
+S155200655L Rocker MouldingRemove /
+Replace
+BodyINCNewM1PZ
+7810177 A
+1$142.97Yes
+Front Door
+56200428R Frt Door OutsideBlendRefinish0.9 CExisting
+57200429L Frt Door OutsideBlendRefinish0.9 CExisting
+58201984R Frt Rear View MirrorRemove /
+Install
+Body0.3#Existing
+59AUTOR Frt Door Frame MldgRemove /
+Install
+Body0.2#
+60201985L Frt Rear View MirrorRemove /
+Install
+Body0.3#Existing
+61AUTOL Frt Door Frame MldgRemove /
+Install
+Body0.2#
+62201988R Frt Otr Door Belt
+Moulding
+Remove /
+Install
+Body0.2#Existing
+63201989L Frt Otr Door Belt
+Moulding
+Remove /
+Install
+Body0.2#Existing
+S164201044R Frt Lwr Door MouldingRemove /
+Replace
+Body0.3NewM1PZ
+7820878 A
+1$187.38Yes
+S165201045L Frt Lwr Door MouldingRemove /
+Replace
+Body0.3NewM1PZ
+7820879 A
+1$187.05Yes
+S166201052R Frt Door DecalRemove /
+Install
+Body0.2rExisting
+S167201050L Frt Door DecalRemove /
+Install
+Body0.2rExisting
+68201417R Frt Door Trim PanelRemove /
+Install
+BodyINC#Existing
+69201418L Frt Door Trim PanelRemove /
+Install
+BodyINC#Existing
+70200964R Frt Otr Door HandleRemove /
+Install
+Body0.3Existing
+71200965L Frt Otr Door HandleRemove /
+Install
+Body0.3Existing
+S172900500Clean and retape decalsAdditional
+Labor
+Body*0.5*Existing
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  4  of 13
+
+S173200968R Frt Door CarrierRemove /
+Install
+Body1.0#Existing
+S174200969L Frt Door CarrierRemove /
+Install
+Body1.0#Existing
+Additional Costs & Materials
+75AUTOPaint/MaterialsAdditional
+Cost
+$701.40Yes
+76AUTOHazardous Waste DisposalAdditional
+Cost
+$4.00*Yes
+Additional Operations
+77AUTOClear CoatAdditional
+Operation
+Refinish3.1$0.00
+S178931127Pre Repair ScanAdditional
+Operation
+Mechanical0.5*$150.00*
+S279931128Post Repair ScanAdditional
+Operation
+Mechanical0.5*$150.00*
+Special / Manual Entry
+80900500CORROSION
+PROTECTION
+Additional
+Labor
+Body*0.2*SubletSublet1$15.00*
+81900500CAR COVERAdditional
+Labor
+Body*0.2*SubletSublet1$6.00*
+82900501For primer
+83900500CAR COVERAdditional
+Labor
+Body*0.2*SubletSublet1$6.00*
+84900500FLEX ADDITIVERemove /
+Replace
+Refinish*0.0*SubletSublet1$12.00*Yes
+S185900500R-1234YF FREONRemove /
+Replace
+Body*0.0*Aftermarket
+New
+New1$399.00*Yes
+S186900500Final safety inspect and
+test drive
+Additional
+Labor
+Body*0.5*Existing
+S287900500Power Window ResetRemove /
+Replace
+Body*INC*New1$67.50*Yes
+S288900500D&R 12v and reset
+electronics
+Additional
+Labor
+Mechanical*0.3*Existing
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+** Judgment Item CC Included in Clear Coat Calculation
+TT Included in Two Tone Calculation AA Included in Clear Coat and Two Tone
+Calculation
+## Labor Note Applies rr CEG R&R Time Used for this Labor Operation
+dd Discontinued by Manufacturer [ ][ ] Verify the part number and price before
+ordering
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  5  of 13
+
+Parts VendorsParts Vendors
+ADHESIVE TEMPLATES
+4717 CAMPUS DR
+KALAMAZOO MI 49008
+(888) 249-3350 (Work)
+LinePart #TotalTotal
+PricePrice
+17M1PZ8A224B-AT$14.00$14.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader).
+KSI Auto Parts
+100 Wade Ave
+South Plainfield NJ 07080
+(866) 574-4467 (Work)
+LinePart #TotalTotal
+PricePrice
+72112314$166.11$166.11
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader).
+202112372$30.15$30.15
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader).
+33AC30196$146.00$146.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader).
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  6  of 13
+
+LKQ KEYSTONE WEST DEPTFORD, NJ
+39 PHOENIX DRIVE
+WEST DEPTFORD NJ 08086
+(800) 223-0171 (Work)
+LinePart #TotalTotal
+PricePrice
+5FO1015148$467.00$467.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader)., Certs/Programs: KEYSIQ
+13FO1200710C$681.00$681.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader). CAPA Certified Part.
+16FO1207138$20.00$20.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader)., Certs/Programs: KEYSIQ
+21FO1230344C$776.00$776.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader). CAPA Certified Part.
+31FO1218180$150.00$150.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader)., Certs/Programs: KEYSIQ
+45FO1291143C$82.00$82.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader). CAPA Certified Part.
+46FO1290143$78.00$78.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader)., Certs/Programs: KEYSIQ
+National Autobody Parts Whse,I
+2000 E Main
+Grand Prairie TX 75050
+(972) 263-1111 (Work)
+LinePart #TotalTotal
+PricePrice
+41T2FO1244120$39.00$39.00
+Supplier Notes: Part sourced from SurePart (pow
+ered by PartsTrader).
+Parts VendorsParts Vendors
+Disclaimer: Disclaimer: This estimate has been prepared based on the use of aftermarket crash parts supplied by a source other than
+the manufacturer of your vehicle. The aftermarket crash parts used in the preparation of this estimate are warranted by
+the manufacturer or distributor of such parts, rather than the manufacturer of your motor vehicle. Definition:
+Aftermarket crash part - a nonoriginal equipment manufacturer (non-OEM) replacement part, either new or used, for any
+of the nonmechanical parts that generally constitute the exterior of the motor vehicle, including inner and outer panels.
+Recycled Part VendorsRecycled Part Vendors
+Chuck's Auto Salvage, PRP
+6867 Boyertown Pike
+Douglassville PA 19518
+(484) 925-0907 (Work)
+LinePart #Total PriceTotal PriceVehicleDescriptionVIN
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  7  of 13
+
+10107-Y25H80-1
+0322
+$737.50$737.50Recycled > Grade A
+Supplier Notes: Part sourced from SurePart (powered by PartsTrader).
+37110-Y25F193-
+10586
+$168.75$168.75Recycled > Grade A
+Supplier Notes: Part sourced from SurePart (powered by PartsTrader).
+LinePart #Total PriceTotal PriceVehicleDescriptionVIN
+Recycled Part VendorsRecycled Part Vendors
+Lentini Auto
+132 US Highway 202
+Ringoes NJ 08551
+(800) 735-8464 (Work)
+LinePart #Total PriceTotal PriceVehicleDescriptionVIN
+18114-X0665A-1
+2381
+$625.00$625.00Recycled > Grade A
+Supplier Notes: Part sourced from SurePart (powered by PartsTrader).
+Recycled Part VendorsRecycled Part Vendors
+LKQ KEYSTONE WEST DEPTFORD, NJ
+39 PHOENIX DRIVE
+WEST DEPTFORD NJ 08086
+(800) 223-0171 (Work)
+LinePart #Total PriceTotal PriceVehicleDescriptionVIN
+2~421128681$270.00$270.00Recycled > Grade A
+Supplier Notes: Part sourced from SurePart (powered by PartsTrader).
+30~434058315$455.00$455.00Recycled > Grade A
+Supplier Notes: Part sourced from SurePart (powered by PartsTrader).
+Disclaimer: Recycled part pricing may represent either actual pricing (the price at which the recycler is willing to sell the
+part for in its existing condition) or undamaged pricing (the price at which the recycler would sell the part if it was in
+undamaged condition). If you are unsure, please contact the automotive recycler.
+Estimate TotalsEstimate Totals
+LaborUnitsUnitsRateRateSubletSubletAdd'l AmountAdd'l AmountTotalsTotals
+Body Labor21.321.3$61.00$61.00$27.00$27.00$1,326.30$1,326.30
+Refinish Labor16.716.7$61.00$61.00$1,018.70$1,018.70
+Mechanical Labor6.86.8$100.00$100.00$300.00$300.00$980.00$980.00
+Total LaborTotal Labor44.844.8$27.00$27.00$3,325.00$3,325.00
+Taxable$3,325.00$3,325.00
+Tax 6.0000%$199.50$199.50
+Non-Taxable$0.00$0.00
+Pre-Tax Discount 0.00%$0.00$0.00
+Labor TotalLabor Total$3,524.50$3,524.50
+PartsAmountAmount
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  8  of 13
+
+Taxable Parts$6,594.49$6,594.49$6,594.49$6,594.49
+Parts Adjustments$0.00$0.00
+Tax 6.0000%$395.67$395.67
+Non-Taxable$0.00$0.00
+Pre-Tax Discount 0.00%$0.00$0.00
+Parts TotalParts Total$6,990.16$6,990.16
+CostsAmountAmount
+Paint Materials$701.40$701.40$701.40$701.40
+Shop Materials$0.00$0.00$0.00$0.00
+Other Additional
+Costs
+$4.00$4.00$4.00$4.00
+Paint Materials:
+      - Refinish Units: 16.7 units
+      - Rate: $42.00
+      - Rate Max: 99.9 units
+      - Additional Rate: $0.00
+Taxable$705.40$705.40
+Tax 6.0000%$42.32$42.32
+Non-Taxable$0.00$0.00
+Pre-Tax Discount 0.00%$0.00$0.00
+Costs TotalCosts Total$747.72$747.72
+Gross TotalsAmountAmount
+Gross Total$11,262.38$11,262.38$11,262.38$11,262.38
+Taxable$10,624.89$10,624.89
+Tax$637.49$637.49
+Non-Taxable$0.00$0.00
+Pre-Tax Discount 0.00%$0.00$0.00
+Gross TotalGross Total$11,262.38$11,262.38
+AdjustmentsAmountAmount
+DeductibleWaivedWaivedWaivedWaived
+Total CustomerTotal Customer
+ResponsibilityResponsibility
+$0.00$0.00
+Net Estimate TotalNet Estimate Total$11,262.38$11,262.38
+Less Original Net Total$4,916.49$4,916.49
+Net Supplement Amount$6,345.89$6,345.89
+S1: WADE MAGER$4,640.99$4,640.99
+S2: WADE MAGER$1,704.90$1,704.90
+Estimate TotalsEstimate Totals
+"All manufacturers requirements regarding seat belt and supplemental restraint system replacement must be adhered to.
+If additional parts or operations are necessary to properly accomplish this, please contact the estimating claims rep."
+This is a damage assessment only - Not an authorization to repair- based on damage visible or certain at the time it was
+written.
+If frame or unibody repair is included on this estimate, the amount shown includes time or allowance for measuring
+before, during and after those repairs.
+The owner of the vehicle may select the repair facility of his/her choice.
+To ensure proper and prompt payment for additional damage discovered during the course of repairs, contact Progressive
+for supplement handling procedures.
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  9  of 13
+
+Progressive honors the prevailing labor market rate in your area for your property. If you choose a shop that charges in
+excess of the prevailing labor market rates, you will be responsible for the difference.
+Lifetime guarantee for sheet metal and plastic body parts.
+The replacement parts written on the estimate are intended to return your vehicle to its pre-loss condition with proper
+installation. After repair, if any sheet metal or plastic body part included in the estimate fails to return your vehicle to its
+pre-loss condition (assuming proper installation), in terms of form, fit, finish, durability or functionality, Progressive will
+arrange and pay for the replacement of the part, to the extent not covered by a manufacturer's or other warranty. This
+service will be performed at no cost to you (including associated repair and rental car costs). To obtain service under this
+Guarantee, call Progressive at 1-800-274-4641. This Guarantee applies as long as you own or lease the vehicle. This
+Guarantee is not transferable and terminates if you sell or otherwise transfer your vehicle.
+This guarantee does not cover normal wear and tear or damage caused by improper maintenance, neglect, abuse or
+subsequent accident. This guarantee is limited to arranging for the selection of repair parts that will return your vehicle to
+its pre-loss condition. Accordingly, Progressive will not be liable for any indirect, incidental or consequential damages that
+result from the installation or use of these parts.
+Part Type Terms and Abbreviations
+NEW and OEM or part number displayed - These refer to a new, original equipment manufacturer part.
+A/M Certified: This refers to a new, certified non-original equipment manufacturer replacement part.
+A/M: This refers to a new, non-original equipment manufacturer replacement part.
+Recycled: This refers to a used OEM part.
+Remanufactured and Recond. and Recore: These refer to recycled OEM parts that have been rebuilt or refurbished.
+OEM Surplus Part: This refers to new OEM parts, that are excess inventory from the Original Equipment Manufacturer.
+Recovered OE - This refers to parts removed from a new vehicle for various reasons.
+Progressive’s Lifetime Guarantee does not cover repairs you request the shop to make that are not related to this
+accident, including but not exclusive to unrelated prior damage and pre-existing damage.
+Repair shop's authorized representative's signature indicating agreement on cost to return the vehicle to pre-loss
+condition including tow/storage charges:
+Shop Signature: ________________________ Est. completion Date:______
+Appraiser Signature: _______________________________________________
+Disclaimer: Any person who knowingly and with intent to defraud any insurance company or other person files an
+application for insurance or statement of claim containing any materially false information or conceals for the purpose of
+misleading, information concerning any fact material thereto commits a fraudulent insurance act, which is a crime and
+subjects such person to criminal and civil penalties.
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  10  of 13
+
+Cycle Time InformationCycle Time Information
+Due InDue In9/4/2025
+ Estimate Event LogEstimate Event Log
+Job CreatedJob Created8/27/2025 06:35 AM
+Supplement 2Supplement 2StartedStarted9/22/2025 08:13 AM
+Supplement 2Supplement 2PrintedPrinted9/22/2025 08:29 AM
+Supplement 2Supplement 2CommittedCommitted9/22/2025 08:29 AM
+Estimate VersionEstimate Version2
+Estimate Retrieval IDEstimate Retrieval ID10007550939
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  11  of 13
+
+Delta ReportDelta Report
+Supplement 1 & Supplement 2
+Date & Time
+9/22/2025
+8:29:06 AM
+Estimate ID
+25-743062003-
+01
+Supplement No.
+Supplement 2
+Profile ID
+PA MALV ALL PART TYPES
+LUKE KRAUTERLUKE KRAUTERLUKE KRAUTERLUKE KRAUTER2022 Ford Bronco Sport Outer Banks2022 Ford Bronco Sport Outer Banks
+Damage Assessed By
+WADE MAGER
+Supplemented By
+WADE MAGER
+Date of Loss
+08/23/2025
+Global ChangesGlobal ChangesS1S1S2S2
+DeductibleDeductible$1,000.00$1,000.00$0.00$0.00
+Deductible Reduction CreditDeductible Reduction Credit$0.00$0.00$0.00$0.00
+Insurance Pre-paid AmountInsurance Pre-paid Amount$0.00$0.00$0.00$0.00
+Estimate Line Changes - Primary EstimateEstimate Line Changes - Primary Estimate
+Supp/LABORLABORPARTPART
+Line #Item DescriptionOperationTypeTotal UnitsCEGTypeNumberPrice
+Changed EntriesChanged Entries
+S1S177Post Repair ScanAdd'l OprMechanical0.5*0.00$0.00
+S2S27979Post Repair ScanAdd'l OprMechanical0.5*0.00$150.00*$150.00*
+Deleted EntriesDeleted Entries
+S2S278reconcile with
+invoice
+Added EntriesAdded Entries
+S2S212Aim Distance SensorRemove /
+Replace
+BodyINC*0.00TNewNew$350.00*
+S2S251Seatbelt Dynamic
+Function Test
+Remove /
+Replace
+BodyINC*0.00TNewNew$67.50*
+S2S287Power Window
+Reset
+Remove /
+Replace
+BodyINC*0.00TNewNew$67.50*
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  12  of 13
+
+S2S288D&R 12v and reset
+electronics
+Add'l LaborMechanical0.3*0.00ExistingExisting$0.00*
+Supp/LABORLABORPARTPART
+Line #Item DescriptionOperationTypeTotal UnitsCEGTypeNumberPrice
+Estimate Totals ChangesEstimate Totals Changes
+Estimate TypeEstimate TypeTotal TaxTotal TaxGross TotalGross TotalCustomer ResponsibilityCustomer ResponsibilityNet Estimate TotalNet Estimate Total
+Supplement 1$597.59$10,557.48-$1,000.00$9,557.48
+Supplement 2$637.49$11,262.38 $0.00$11,262.38
+Net Estimate TotalsNet Estimate Totals
+Estimate TypeEstimate TypeNet AmountNet Amount
+Supplement 1 $4,640.99
+Supplement 2 $1,704.90
+Net SupplementNet Supplement $6,345.89 $6,345.89
+Original Estimate $4,916.49
+Net Estimate TotalNet Estimate Total $11,262.38 $11,262.38
+Estimate TypeProgram Calc VersionData Versions
+Supplement 111AUG_25_V
+Supplement 211AUG_25_V
+Committed On
+9/22/2025
+08:29 AM
+ 
+Version
+Mitchell Estimating 25.2
+OEM AUG_25_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2025 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/22/2025
+08:29 AM
+ 
+Profile
+PA MALV ALL PART TYPES
+Profile Version
+17.0
+ Page  13  of 13

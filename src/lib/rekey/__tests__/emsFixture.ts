@@ -64,13 +64,16 @@ export function buildEmsExportFiles(overrides?: {
   lines?: Array<Record<string, string | number | boolean | null>>;
   emptyLines?: boolean;
   partsMarkupPct?: number;
+  estimatingSystem?: string;
 }): Array<{ filename: string; bytes: Uint8Array }> {
   const env = writeDbaseTable(
     [
       { name: "EST_SYSTEM", type: "C", length: 20 },
       { name: "EMS_VER", type: "C", length: 8 },
     ],
-    [{ EST_SYSTEM: "TEST ESTIMATING", EMS_VER: "2.01" }]
+    // "C" is the CIECA code a real CCC export writes (F-RK1a); verification is
+    // only defined against a CCC workfile, so the synthetic export says so too.
+    [{ EST_SYSTEM: overrides?.estimatingSystem ?? "C", EMS_VER: "2.01" }]
   );
   const veh = writeDbaseTable([{ name: "V_VIN", type: "C", length: 17 }], [
     { V_VIN: overrides?.vin ?? "1FTFW1E84PKE00000" },

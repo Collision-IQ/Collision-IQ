@@ -83,7 +83,9 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
     lines.push(
       `  — ${group.totals.lines} line${group.totals.lines === 1 ? "" : "s"}; body ${hours(group.totals.body)} h · paint ${hours(
         group.totals.paint
-      )} h · mech ${hours(group.totals.mech)} h · parts ${money(group.totals.parts)} · misc ${money(group.totals.misc)}`
+      )} h · mech ${hours(group.totals.mech)} h${
+        group.totals.other > 0 ? ` · other labor ${hours(group.totals.other)} h` : ""
+      } · parts ${money(group.totals.parts)} · misc ${money(group.totals.misc)}`
     );
     lines.push("");
   }
@@ -99,6 +101,25 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
     }
     lines.push(`  Tax: ${money(sheet.expectedTotals.tax)}`);
     lines.push(`  Gross total: ${money(sheet.expectedTotals.grandTotal)}`);
+    lines.push("");
+  }
+
+  if (sheet.reconciliation && sheet.reconciliation.rows.length > 0) {
+    lines.push(
+      sheet.reconciliation.closes
+        ? "THE ROWS ABOVE ADD UP TO THE PRINTED TOTALS"
+        : "THE ROWS ABOVE DO NOT ADD UP TO THE PRINTED TOTALS — DO NOT KEY FROM THIS SHEET"
+    );
+    for (const row of sheet.reconciliation.rows) {
+      const format = (value: number | null) =>
+        value === null ? "not printed" : row.unit === "hours" ? `${value.toFixed(1)} h` : money(value);
+      lines.push(
+        `  ${row.closes ? "ok " : "-> "}${row.category}: rows ${format(row.derived)} · printed ${format(row.printed)}${
+          row.delta === null || row.closes ? "" : ` · difference ${row.delta > 0 ? "+" : ""}${row.delta.toFixed(row.unit === "hours" ? 1 : 2)}`
+        }`
+      );
+    }
+    for (const failure of sheet.reconciliation.failures) lines.push(`  -> ${failure}`);
     lines.push("");
   }
 

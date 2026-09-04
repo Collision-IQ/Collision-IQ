@@ -128,7 +128,9 @@ describe("Mitchell totals", () => {
 
   it("reads hours printed twice and run together", () => {
     const body = totals?.categories.find((entry) => entry.category === "Body Labor");
-    expect(body).toEqual({ category: "Body Labor", hours: 11.4, rate: 90, cost: 1047 });
+    // The $21.00 between rate and total is what the category carries beyond
+    // hours x rate — the sublet the platform books into body labor.
+    expect(body).toEqual({ category: "Body Labor", hours: 11.4, rate: 90, cost: 1047, extra: 21 });
   });
 
   it("reads a category with no sublet column", () => {
@@ -137,6 +139,7 @@ describe("Mitchell totals", () => {
       hours: 8.2,
       rate: 90,
       cost: 738,
+      extra: null,
     });
   });
 

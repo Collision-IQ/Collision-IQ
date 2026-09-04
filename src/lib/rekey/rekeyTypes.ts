@@ -64,8 +64,10 @@ export interface RekeyGroup {
   group: string;
   mapped: boolean;
   rows: RekeyLedgerRow[];
-  /** Per-group footer so the estimator can spot-check while keying. */
-  totals: { lines: number; body: number; paint: number; mech: number; parts: number; misc: number };
+  /** Per-group footer so the estimator can spot-check while keying. `other`
+   *  is every labor type beyond body / paint / mechanical (glass, frame,
+   *  structural, diagnostic, electrical). */
+  totals: { lines: number; body: number; paint: number; mech: number; other: number; parts: number; misc: number };
 }
 
 export type RekeyProfileBasis = "printed" | "derived" | "instruction" | "unavailable";
@@ -79,12 +81,44 @@ export interface RekeyProfileField {
 }
 
 export interface RekeyExpectedTotals {
-  /** Categories exactly as the source totals page prints them. */
-  categories: Array<{ category: string; hours: number | null; rate: number | null; cost: number | null }>;
+  /** Categories exactly as the source totals page prints them. `extra` is
+   *  what a labor category carries beyond hours x rate (sublet / additional
+   *  amount), when the print states it. */
+  categories: Array<{
+    category: string;
+    hours: number | null;
+    rate: number | null;
+    cost: number | null;
+    extra?: number | null;
+  }>;
   subtotal: number | null;
   tax: number | null;
   grandTotal: number | null;
   taxLanes: Array<{ label: string; amount: number }>;
+}
+
+/**
+ * RK-02: one printed total against what the sheet's own rows add up to.
+ * A sheet whose rows do not reproduce the totals it prints is not fit to key
+ * from, whatever else it got right.
+ */
+export interface RekeyReconciliationRow {
+  category: string;
+  unit: "hours" | "amount";
+  printed: number | null;
+  derived: number;
+  delta: number | null;
+  closes: boolean;
+}
+
+export interface RekeyReconciliation {
+  rows: RekeyReconciliationRow[];
+  /** Printed line numbers that produced no keying row (RK-09). */
+  unreadLines: number[];
+  /** True only when every checked total closes and no line was lost. */
+  closes: boolean;
+  /** Plain-language reasons the sheet does not close, empty when it does. */
+  failures: string[];
 }
 
 export interface RekeySheet {
@@ -99,6 +133,7 @@ export interface RekeySheet {
   groups: RekeyGroup[];
   rows: RekeyLedgerRow[];
   expectedTotals: RekeyExpectedTotals | null;
+  reconciliation: RekeyReconciliation;
   /** The source's parts-vendors pages verbatim, so every attached vendor can
    *  be checked against the page it came from. Empty when the source has none. */
   partsVendorsBlock: string[];

@@ -228,7 +228,10 @@ export function readClaimIdentity(text: string): ClaimIdentity {
     1
   );
 
-  const vehicleMatch = /\b((?:19|20)\d{2}\s+[A-Z][A-Za-z]{1,}(?:\s+[A-Za-z0-9/-]{1,}){0,5})/.exec(
+  // RK-11: a year that is the tail of a date ("06/25/2025 Loss Date") is not a
+  // model year; matching it put a loss date and an inspection site on a sheet
+  // as the vehicle.
+  const vehicleMatch = /(?<![\d/.-])((?:19|20)\d{2}\s+[A-Z][A-Za-z]{1,}(?:\s+[A-Za-z0-9/-]{1,}){0,5})/.exec(
     source
   );
 
