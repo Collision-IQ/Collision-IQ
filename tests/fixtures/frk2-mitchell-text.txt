@@ -1,0 +1,694 @@
+
+
+Conestoga CollisionConestoga Collision
+961 Lancaster Ave, Berwyn, PA 19312
+Office:(610) 644-1000
+Fax:(610) 644-1007
+max@conestogacollision.com
+Tax ID: 270822500
+Estimate ID
+29508501
+Original
+Claim Number
+0367005210101156
+Owner
+TUCKER CONLAN
+741 FIRST AVE 961
+Berwyn, PA 19312
+ 
+Appraiser
+Oskar Keller
+max@conestogacollision.com
+Classification
+None
+GEICO
+Payer
+Customer
+ 
+Loss Type
+Collision
+ 
+Claim Number
+0367005210101156
+ 
+Adjuster
+Fernando Cracha
+fcracha@geico.com
+Deductible
+Unknown
+ 
+Repair Facility
+Conestoga Collision
+961 Lancaster Ave
+Berwyn, PA 19312
+(610) 644-1000 (Work)
+vinny@conestogacollision.com
+2021 Lexus ES 350 Base 4 Door Sedan 3.5L 6 Cyl Gas Injected 8 Speed Auto Trans FWD
+Exterior Color
+218 (Attitude Black Mica)
+ 
+License
+PA-MWL3251
+ 
+VIN
+58ADZ1B10MU091115
+ 
+Condition
+Very Good
+Drivable
+No
+ 
+Mitchell Service Code
+912102
+Primary Point of Impact
+Front (12)
+Options
+Air Conditioning
+ 
+Alum/Alloy Wheels
+ 
+AM-FM Stereo
+ 
+Anti-Lock Brake Sys. (ABS)
+ 
+Auto Air Condition
+Automatic Headlights
+ 
+Auxiliary Input
+ 
+Bluetooth Wireless
+Connectivity
+ 
+CD Player
+ 
+Cruise Control
+Daytime Running Lights
+ 
+Driver Seat With Power
+Lumbar Support
+ 
+Driver-Front Air Bag
+ 
+Dual A/C
+ 
+Electric Defogger
+Electronic Stability Control
+ 
+First Row Bucket Seat
+ 
+Front Seats With Power
+Lumbar Support
+ 
+HD Radio
+ 
+Interior Automatic
+Day/Night Or
+Electrochromatic Mirror
+Keyless Entry System
+ 
+Leather Steering Wheel
+ 
+Left-Curtain Air Bag
+ 
+Manual Sunroof
+ 
+MP3 Player
+Navigation Sys.
+ 
+Passenger-Front Air Bag
+ 
+Power Door Locks
+ 
+Power Driver Seat
+ 
+Power Passenger Seat
+Power Remote Mirror
+ 
+Power Steering
+ 
+Power Windows
+ 
+Premium Sound Sys.
+ 
+Rear Bench Seat
+Rearview Camera
+ 
+Remote Decklid Or Tailgate
+Release
+ 
+Remote Vehicle Starter
+System
+ 
+Satellite Radio
+ 
+Second Row Side Airbag With
+Head Protection
+Side Airbags
+ 
+Smart Key System
+ 
+Steering Wheel Mounted
+Audio Control
+ 
+Telematic Systems
+ 
+Theft Deterrent Sys.
+Tilt Steering Wheel
+ 
+Tire Pressure Monitoring
+System
+ 
+Traction Control/Electronic
+ 
+Trip Computer
+ 
+Universal Garage Door
+Opener
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  1  of 6
+
+TUCKER  CONLANTUCKER  CONLAN 2021 Lexus ES 350 B ase2021 Lexus ES 350 B ase
+Parts Profile
+N/A
+ 
+Parts Profile Version
+N/A
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsCEGTypeNumberQtyTotal PriceTax
+Information Labels
+1203597Inform Label Cooler
+Caution
+Remove
+/ Replace
+Body0.00.0New88723-061301$3.14Yes
+2204929Inform Label Emission
+Information
+Remove
+/ Replace
+Body0.00.0New11298-0P8001$1.98Yes
+3203601Inform Label Oil Level
+Caution
+Remove
+/ Replace
+Body0.00.0New15369-0P0101$2.64Yes
+Front Bumper
+4AUTOFrt Bumper Cover AssyOverhaulBody2.6#2.6Existing
+5200214Frt Bumper CoverRemove
+/ Replace
+BodyINC#2.6New52119-0X9481$508.80Yes
+6AUTOFrt Bumper CoverRefinish
+Only
+Refinish2.8 C2.8
+7AUTOFrt Add w/Parking SensorRemove
+/ Replace
+Mechanical
+*
+0.20.2
+8900500Test fit front bumperRepairBody*1.0*0.0Existing
+9900501Pre-fit prior to refinish to
+ensure all mounting
+locations are in-line to
+avoid damage after final
+refinish
+10900500Set back wiringRemove
+/ Replace
+Body*0.3*0.0New1$2.50*Yes
+11900500Raw plastic primerRemove
+/ Replace
+Body*0.0*0.0New1$15.00*Yes
+12900500Prep unprimed bumperRefinish
+Only
+Refinish*0.8*0.0Existing
+13203609Frt Bumper SealRemove
+/ Replace
+BodyINC0.2New52542-060101$70.84Yes
+14900501Note: PARTS: Part
+cannot be
+reused/reinstalled.
+LABOR: Time included
+with overhaul.
+15200256Frt Upr Bumper Impact
+Absorber
+Remove
+/ Replace
+BodyINC#0.2New52611-065301$49.05Yes
+16200257Frt Bumper Clip (2 @
+$1.98)
+Remove
+/ Replace
+BodyINC0.0New90467-
+07049-23
+2$3.96Yes
+17200260Frt Bumper
+Reinforcement Bar
+Remove
+/ Replace
+Body1.0#1.0New52021-061901$392.70Yes
+18200294L Frt Bumper Cover
+Support
+Remove
+/ Install
+Body0.1r#0.1Existing
+19AUTOFrt Bumper CoverRemove
+/ Install
+BodyINC#1.3
+20200295R Frt Bumper BracketRemove
+/ Replace
+BodyINC0.0New52145-061201$7.14Yes
+21200298L Frt Bumper Clip (3 @
+$6.64)
+Remove
+/ Replace
+BodyINC0.0New47749-020203$19.92Yes
+22200310Frt Bumper Clip (4 @
+$1.98)
+Remove
+/ Replace
+BodyINC0.0New90467-
+07049-23
+4$7.92Yes
+23900500Flex additiveRemove
+/ Replace
+Body*0.0*0.0New1$12.00*Yes
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  2  of 6
+
+Grille
+24203348Grille AssemblyRemove
+/ Replace
+Body0.4#0.8New53101-066501$741.50Yes
+25AUTOFrt Inr Add w/Parking
+Sensor
+Remove
+/ Replace
+Body0.20.2
+26203339Upr GrilleRemove
+/ Replace
+BodyINC0.3New53114-062601$94.13Yes
+27203340Grille Retainer (2 @
+$10.63)
+Remove
+/ Replace
+BodyINC0.0New52521-061502$21.26Yes
+28203790Grille EmblemRemove
+/ Install
+BodyINCr#0.2Existing
+29200978Grille Retainer (2 @
+$10.63)
+Remove
+/ Replace
+BodyINC0.0New52521-061502$21.26Yes
+Front Lamps
+30200401L Front Combination
+Lamp
+Remove
+/ Install
+Body0.3#0.3Existing
+31900500Test fit RT HeadlampRepairBody*0.5*0.0Existing
+32900500Set back wiringRemove
+/ Replace
+Body*0.3*0.0New1$2.50*Yes
+33201984R Frt Combination Lamp
+Assembly
+Remove
+/ Replace
+Body0.5#0.5New81110-
+06C91
+1$1,921.50Yes
+34AUTOHeadlampsCheck /
+Adjust
+Body0.40.4
+Hood
+35202347Hood Panel (Alum)Remove
+/ Replace
+Body2.22.2New53301-063901$1,105.45Yes
+36AUTOHood OutsideRefinish
+Only
+Refinish3.0 C3.0
+37AUTOAdd For Hood UndersideRefinish
+Only
+Refinish1.5 C1.5
+38900500Collision AccessRemove
+/ Replace
+Body*1.0*0.0New1$0.00*Yes
+39900501Hood will not open when
+engaged
+40202315Frt Hood SealRemove
+/ Replace
+BodyINC0.2New53381-061701$50.55Yes
+41900500Windshield washer hose
+clips (4 @ $2.38)
+Remove
+/ Replace
+Body*0.0*0.0New85371060104$9.52*Yes
+42202328R Hood HingeRepairBody0.5*#0.3Existing
+43202329L Hood HingeRepairBody0.5*#0.3Existing
+44202330Hood LatchRemove
+/ Replace
+BodyINC#0.3New53510-064211$108.10Yes
+45900500Latch mount bold (2 @
+$1.06)
+Remove
+/ Replace
+Body*0.0*0.0New90119A04842$2.12*Yes
+46203739Hood Release CableRemove
+/ Install
+Body1.0r#1.0Existing
+47202313Hood ClampRemove
+/ Replace
+Body0.00.0New82711-1E3401$2.98Yes
+48900500Test fit hoodRemove
+/ Replace
+Body*1.0*0.0New1$0.00*Yes
+49900501Pre-fit prior to refinish to
+ensure all mounting
+locations are in-line to
+avoid damage after final
+refinish
+50900500Cavity waxRemove
+/ Replace
+Body*0.2*0.0New1$15.13*Yes
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsCEGTypeNumberQtyTotal PriceTax
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  3  of 6
+
+Front Fender
+51200002R Fender OutsideBlendRefinish0.8 C2.0Existing
+52203125L Fender OutsideBlendRefinish0.8 C2.0Existing
+53201848R Fender SealRemove
+/ Install
+Body0.2r0.2Existing
+54201849L Fender SealRemove
+/ Install
+Body0.2r0.2Existing
+55204933R Fender LinerRemove
+/ Replace
+Body0.40.4New53807-060211$233.02Yes
+56204934L Fender LinerRemove
+/ Replace
+Body0.40.4New53808-060211$233.02Yes
+Front Inner Structure
+57201245Frt Body Upper Tie BarRemove
+/ Replace
+Body0.50.5New53205-069041$174.14Yes
+58AUTOUpper Tie BarRefinish
+Only
+Refinish0.5 C0.5
+59201243R Upr Frt Body SupportRepairBody0.5*1.0Existing
+60201244L Upr Frt Body SupportRepairBody0.5*1.0Existing
+61201553R Frt Body BracketRemove
+/ Install
+Body0.2r0.2Existing
+62201554L Frt Body BracketRemove
+/ Install
+Body0.2r0.2Existing
+63201555Upr Frt Body SealRemove
+/ Install
+Body0.3r0.3Existing
+64900500Set up vehicle on frame
+bench
+RepairBody*2.0*0.0Existing
+65900500Cavity waxRemove
+/ Replace
+Body*0.2*0.0New1$15.13*Yes
+Air Cleaner
+66200669Air Cleaner InletRemove
+/ Install
+Body0.3r0.3Existing
+67200663Air Cleaner HoseRemove
+/ Install
+Body0.3r0.3Existing
+Electrical
+68200128BatteryRepairBody0.3*0.3Existing
+69900501D&R Electric
+70200145Low Note Horn AssyRemove
+/ Install
+Body0.3r#0.3Existing
+71900500Reset electrical
+components
+RepairBody*0.3*0.0Existing
+Rear Bumper
+72202020R Rear Otr Parking
+Sensor Retainer
+Remove
+/ Replace
+Body0.0#0.0New89348-060501$11.13Yes
+73202021L Rear Otr Parking
+Sensor Retainer
+Remove
+/ Replace
+Body0.0#0.0New89348-060501$11.13Yes
+Additional Costs & Materials
+74AUTOPaint/MaterialsAdditional
+Cost
+$912.00Yes
+Additional Operations
+75AUTOClear CoatAdditional
+Operation
+Refinish2.50.0$0.00
+76931127Pre Repair ScanAdditional
+Operation
+Mechanical0.00.0$201.00*
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsCEGTypeNumberQtyTotal PriceTax
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  4  of 6
+
+77900500Revv ADASRemove
+/ Replace
+Body*0.5*0.0New1$25.00*Yes
+78933045In-Process ScanAdditional
+Operation
+Mechanical0.00.0$167.50*
+79900500Front radar static
+calibration
+Remove
+/ Replace
+Body*0.0*0.0Sublet1$469.00*Yes
+80900500Seatbelt dynamic
+function test
+Remove
+/ Replace
+Body*0.0*0.0Sublet1$90.45*Yes
+81900500Parking sensor static
+calibration
+Remove
+/ Replace
+Body*0.0*0.0Sublet1$335.00*Yes
+82900500Seat weight sensor zero
+point
+Remove
+/ Replace
+Body*0.0*0.0Sublet1$201.00*Yes
+83931128Post Repair ScanAdditional
+Operation
+Mechanical0.00.0$201.00*
+84900500Final road test for safety
+& quality check
+RepairBody*0.5*0.0Existing
+85900500Pre-wash vehicleRemove
+/ Replace
+Body*0.5*0.0New1$5.00*Yes
+86900500Interior protection kitRemove
+/ Replace
+Body*0.1*0.0New1$3.22*Yes
+87933066Cover CarAdditional
+Operation
+Body*0.5*0.0$10.00*
+88900500Mask jambsRemove
+/ Replace
+Body*0.9*0.0New1$9.00*Yes
+89900500Tint colorRefinish
+Only
+Refinish*0.5*0.0Existing
+90900500Sand & polishRefinish
+Only
+Refinish*2.0*0.0Existing
+91900500Clean vehicle for deliveryRemove
+/ Replace
+Body*0.5*0.0New1$5.00*Yes
+92900500Hazardous waste
+removal
+Remove
+/ Replace
+Body*0.0*0.0New1$5.00*Yes
+93900500Solid waste removalRemove
+/ Replace
+Body*0.0*0.0New1$5.00*Yes
+ LABOR  PART 
+Line #DescriptionOperationTypeTotal UnitsCEGTypeNumberQtyTotal PriceTax
+** Judgment Item CC Included in Clear Coat Calculation
+TT Included in Two Tone Calculation AA Included in Clear Coat and Two Tone Calculation
+## Labor Note Applies rr CEG R&R Time Used for this Labor Operation
+dd Discontinued by Manufacturer [  ][  ] Verify the part number and price before ordering
+Estimate TotalsEstimate Totals
+LaborU n itsU n itsR ateR ateSu b letSu b letAd d ' l Amo u n tAd d ' l Amo u n tTo talsTo tals
+Body Labor24.624.6$75.00$75.00$10.00$10.00$1,855.00$1,855.00
+Refinish Labor15.215.2$75.00$75.00$1,140.00$1,140.00
+Mechanical Labor0.20.2$75.00$75.00$569.50$569.50$584.50$584.50
+To tal Lab o rTo tal Lab o r40.040.0$3,579.50$3,579.50
+Taxable$ 3 , 5 7 9 . 5 0$ 3 , 5 7 9 . 5 0
+Tax 6.0000%$ 2 1 4 . 7 7$ 2 1 4 . 7 7
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Pre-Tax Discount 0.00%$ 0 . 0 0$ 0 . 0 0
+L a bor  T ota lL a bor  T ota l$ 3 , 7 9 4 . 2 7$ 3 , 7 9 4 . 2 7
+PartsAmo u n tAmo u n t
+Taxable Parts$7,023.83$7,023.83$7,023.83$7,023.83
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  5  of 6
+
+Parts Adjustments$ 2 7 3 . 8 6$ 2 7 3 . 8 6
+Tax 6.0000%$ 4 3 7 . 8 6$ 4 3 7 . 8 6
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Pre-Tax Discount 0.00%$ 0 . 0 0$ 0 . 0 0
+Pa rts   T ota lPa rts   T ota l$ 7 , 7 3 5 . 5 5$ 7 , 7 3 5 . 5 5
+CostsAmo u n tAmo u n t
+Paint Materials$912.00$912.00$912.00$912.00
+Shop Materials$0.00$0.00$0.00$0.00
+Other Additional
+Costs
+$0.00$0.00$0.00$0.00
+Paint Materials:
+      - Refinish Units: 15.2 units
+      - Rate: $60.00
+      - Rate Max: 99.9 units
+      - Additional Rate: $0.00
+Taxable$ 9 1 2 . 0 0$ 9 1 2 . 0 0
+Tax 6.0000%$ 5 4 . 7 2$ 5 4 . 7 2
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Pre-Tax Discount 0.00%$ 0 . 0 0$ 0 . 0 0
+Cos ts   T ota lCos ts   T ota l$ 9 6 6 . 7 2$ 9 6 6 . 7 2
+Gross TotalsAmo u n tAmo u n t
+Gross Total$12,496.54$12,496.54$12,496.54$12,496.54
+Taxable$ 1 1 , 7 8 9 . 1 9$ 1 1 , 7 8 9 . 1 9
+Tax$ 7 0 7 . 3 5$ 7 0 7 . 3 5
+Non-Taxable$ 0 . 0 0$ 0 . 0 0
+Pre-Tax Discount 0.00%$ 0 . 0 0$ 0 . 0 0
+G ros s   T ota lG ros s   T ota l$ 1 2 , 4 9 6 . 5 4$ 1 2 , 4 9 6 . 5 4
+AdjustmentsAmo u n tAmo u n t
+To tal C u sto merTo tal C u sto mer
+Resp o n sib ilityResp o n sib ility
+$0.00$0.00
+Net Estimate TotalNet Estimate Total$12,496.54$12,496.54
+Estimate TotalsEstimate Totals
+Disclaimer: Any person who knowingly and with intent to defraud any insurance company or other person files an
+application for insurance or statement of claim containing any materially false information or conceals for the purpose of
+misleading, information concerning any fact material thereto commits a fraudulent insurance act, which is a crime and
+subjects such person to criminal and civil penalties.
+Estimate Even t Lo gEstimate Even t Lo g
+J ob  Cre a te dJ ob  Cre a te d9/3/2026 10:17 PM
+E s tim a teE s tim a teSta rte dSta rte d9/3/2026 10:23 PM
+E s tim a teE s tim a tePrinte dPrinte d9/3/2026 11:09 PM
+E s tim a teE s tim a teCom m itte dCom m itte dEstimate Not Committed
+E s tim a te   Re trie v a l  IDE s tim a te   Re trie v a l  ID1011655170
+Committed On
+ 
+Version
+Mitchell Estimating 26.2
+OEM AUG_26_V
+ 
+Mitchell Cloud Estimating
+TM
+Copyright 1994-2026 Mitchell International, Inc.
+All Rights Reserved
+ 
+Printed On
+9/3/2026
+11:09 PM
+ 
+Profile (Modified)
+System profile
+Profile Version
+4.0
+ Page  6  of 6
