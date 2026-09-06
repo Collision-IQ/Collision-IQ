@@ -89,7 +89,7 @@ describe("RV-4 — sublet is reported against the sublet category", () => {
 
 describe("RV-4 — a category only one side carries is not a disagreement", () => {
   it("marks the export's own internal subtotals as nothing to compare", () => {
-    for (const code of ["LAT", "PAN", "PAO", "MAT", "UPD"]) {
+    for (const code of ["LAT", "PAN", "PAO", "MAPA", "UPD"]) {
       const entry = verification.totals.find((candidate) => candidate.code === code);
       expect(entry).toMatchObject({ source: null, comparable: false });
     }
@@ -124,33 +124,34 @@ describe("RV-4 — a category only one side carries is not a disagreement", () =
  * empty that is the same absence written twice.
  */
 describe("RV-5 — an export's zeros are not values", () => {
-  it("does not report a zero against a cell the print leaves empty", () => {
-    const words: MitchellPageWord[] = (
-      JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
-        p: number;
-        x: number;
-        y: number;
-        w: number;
-        t: string;
-      }>
-    ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
-    const cccSheet = buildRekeySheet({
-      text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
-      sourceFile: "CCC Estimate 1259209948.pdf",
-      columns: readEstimateColumns(words),
-    });
-    const emsDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
-    const own = keyedEstimateFromEms(
-      readEmsBundle(
-        fs
-          .readdirSync(emsDir)
-          .map((name) => ({ filename: name, bytes: new Uint8Array(fs.readFileSync(path.join(emsDir, name))) }))
-      ),
-      "4b53232a.zip"
-    );
-    if (!own.ok) throw new Error(own.reason);
-    const check = verifyRekey({ sheet: cccSheet, keyed: own.estimate });
+  const words: MitchellPageWord[] = (
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+      p: number;
+      x: number;
+      y: number;
+      w: number;
+      t: string;
+    }>
+  ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+  const cccSheet = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
+    sourceFile: "CCC Estimate 1259209948.pdf",
+    columns: readEstimateColumns(words),
+  });
+  const emsDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+  const own = keyedEstimateFromEms(
+    readEmsBundle(
+      fs
+        .readdirSync(emsDir)
+        .map((name) => ({ filename: name, bytes: new Uint8Array(fs.readFileSync(path.join(emsDir, name))) }))
+    ),
+    "4b53232a.zip"
+  );
+  if (!own.ok) throw new Error(own.reason);
+  const check = verifyRekey({ sheet: cccSheet, keyed: own.estimate });
+  const cccRow = (code: string) => check.totals.find((entry) => entry.code === code);
 
+  it("does not report a zero against a cell the print leaves empty", () => {
     // The two documents ARE the same workfile, so every remaining finding is
     // one fact: the print marks a manual charge miscellaneous and its own
     // export books the identical dollars as a price.
@@ -160,5 +161,42 @@ describe("RV-5 — an export's zeros are not values", () => {
     expect(counts).toEqual({ "charge column": 12 });
     expect(check.summary.exact).toBe(82);
     expect(check.identity.verdict).toBe("match");
+  });
+
+  /**
+   * The materials mapping, measured on the one pair where both sides are the
+   * same workfile — so a difference here can only be the reading.
+   */
+  it("answers a printed materials line with the export's materials total", () => {
+    // The print states one line: "Paint Supplies 17.3 hrs @ $60.00/hr
+    // 1,038.00". The export splits the identical money by stage —
+    // $756.00 MAPA + $0.00 MASH + $66.00 MA2S + $216.00 MABL = $1,038.00 —
+    // so the paint stage alone answered the line $282.00 short and reported
+    // a disagreement between a document and its own export.
+    const stages = ["MAPA", "MASH", "MA2S", "MABL"].map((code) => cccRow(code)?.keyed ?? 0);
+    expect(stages.reduce((total, stage) => total + stage, 0)).toBeCloseTo(1038, 2);
+
+    expect(cccRow("MAT")).toMatchObject({
+      label: "Paint Supplies",
+      source: 1038,
+      keyed: 1038,
+      matches: true,
+      comparable: true,
+    });
+    // The stages stay on the table as what they are: figures only the export
+    // states, reported rather than compared.
+    expect(cccRow("MAPA")).toMatchObject({ source: null, keyed: 756, comparable: false });
+  });
+
+  it("nets a roll-up only of the members the page states on their own lines", () => {
+    // This page states no materials stage of its own, so nothing is netted
+    // out of the materials total. It DOES state miscellaneous separately, and
+    // the export's parts total rolls sublet in — so the parts comparison is
+    // the export's PAT less the PAS the page prints below it, rather than the
+    // same $1,664.95 answering two rows.
+    expect(cccRow("MAT")?.note ?? "").not.toMatch(/states on lines of their own/);
+    expect(cccRow("PAT")).toMatchObject({ source: 5314.38, keyed: 5440.64 });
+    expect(cccRow("PAT")?.note).toMatch(/less PAS, which this page states on lines of their own/);
+    expect(check.summary.totalsRowsOff).toBe(2);
   });
 });

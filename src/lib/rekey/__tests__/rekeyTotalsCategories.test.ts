@@ -43,7 +43,7 @@ describe("a category is mapped by its own name, not by the word it starts with",
   it("keeps every other category mapping it had", () => {
     expect(totalsCategoryCode("Body Labor")).toMatchObject({ code: "LAB", unit: "hours" });
     expect(totalsCategoryCode("Refinish Labor")).toMatchObject({ code: "LAR", unit: "hours" });
-    expect(totalsCategoryCode("Paint Materials")).toMatchObject({ code: "MAPA", unit: "amount" });
+    expect(totalsCategoryCode("Paint Materials")).toMatchObject({ code: "MAT", unit: "amount" });
     expect(totalsCategoryCode("Sublet")).toMatchObject({ code: "PAS", unit: "amount" });
   });
 });
@@ -142,13 +142,18 @@ describe("the totals table on the real pair", () => {
   it("counts the shop-materials line in the materials roll-up", () => {
     // MAT hours are 24.5 = 17.6 MAPA + 2.8 MASH + 2.0 MA2S + 2.1 MABL, and the
     // second export agrees: 19.1 = 12.6 + 1.8 + 1.1 + 3.6. Leaving MASH out
-    // named the roll-up as the sum of three of its four parts.
-    expect(row("MAT")?.note).toMatch(/roll-up of MAPA, MASH, MA2S, MABL/);
+    // named the roll-up as the sum of three of its four parts. The printed
+    // materials line answers to that total, so the shop-materials stage the
+    // page states on its own line is netted out of the comparison rather than
+    // counted on two rows.
+    expect(row("MAT")).toMatchObject({ label: "Paint Materials", source: 701.4, keyed: 1302 });
+    expect(row("MAT")?.note).toMatch(/less MASH, which this page states on lines of their own/);
+    expect(row("MASH")).toMatchObject({ source: 0, keyed: 0, matches: true });
   });
 
   it("names the export's roll-ups instead of printing bare codes", () => {
     expect(row("LAT")).toMatchObject({ label: "Labor total", comparable: false });
-    expect(row("MAT")).toMatchObject({ label: "Materials total", comparable: false });
+    expect(row("MAPA")).toMatchObject({ label: "Paint materials", source: null, comparable: false });
     expect(row("PAN")?.label).toBe("New parts");
     expect(row("LAT")?.note).toMatch(/roll-up of LAB, LAR, LAM/);
   });

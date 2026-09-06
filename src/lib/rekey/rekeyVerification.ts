@@ -946,17 +946,61 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
         .reduce((total, row) => total + (row.price ?? 0) * (row.qty ?? 1), 0)
   );
 
+  const rollUps = new Map(
+    TOTALS_CATEGORIES.filter((entry) => entry.rollUpOf?.length).map((entry) => [entry.ems, entry.rollUpOf as string[]])
+  );
+
+  // A print states materials as one line; an export splits the same dollars by
+  // stage, so the printed line answers to the export's TOTAL and not to any
+  // one stage. Measured on the CCC estimate here, $756.00 paint + $66.00
+  // two-stage + $216.00 blend IS the $1,038.00 the print states.
+  //
+  // That only holds while the print leaves the whole total on one line. A
+  // Mitchell totals page states shop materials on a line of its own, and that
+  // stage is inside the export's total too — comparing both against the total
+  // would answer one printed line with money the page already accounts for
+  // elsewhere. So a roll-up is netted of every member the print states
+  // separately, and the netted-out member is still compared on its own row.
+  //
+  // Only an EXPORT rolls its subtotals up. A second document states the same
+  // categories the source does — its parts line already excludes the sublet
+  // it prints below — so netting a document's figure would subtract money it
+  // never carried.
+  const printed = (sheet.expectedTotals?.categories ?? []).map((category) => ({
+    category,
+    mapped: totalsCategoryCode(category.category),
+  }));
+  const printedCodes = new Set(printed.map((entry) => entry.mapped.code));
+  const netOfPrintedMembers = (code: string, amount: number | null): { amount: number | null; netted: string[] } => {
+    if (keyed.origin !== "ems") return { amount, netted: [] };
+    const members = (rollUps.get(code) ?? []).filter(
+      (member) => printedCodes.has(member) && (keyedByCode.get(member)?.amount ?? null) !== null
+    );
+    if (amount === null || members.length === 0) return { amount, netted: [] };
+    return {
+      amount: round2(members.reduce((total, member) => total - (keyedByCode.get(member)?.amount ?? 0), amount)),
+      netted: members,
+    };
+  };
+
   const totals: RekeyTotalsRow[] = [];
   const seenCodes = new Set<string>();
-  for (const category of sheet.expectedTotals?.categories ?? []) {
-    const mapped = totalsCategoryCode(category.category);
+  for (const { category, mapped } of printed) {
     seenCodes.add(mapped.code);
     const found = keyedByCode.get(mapped.code);
     const source = mapped.unit === "hours" ? (category.hours ?? category.cost) : category.cost;
-    const keyedValue = mapped.unit === "hours" ? (found?.hours ?? found?.amount ?? null) : (found?.amount ?? null);
+    const net =
+      mapped.unit === "hours"
+        ? { amount: found?.hours ?? found?.amount ?? null, netted: [] as string[] }
+        : netOfPrintedMembers(mapped.code, found?.amount ?? null);
+    const keyedValue = net.amount;
     const matches =
       mapped.unit === "hours" ? sameHours(source, keyedValue) : sameMoney(source, keyedValue);
     const comparable = mapped.comparable && source !== null && keyedValue !== null;
+    const nettingNote =
+      net.netted.length > 0
+        ? `The export's ${mapped.code} less ${net.netted.join(", ")}, which this page states on lines of their own.`
+        : null;
     totals.push({
       code: mapped.code,
       label: category.category,
@@ -966,7 +1010,9 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       delta: comparable ? round2((keyedValue as number) - (source as number)) : null,
       matches: comparable && matches,
       comparable,
-      ...(mapped.note ? { note: mapped.note } : {}),
+      ...(mapped.note || nettingNote
+        ? { note: [mapped.note, nettingNote].filter(Boolean).join(" ") }
+        : {}),
     });
     // A labor category also carries a dollar amount; report it as its own row
     // so an hours match with a rate error cannot pass silently.
@@ -984,9 +1030,6 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       });
     }
   }
-  const rollUps = new Map(
-    TOTALS_CATEGORIES.filter((entry) => entry.rollUpOf?.length).map((entry) => [entry.ems, entry.rollUpOf as string[]])
-  );
   // A code the vocabulary says something about says it here too, rather than
   // falling to the generic line — including where what it has to say is that
   // the code's meaning is not evidenced.
