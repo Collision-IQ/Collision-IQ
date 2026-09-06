@@ -258,7 +258,9 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   if (row.misc === null && row.partTypeCcc === "Sublet") flags.push("sublet part");
   if (row.taxable === true) flags.push("Tax");
   if (!row.sectionMapped) flags.push("group: verify");
-  if (!row.operationMapped) flags.push("operation: verify");
+  if (!row.operationMapped) {
+    flags.push(row.operationSource === null ? "operation: not printed" : "operation: verify");
+  }
   if (row.operationCcc === "Manual") flags.push("manual line");
   if (row.partTypeCcc === UNMAPPED && row.partNumber) flags.push("part type: verify");
   return flags;
@@ -1392,7 +1394,15 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   const groups = [...groupMap.values()].sort((a, b) => groupSortIndex(a.group) - groupSortIndex(b.group));
 
   const unmappedSections = folded.filter((row) => !row.sectionMapped).length;
-  const unmappedOperations = folded.filter((row) => !row.operationMapped).length;
+  // Two different things, and the estimator does two different things about
+  // them. A row whose print STATES an operation this build cannot translate
+  // needs the source wording read and the CCC operation chosen from it. A row
+  // the print leaves blank states no operation at all — there is nothing to
+  // translate, and telling the estimator it "carries an operation this build
+  // does not translate" sends him looking for wording that is not there.
+  const untranslatedOperations = folded.filter((row) => !row.operationMapped && row.operationSource !== null).length;
+  const unstatedOperations = folded.filter((row) => !row.operationMapped && row.operationSource === null).length;
+  const unmappedOperations = untranslatedOperations + unstatedOperations;
 
   if (parsedRows.length === 0) {
     warnings.push("No line items could be read from this document. Nothing was written to the sheet.");
@@ -1407,9 +1417,18 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       `${unmappedSections} line${unmappedSections === 1 ? "" : "s"} sit in a section with no known CCC group. The source section name is printed verbatim — choose the group when keying.`
     );
   }
-  if (unmappedOperations > 0) {
+  if (untranslatedOperations > 0) {
     warnings.push(
-      `${unmappedOperations} line${unmappedOperations === 1 ? " carries" : "s carry"} an operation this build does not translate. The source wording is printed verbatim.`
+      `${untranslatedOperations} line${
+        untranslatedOperations === 1 ? " carries" : "s carry"
+      } an operation this build does not translate. The source wording is printed verbatim — read it and choose the CCC operation.`
+    );
+  }
+  if (unstatedOperations > 0) {
+    warnings.push(
+      `${unstatedOperations} line${
+        unstatedOperations === 1 ? " has" : "s have"
+      } no operation printed against ${unstatedOperations === 1 ? "it" : "them"}. Choose the operation from the line's own wording when keying.`
     );
   }
   // The Mitchell reader accounts for every anchored block itself — row, note
@@ -1495,6 +1514,8 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       noteLines: mitchellRead?.noteLines.length ?? 0,
       unmappedSections,
       unmappedOperations,
+      untranslatedOperations,
+      unstatedOperations,
       vendorsAttached: folded.filter((row) => row.vendor !== null).length,
       columnsMeasured: folded.filter((row) => columnReadRows.has(row.id)).length,
     },

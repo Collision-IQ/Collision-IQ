@@ -201,7 +201,14 @@ export interface RekeySheet {
      *  to the row above them. Counted so the line accounting can close. */
     noteLines: number;
     unmappedSections: number;
+    /** Rows whose operation this build could not translate, whatever the
+     *  reason. The two halves below say which reason, because they call for
+     *  different work from the estimator. */
     unmappedOperations: number;
+    /** The print states an operation and this build has no translation. */
+    untranslatedOperations: number;
+    /** The print states no operation at all against the line. */
+    unstatedOperations: number;
     vendorsAttached: number;
     /** RS-3: rows whose part number and quantity came from the page's own
      *  measured column bands rather than from a split of the reflowed text. */

@@ -136,6 +136,37 @@ describe("the sheet the CCC estimate produces", () => {
   });
 });
 
+describe("a blank operation column is reported as blank", () => {
+  const sheet = buildRekeySheet({ text: TEXT, sourceFile: "ccc.pdf", columns });
+  const line5 = sheet.rows.find((entry) => entry.sourceLine === 5);
+
+  it("does not tell the estimator to read wording that is not there", () => {
+    // Line 5 prints "Rpl information labels" with an EMPTY Oper column. Saying
+    // it "carries an operation this build does not translate" sends him
+    // looking for a word the print never wrote.
+    expect(line5?.operationSource).toBeNull();
+    expect(line5?.flags).toContain("operation: not printed");
+    expect(line5?.flags).not.toContain("operation: verify");
+  });
+
+  it("counts the two causes separately, because they call for different work", () => {
+    expect(sheet.stats).toMatchObject({ unmappedOperations: 1, untranslatedOperations: 0, unstatedOperations: 1 });
+    expect(sheet.warnings).toContain(
+      "1 line has no operation printed against it. Choose the operation from the line's own wording when keying."
+    );
+    expect(sheet.warnings.some((warning) => /does not translate/.test(warning))).toBe(false);
+  });
+
+  it("leaves a print that states every operation saying nothing at all", () => {
+    const mitchell = buildRekeySheet({
+      text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk1b-mitchell-text.txt"), "utf8"),
+      sourceFile: "frk1b.pdf",
+    });
+    expect(mitchell.stats).toMatchObject({ untranslatedOperations: 0, unstatedOperations: 0 });
+    expect(mitchell.warnings.some((warning) => /operation/.test(warning))).toBe(false);
+  });
+});
+
 describe("without the geometry the sheet is still refused, not keyed", () => {
   it("fails the gate on the text alone", () => {
     const textOnly = buildRekeySheet({ text: TEXT, sourceFile: "ccc.pdf" });
