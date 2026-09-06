@@ -98,6 +98,52 @@ export interface RekeyExpectedTotals {
 }
 
 /**
+ * RS-2: the totals the KEYED estimate will read, computed from the sheet's own
+ * rows under the sheet's own profile — not copied from the source's totals
+ * page. The printed gross is then a check on it, with the difference stated.
+ *
+ * The distinction matters because copying the printed totals makes the block
+ * true by construction: it agrees with the source no matter what the rows say,
+ * so an estimator keying every row on the sheet can land somewhere else and
+ * the sheet will still look right.
+ */
+export interface RekeyDerivedTotals {
+  categories: Array<{
+    category: string;
+    hours: number | null;
+    /** What `hours` counts: labor hours, or the refinish units a materials
+     *  rate is charged against. */
+    unit: "hours" | "units";
+    rate: number | null;
+    /** Sublet / additional dollars booked inside a labor category. */
+    extra: number | null;
+    cost: number;
+    /** How this number was arrived at, in words the estimator can check. */
+    basis: string;
+    /** False when the source states the amount and the rows cannot produce
+     *  it — a parts adjustment whose markup rate the source never prints. */
+    fromRows: boolean;
+  }>;
+  subtotal: number;
+  /** Rate applied to the derived subtotal, and where it came from. */
+  taxRate: { rate: number; basis: string } | null;
+  tax: number | null;
+  grandTotal: number | null;
+  /** The source's printed gross, and what the derived block differs from it
+   *  by. `closes` is false only when both numbers exist and disagree. */
+  check: {
+    printedGrandTotal: number | null;
+    delta: number | null;
+    closes: boolean;
+    /** Figures carried from the source's totals page because the rows cannot
+     *  produce them. Each contributes the printed number itself, so none can
+     *  open a gap in the check — they are named so the estimator knows which
+     *  part of the gross the check does not test. */
+    caveats: string[];
+  };
+}
+
+/**
  * RK-02: one printed total against what the sheet's own rows add up to.
  * A sheet whose rows do not reproduce the totals it prints is not fit to key
  * from, whatever else it got right.
@@ -139,6 +185,9 @@ export interface RekeySheet {
   groups: RekeyGroup[];
   rows: RekeyLedgerRow[];
   expectedTotals: RekeyExpectedTotals | null;
+  /** RS-2: what the rows and the profile add up to, checked against the
+   *  printed gross. Null when the source prints no totals page to check. */
+  derivedTotals: RekeyDerivedTotals | null;
   reconciliation: RekeyReconciliation;
   /** The source's parts-vendors pages verbatim, so every attached vendor can
    *  be checked against the page it came from. Empty when the source has none. */

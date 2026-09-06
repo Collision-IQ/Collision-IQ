@@ -102,8 +102,46 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
     lines.push("");
   }
 
+  // RS-2: the block the estimator keys toward is computed from the rows above
+  // under the profile above, and the source's printed gross is the check on
+  // it — not the other way round. The source's own totals page follows, so
+  // both numbers are on the sheet and neither is passed off as the other.
+  const derived = sheet.derivedTotals;
+  if (derived) {
+    lines.push("THE KEYED ESTIMATE SHOULD READ — FROM THE ROWS ABOVE, AT THE PROFILE ABOVE");
+    for (const category of derived.categories) {
+      lines.push(
+        `  ${category.category}: ${
+          category.hours === null
+            ? ""
+            : `${hours(category.hours)} ${category.unit === "units" ? "units" : "h"} @ ${money(category.rate)} = `
+        }${money(category.cost)}  — ${category.basis}`
+      );
+    }
+    lines.push(`  Subtotal: ${money(derived.subtotal)}`);
+    lines.push(
+      derived.taxRate === null
+        ? "  Tax: not derivable from this document"
+        : `  Tax: ${money(derived.tax)}  — ${derived.taxRate.basis}`
+    );
+    lines.push(`  Gross total: ${derived.grandTotal === null ? "not derivable" : money(derived.grandTotal)}`);
+    if (derived.check.printedGrandTotal !== null) {
+      lines.push(
+        derived.check.delta === null
+          ? `  Check: the source prints ${money(derived.check.printedGrandTotal)}; this sheet could not derive a gross to compare.`
+          : `  Check: the source prints ${money(derived.check.printedGrandTotal)} — difference ${
+              derived.check.delta > 0 ? "+" : ""
+            }${derived.check.delta.toFixed(2)}${derived.check.closes ? "" : " — SEE THE RECONCILIATION BELOW"}`
+      );
+    }
+    for (const caveat of derived.check.caveats) {
+      lines.push(`  Carried from the source, not derived: ${caveat}`);
+    }
+    lines.push("");
+  }
+
   if (sheet.expectedTotals) {
-    lines.push("THE KEYED ESTIMATE SHOULD READ");
+    lines.push("THE SOURCE ESTIMATE PRINTS");
     for (const category of sheet.expectedTotals.categories) {
       lines.push(
         `  ${category.category}: ${category.hours === null ? "" : `${hours(category.hours)} h @ ${money(category.rate)} = `}${money(
