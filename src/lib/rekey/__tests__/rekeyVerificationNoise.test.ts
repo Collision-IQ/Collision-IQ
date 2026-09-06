@@ -102,8 +102,8 @@ describe("RV-4 — a category only one side carries is not a disagreement", () =
   it("counts only the rows both sides carry as off", () => {
     // 22 before: nine of the export's internal codes and four one-sided
     // source categories were each being counted as a failed comparison.
-    expect(verification.summary.totalsRowsOff).toBe(10);
-    expect(verification.totals.filter((entry) => entry.comparable && !entry.matches)).toHaveLength(10);
+    expect(verification.summary.totalsRowsOff).toBe(9);
+    expect(verification.totals.filter((entry) => entry.comparable && !entry.matches)).toHaveLength(9);
   });
 
   it("does not print a floating-point artifact for stacked tax lanes", () => {

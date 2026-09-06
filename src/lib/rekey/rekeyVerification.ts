@@ -36,6 +36,13 @@ const TOTALS_CATEGORIES = VOCABULARY.totalsCategories as Array<{
   label: string;
   unit: "hours" | "amount";
   aliases: string[];
+  /** False when no EMS subtotal answers for this printed category, so there
+   *  is nothing on the keyed side to compare it against. */
+  comparable?: boolean;
+  /** The codes this one is the sum of. An export states both the roll-up and
+   *  its parts; comparing against the roll-up counts its components twice. */
+  rollUpOf?: string[];
+  note?: string;
 }>;
 
 /**
@@ -111,19 +118,34 @@ export interface KeyedEstimate {
 
 /** Map a printed totals-category name onto its EMS code. Unknown names keep
  *  their printed form as the code so nothing is silently discarded. */
-export function totalsCategoryCode(name: string): { code: string; label: string; unit: "hours" | "amount" } {
+export function totalsCategoryCode(name: string): {
+  code: string;
+  label: string;
+  unit: "hours" | "amount";
+  comparable: boolean;
+  note?: string;
+} {
   const normalized = normalizeVocabularyText(name);
+  const found = (entry: (typeof TOTALS_CATEGORIES)[number]) => ({
+    code: entry.ems,
+    label: entry.label,
+    unit: entry.unit,
+    comparable: entry.comparable !== false,
+    ...(entry.note ? { note: entry.note } : {}),
+  });
   for (const entry of TOTALS_CATEGORIES) {
-    if (entry.aliases.some((alias) => normalizeVocabularyText(alias) === normalized)) {
-      return { code: entry.ems, label: entry.label, unit: entry.unit };
-    }
+    if (entry.aliases.some((alias) => normalizeVocabularyText(alias) === normalized)) return found(entry);
   }
-  for (const entry of TOTALS_CATEGORIES) {
-    if (entry.aliases.some((alias) => normalized.startsWith(normalizeVocabularyText(alias)))) {
-      return { code: entry.ems, label: entry.label, unit: entry.unit };
-    }
-  }
-  return { code: normalized || "UNKNOWN", label: name.trim() || "Unknown category", unit: "amount" };
+  // There is no prefix fallback. One category name starting with another's
+  // is how "Parts Adjustments" — a markup — became the parts total, so the
+  // export's whole $11,926.97 answered two source rows and neither answer
+  // meant anything. Measured across every fixture in this repository, all
+  // eleven printed category names resolve exactly and none needed a prefix,
+  // so the rule earned nothing and cost that. A name the table does not know
+  // keeps its own printed name as its code and is reported with nothing to
+  // compare, which is a stated gap rather than a false comparison; the alias
+  // lists are where a new printed name belongs.
+  return { code: normalized || "UNKNOWN", label: name.trim() || "Unknown category", unit: "amount", comparable: true };
 }
 
 export function keyedEstimateFromEms(bundle: EmsBundle, sourceFile: string): {
@@ -909,15 +931,17 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     const keyedValue = mapped.unit === "hours" ? (found?.hours ?? found?.amount ?? null) : (found?.amount ?? null);
     const matches =
       mapped.unit === "hours" ? sameHours(source, keyedValue) : sameMoney(source, keyedValue);
+    const comparable = mapped.comparable && source !== null && keyedValue !== null;
     totals.push({
       code: mapped.code,
       label: category.category,
       unit: mapped.unit,
       source,
       keyed: keyedValue,
-      delta: source !== null && keyedValue !== null ? round2(keyedValue - source) : null,
-      matches,
-      comparable: source !== null && keyedValue !== null,
+      delta: comparable ? round2((keyedValue as number) - (source as number)) : null,
+      matches: comparable && matches,
+      comparable,
+      ...(mapped.note ? { note: mapped.note } : {}),
     });
     // A labor category also carries a dollar amount; report it as its own row
     // so an hours match with a rate error cannot pass silently.
@@ -935,9 +959,13 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       });
     }
   }
+  const rollUps = new Map(
+    TOTALS_CATEGORIES.filter((entry) => entry.rollUpOf?.length).map((entry) => [entry.ems, entry.rollUpOf as string[]])
+  );
   for (const [code, value] of keyedByCode) {
     if (seenCodes.has(code)) continue;
     const keyedValue = value.amount ?? value.hours;
+    const rollUpOf = rollUps.get(code);
     // RV-4: the sublet category IS comparable — the source's sublet dollars
     // are on its rows, they are simply booked inside its labor categories
     // rather than into a sublet total of their own. Reporting them here says
@@ -958,7 +986,9 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
         ? {
             note: "The source books these dollars inside the labor categories the rows bill, so they are also counted in the labor amounts above.",
           }
-        : { note: "The export carries this subtotal; the source's totals page prints no such category." }),
+        : rollUpOf
+          ? { note: `The export's own roll-up of ${rollUpOf.join(", ")}; those are compared individually.` }
+          : { note: "The export carries this subtotal; the source's totals page prints no such category." }),
     });
   }
   totals.push({
