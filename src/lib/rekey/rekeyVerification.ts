@@ -24,6 +24,7 @@ import {
   canonicalizeNomenclature,
   nomenclatureOverlap,
   normalizeVocabularyText,
+  resolveOperationCode,
 } from "./rekeyVocabulary";
 import { buildRekeySheet } from "./rekeyLedger";
 import { looksLikeMitchellLayout } from "./mitchellEstimateReader";
@@ -308,6 +309,13 @@ export interface RekeyTotalsRow {
   keyed: number | null;
   delta: number | null;
   matches: boolean;
+  /** RV-4: false when only one side has a figure. A category one side does
+   *  not carry is not a disagreement between the two estimates — it is
+   *  nothing to compare — and counting it as a failure inflated the totals
+   *  score with the export's own internal subtotal codes. */
+  comparable: boolean;
+  /** Why a row reads the way it does, when that needs saying. */
+  note?: string;
 }
 
 export interface RekeyProfileFinding {
@@ -463,7 +471,16 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
   const sourceQty = row.qty ?? null;
   const keyedQty = keyed.qty ?? null;
   const defaultQuantity = (sourceQty === null && keyedQty === 1) || (keyedQty === null && sourceQty === 1);
-  if (sourceQty !== keyedQty && !defaultQuantity) {
+  // RV-5: a line with no part has no quantity, and the two platforms write
+  // that absence differently — the print leaves the cell blank, the export
+  // writes zero. Reporting "expected not printed, found 0" against a labor
+  // line is not a finding; it was five of the six quantity findings on a real
+  // pair. A line that DOES carry a part price is never covered by this: there
+  // a zero quantity is a real difference.
+  const noPartEitherSide = (row.price ?? 0) === 0 && (keyed.price ?? 0) === 0;
+  const absentQuantity =
+    noPartEitherSide && ((sourceQty === null && keyedQty === 0) || (keyedQty === null && sourceQty === 0));
+  if (sourceQty !== keyedQty && !defaultQuantity && !absentQuantity) {
     deltas.push({
       field: "quantity",
       expected: sourceQty === null ? "not printed" : String(sourceQty),
@@ -493,7 +510,23 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
   // reading, not a difference in the keying, so it is never reported here.
   const keyedOperation = keyed.operation ?? null;
   if (keyedOperation && /^OP\d+$/i.test(keyedOperation)) {
-    if (row.laborOpCode && row.laborOpCode.toUpperCase() !== keyedOperation.toUpperCase()) {
+    // RV-5: resolve the code to the operation it names before comparing. Two
+    // codes that mean the same operation are the vocabularies differing, not
+    // the keying, and a difference that survives now reads as the operations
+    // themselves ("Rpr" against "Algn") instead of "OP9" against "OP4".
+    const keyedName = resolveOperationCode(keyedOperation);
+    const sourceName = row.operationMapped && row.operationCcc !== UNMAPPED ? row.operationCcc : null;
+    if (keyedName && sourceName) {
+      if (normalizeVocabularyText(sourceName) !== normalizeVocabularyText(keyedName)) {
+        deltas.push({
+          field: "operation",
+          expected: sourceName,
+          found: `${keyedName} (${keyedOperation.toUpperCase()})`,
+        });
+      }
+    } else if (row.laborOpCode && row.laborOpCode.toUpperCase() !== keyedOperation.toUpperCase()) {
+      // One side's code names no operation this build knows; the codes are all
+      // there is to compare, so they are reported as codes.
       deltas.push({ field: "operation", expected: row.laborOpCode, found: keyedOperation });
     }
   } else if (keyedOperation && row.operationMapped && row.operationCcc !== "UNMAPPED" && row.operationCcc !== "Manual") {
@@ -853,6 +886,19 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     });
   }
 
+  // RV-4: what the SOURCE books as sublet. Its own print books these dollars
+  // inside the labor categories they belong to, so without this the sublet
+  // row of the totals table has nothing on the source side at all and reads
+  // as though the source carried no sublet work.
+  const sourceSubletTotal = round2(
+    keyable
+      .filter((row) => row.misc?.sublet)
+      .reduce((total, row) => total + (row.misc?.amount ?? 0), 0) +
+      keyable
+        .filter((row) => row.misc === null && row.partTypeCcc === "Sublet")
+        .reduce((total, row) => total + (row.price ?? 0) * (row.qty ?? 1), 0)
+  );
+
   const totals: RekeyTotalsRow[] = [];
   const seenCodes = new Set<string>();
   for (const category of sheet.expectedTotals?.categories ?? []) {
@@ -871,6 +917,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       keyed: keyedValue,
       delta: source !== null && keyedValue !== null ? round2(keyedValue - source) : null,
       matches,
+      comparable: source !== null && keyedValue !== null,
     });
     // A labor category also carries a dollar amount; report it as its own row
     // so an hours match with a rate error cannot pass silently.
@@ -884,19 +931,34 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
         keyed: keyedAmount,
         delta: keyedAmount !== null ? round2(keyedAmount - category.cost) : null,
         matches: sameMoney(category.cost, keyedAmount),
+        comparable: keyedAmount !== null,
       });
     }
   }
   for (const [code, value] of keyedByCode) {
     if (seenCodes.has(code)) continue;
+    const keyedValue = value.amount ?? value.hours;
+    // RV-4: the sublet category IS comparable — the source's sublet dollars
+    // are on its rows, they are simply booked inside its labor categories
+    // rather than into a sublet total of their own. Reporting them here says
+    // where they are, rather than leaving the row one-sided; the labor rows
+    // above still report the source exactly as it prints, which is why the
+    // note names the double booking rather than hiding it.
+    const isSublet = code === "PAS" && sourceSubletTotal > 0;
     totals.push({
       code,
       label: value.label,
       unit: value.amount !== null ? "amount" : "hours",
-      source: null,
-      keyed: value.amount ?? value.hours,
-      delta: null,
-      matches: false,
+      source: isSublet ? sourceSubletTotal : null,
+      keyed: keyedValue,
+      delta: isSublet && keyedValue !== null ? round2(keyedValue - sourceSubletTotal) : null,
+      matches: isSublet ? sameMoney(sourceSubletTotal, keyedValue) : false,
+      comparable: isSublet && keyedValue !== null,
+      ...(isSublet
+        ? {
+            note: "The source books these dollars inside the labor categories the rows bill, so they are also counted in the labor amounts above.",
+          }
+        : { note: "The export carries this subtotal; the source's totals page prints no such category." }),
     });
   }
   totals.push({
@@ -910,6 +972,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
         ? round2(keyed.totals.tax - sheet.expectedTotals.tax)
         : null,
     matches: sameMoney(sheet.expectedTotals?.tax ?? null, keyed.totals.tax),
+    comparable: (sheet.expectedTotals?.tax ?? null) !== null && keyed.totals.tax !== null,
   });
   totals.push({
     code: "GROSS",
@@ -924,6 +987,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
         ? round2(keyed.totals.grandTotal - sheet.expectedTotals.grandTotal)
         : null,
     matches: sameMoney(sheet.expectedTotals?.grandTotal ?? null, keyed.totals.grandTotal),
+    comparable: (sheet.expectedTotals?.grandTotal ?? null) !== null && keyed.totals.grandTotal !== null,
   });
 
   // Sublet is booked under miscellaneous by CCC and under labor by the source.
@@ -946,7 +1010,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
   const valueDelta = lineFindings.filter((finding) => finding.resolution === "value_delta").length;
   const missing = lineFindings.filter((finding) => finding.resolution === "missing_in_keyed").length;
   const unmatched = lineFindings.filter((finding) => finding.resolution === "unmatched").length;
-  const totalsRowsOff = totals.filter((row) => !row.matches).length;
+  const totalsRowsOff = totals.filter((row) => row.comparable && !row.matches).length;
 
   return {
     blocked: false,

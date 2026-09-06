@@ -245,11 +245,13 @@ export function buildRekeyVerificationText(verification: RekeyVerification): str
     const unit = row.unit === "hours" ? "h" : "";
     const format = (value: number | null) =>
       value === null ? "—" : row.unit === "hours" ? `${value.toFixed(1)} h` : money(value);
+    const mark = row.matches ? "ok " : row.comparable ? "-> " : " . ";
     lines.push(
-      `  ${row.matches ? "ok " : "-> "}${row.label}: source ${format(row.source)} · keyed ${format(row.keyed)}${
+      `  ${mark}${row.label}: source ${format(row.source)} · keyed ${format(row.keyed)}${
         row.delta === null ? "" : ` · difference ${row.delta > 0 ? "+" : ""}${row.delta.toFixed(row.unit === "hours" ? 1 : 2)}${unit}`
-      }`
+      }${row.comparable ? "" : " — nothing to compare"}`
     );
+    if (row.note) lines.push(`      ${row.note}`);
   }
   lines.push("");
 

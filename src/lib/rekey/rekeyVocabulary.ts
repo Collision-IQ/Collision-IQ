@@ -349,6 +349,21 @@ function routeByDescription(entry: SectionGroupEntry, description: string | null
   return null;
 }
 
+/**
+ * The CCC operation an EMS labor-operation code names.
+ *
+ * An export states the operation as a code ("OP4"), a document states it as a
+ * word ("Align"). Comparing the two as raw strings reports every pair as a
+ * difference and reads as "expected OP9, found OP4" — which names neither
+ * operation. Resolving both to the operation itself makes a real difference
+ * legible and makes a difference that is only the two vocabularies disappear.
+ */
+export function resolveOperationCode(code: string | null | undefined): string | null {
+  const normalized = (code ?? "").trim().toUpperCase();
+  if (!normalized) return null;
+  return OPERATIONS.find((entry) => (entry.laborOpCode ?? "").toUpperCase() === normalized)?.ccc ?? null;
+}
+
 /** Scan / calibration / reset work, which CCC groups under VEHICLE DIAGNOSTICS. */
 export function isDiagnosticsOperation(description: string | null | undefined): boolean {
   const normalized = normalizeVocabularyText(description);
