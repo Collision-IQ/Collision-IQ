@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import { readEmsBundle } from "../emsReader";
 import { keyedEstimateFromEms, verifyRekey } from "../rekeyVerification";
+import { readEstimateColumns, type MitchellPageWord } from "../mitchellColumnBands";
 import { buildRekeyVerificationText } from "../rekeyReportBuilder";
 import { resolveOperationCode } from "../rekeyVocabulary";
 
@@ -108,5 +109,56 @@ describe("RV-4 — a category only one side carries is not a disagreement", () =
 
   it("does not print a floating-point artifact for stacked tax lanes", () => {
     expect(row("Tax")?.source).toBe(637.49);
+  });
+});
+
+/**
+ * RV-5, measured against ground truth.
+ *
+ * The strongest check available to this repository: a CCC estimate verified
+ * against the CCC EMS export OF THE SAME WORKFILE. Every line, price and hour
+ * on the two sides is the same fact stated twice, so a finding here is a
+ * finding about the READING, not about a rekey. It is where the noise classes
+ * were measured — an export writes a figure in every column of every line,
+ * zero where the line has none, and against a print that leaves the cell
+ * empty that is the same absence written twice.
+ */
+describe("RV-5 — an export's zeros are not values", () => {
+  it("does not report a zero against a cell the print leaves empty", () => {
+    const words: MitchellPageWord[] = (
+      JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+        p: number;
+        x: number;
+        y: number;
+        w: number;
+        t: string;
+      }>
+    ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+    const cccSheet = buildRekeySheet({
+      text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
+      sourceFile: "CCC Estimate 1259209948.pdf",
+      columns: readEstimateColumns(words),
+    });
+    const emsDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+    const own = keyedEstimateFromEms(
+      readEmsBundle(
+        fs
+          .readdirSync(emsDir)
+          .map((name) => ({ filename: name, bytes: new Uint8Array(fs.readFileSync(path.join(emsDir, name))) }))
+      ),
+      "4b53232a.zip"
+    );
+    if (!own.ok) throw new Error(own.reason);
+    const check = verifyRekey({ sheet: cccSheet, keyed: own.estimate });
+
+    // The two documents ARE the same workfile, so every remaining finding is
+    // one fact: the print marks a manual charge miscellaneous and its own
+    // export books the identical dollars as a price.
+    const counts = check.lineFindings
+      .flatMap((finding) => finding.deltas)
+      .reduce<Record<string, number>>((totals, delta) => ({ ...totals, [delta.field]: (totals[delta.field] ?? 0) + 1 }), {});
+    expect(counts).toEqual({ "charge column": 12 });
+    expect(check.summary.exact).toBe(82);
+    expect(check.identity.verdict).toBe("match");
   });
 });

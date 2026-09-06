@@ -147,7 +147,13 @@ export function readEmsBundle(files: Array<{ filename: string; bytes: Uint8Array
     // A .dbt is the dBase MEMO side-file, not a table. The EMS spec lists it
     // as optional and it carries no fields of its own, so skipping it is
     // normal and must not be reported as a fault in the export.
-    if (extension === "dbt") continue;
+    //
+    // An .AWF is the estimating system's own workfile. WO-RK1 §1 puts it out
+    // of scope explicitly — none is generated, read or reverse-engineered —
+    // so a real export's AWF is passed over deliberately. Reporting it as
+    // unreadable put "4b53232a.AWF is not a readable dBase table" on the
+    // verification of a perfectly good export.
+    if (extension === "dbt" || extension === "awf") continue;
     const table = parseDbaseTable(extension, file.bytes);
     if (!table) {
       errors.push(`${file.filename} is not a readable dBase table.`);

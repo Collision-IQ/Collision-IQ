@@ -21,6 +21,8 @@
 
 /** The minimum of a PDF word this reader needs. Callers map their extractor's
  *  word type onto it, so this module pulls in no PDF dependency. */
+import VOCABULARY from "./data/rekeyVocabulary.json";
+
 export interface MitchellPageWord {
   page: number;
   x: number;
@@ -53,6 +55,14 @@ export interface MitchellColumnRow {
    *  to $5,314.38 of parts and $1,791.21 of miscellaneous — both to the cent
    *  what its totals page prints. */
   miscMarker?: "T" | "X" | null;
+  /** The operation and description as the columns carry them. The reflowed
+   *  text of this layout welds the line's markers onto its description — a
+   *  structural "s" turned "RT Upper arm" into "RT Upper arms" — and truncated
+   *  others outright ("High note horn w/o F Sport" arrived as "High"). The
+   *  columns carry both whole. Null when the print's operation column is
+   *  empty, which is not the same as an operation this build cannot read. */
+  operation?: string | null;
+  description?: string | null;
 }
 
 export interface MitchellColumnReading {
@@ -106,6 +116,18 @@ const CCC_QTY_LABEL = /^qty|^quantity$/i;
 const CCC_PRICE_LABEL = /^(?:extended|ext\.?|price|amount)$/i;
 const CCC_LABOR_LABEL = /^labor$/i;
 const CCC_PAINT_LABEL = /^(?:paint|refinish)$/i;
+
+/** Every operation word a CCC print can put in its operation column, from the
+ *  same vocabulary the sheet translates into. */
+const CCC_OPERATIONS = new Set(
+  (VOCABULARY.operations as Array<{ ccc: string; aliases: string[] }>)
+    .flatMap((entry) => [entry.ccc, ...entry.aliases])
+    .map((word) => word.toUpperCase())
+);
+
+/** What a line under a row can be instead of the rest of its description: the
+ *  print's own note notation, the continuation of one, or the totals block. */
+const NOT_A_DESCRIPTION = /^(?:note\s*:|parts\s*:|labor\s*:|subtotals?\b|estimate\s+totals?\b|category\b)/i;
 
 const INCLUDED = /^incl\.?$/i;
 const HOURS = /^\d{1,3}(?:\.\d)?$/;
@@ -183,6 +205,11 @@ function splitAcrossBoundary(item: MitchellPageWord, boundary: number): { head: 
 
 type CccBands = {
   line: { from: number; to: number };
+  /** The operation and description SHARE a span: this print centres a header
+   *  over its column, so the description sits under the "Oper" label rather
+   *  than the "Description" one. They are told apart by what they say — an
+   *  operation is a word the vocabulary knows — not by where they sit. */
+  text: { from: number; to: number };
   part: { from: number; to: number };
   qty: { from: number; to: number };
   price: { from: number; to: number };
@@ -222,6 +249,7 @@ function cccBandsFor(header: { items: MitchellPageWord[] }): CccBands | null {
   });
   return {
     line: band(line),
+    text: { from: edges[oper], to: edges[part] },
     part: band(part),
     qty: band(qty),
     price: band(price),
@@ -258,6 +286,9 @@ export function readCccColumns(words: MitchellPageWord[]): MitchellColumnReading
   // them; reading each page independently found page 2 and dropped the other
   // three quarters of the estimate.
   let bands: CccBands | null = null;
+  /** The row a wrapped description continues onto the next line for. */
+  let pending: MitchellColumnRow | null = null;
+  let pendingPage: number | null = null;
   for (const page of [...new Set(lines.map((line) => line.page))]) {
     const pageLines = lines.filter((line) => line.page === page);
     const headerIndex = pageLines.findIndex((line) => cccBandsFor(line) !== null);
@@ -270,8 +301,45 @@ export function readCccColumns(words: MitchellPageWord[]): MitchellColumnReading
       const inBand = (band: { from: number; to: number }) =>
         line.items.filter((item) => item.x >= band.from - 0.5 && item.x < band.to - 0.5);
 
+      const textItems = inBand(bands.text);
       const lineNumberItem = inBand(bands.line).find((item) => INTEGER.test(item.text.trim()));
-      if (!lineNumberItem) continue;
+      if (!lineNumberItem) {
+        // A description too long for its column runs onto the NEXT LINE OF THE
+        // SAME PAGE, which carries no line number of its own. Without this the
+        // sheet lost the tail of every wrapped description; without the page
+        // guard the last row of a page swallowed the next page's heading.
+        // A note the print sets under its row is not the row's description,
+        // and neither is anything after it: the note's own second line, or
+        // the totals block that follows the last row. All three carry no line
+        // number, so a rule that joined any such line read "Emblem Note:
+        // Possible 1-time use ..." as one description and swallowed the whole
+        // ESTIMATE TOTALS block into the last row of the estimate.
+        //
+        // A wrapped description is the line IMMEDIATELY under its row and
+        // nothing else, so anything that is not one closes the row.
+        const first = textItems[0]?.text.trim() ?? "";
+        const joinable =
+          pending !== null &&
+          pendingPage === page &&
+          textItems.length > 0 &&
+          inBand(bands.part).length === 0 &&
+          !NOT_A_DESCRIPTION.test(first);
+        if (joinable && pending) {
+          const tail = textItems.map((item) => item.text.trim()).join(" ").trim();
+          if (tail) pending.description = `${pending.description ?? ""} ${tail}`.trim();
+        } else {
+          pending = null;
+        }
+        continue;
+      }
+
+      const operationItem = textItems.find((item) => CCC_OPERATIONS.has(item.text.trim().toUpperCase())) ?? null;
+      const description =
+        textItems
+          .filter((item) => item !== operationItem)
+          .map((item) => item.text.trim())
+          .join(" ")
+          .trim() || null;
 
       const partItems = inBand(bands.part).filter((item) => PART_FRAGMENT.test(item.text.trim()));
       const qtyItem = inBand(bands.qty).find((item) => INTEGER.test(item.text.trim()));
@@ -300,7 +368,11 @@ export function readCccColumns(words: MitchellPageWord[]): MitchellColumnReading
         paint: readHours(inBand(bands.paint)),
         laborMarker,
         miscMarker,
+        operation: operationItem ? operationItem.text.trim() : null,
+        description,
       });
+      pending = rows.get(Number(lineNumberItem.text.trim())) ?? null;
+      pendingPage = page;
     }
   }
 
