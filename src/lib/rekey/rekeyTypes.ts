@@ -200,6 +200,9 @@ export interface RekeySheet {
     unmappedSections: number;
     unmappedOperations: number;
     vendorsAttached: number;
+    /** RS-3: rows whose part number and quantity came from the page's own
+     *  measured column bands rather than from a split of the reflowed text. */
+    columnsMeasured: number;
   };
   warnings: string[];
 }

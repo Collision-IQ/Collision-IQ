@@ -4,6 +4,8 @@ import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-curren
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canUseProIntegrations, PRO_FEATURE_REQUIRED_MESSAGE } from "@/lib/billing/proFeatures";
 import { extractPreviewDataFromBuffer } from "@/lib/attachments/extractPreviewData";
+import { extractPdfWords } from "@/lib/reports/citationDensityRowAnchors";
+import { readMitchellColumns, type MitchellColumnReading } from "@/lib/rekey/mitchellColumnBands";
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
@@ -67,7 +69,17 @@ function looksLikeZip(filename: string, mimeType: string, buffer: Buffer): boole
 }
 
 type ResolvedFile =
-  | { ok: true; kind: "document"; filename: string; text: string; attachmentId: string | null }
+  | {
+      ok: true;
+      kind: "document";
+      filename: string;
+      text: string;
+      /** RS-3: the page's own measured column bands, when the upload is a PDF
+       *  this process can lay out. Null for every other path, and the sheet
+       *  falls back to reading the columns out of the reflowed text. */
+      columns: MitchellColumnReading | null;
+      attachmentId: string | null;
+    }
   | { ok: true; kind: "ems"; filename: string; buffer: Buffer; attachmentId: string | null }
   | { ok: false; error: string; status: number };
 
@@ -91,6 +103,9 @@ async function resolveFile(params: {
       kind: "document",
       filename: attachment.filename,
       text: attachment.text ?? "",
+      // A file already in the attachment store is kept as extracted text, so
+      // there is no page geometry to measure columns from.
+      columns: null,
       attachmentId: attachment.id,
     };
   }
@@ -147,7 +162,53 @@ async function resolveFile(params: {
     return { text: "", pageCount: undefined as number | undefined };
   });
 
-  return { ok: true, kind: "document", filename, text: extracted.text ?? "", attachmentId: storedId };
+  return {
+    ok: true,
+    kind: "document",
+    filename,
+    text: extracted.text ?? "",
+    columns: await readColumnBands({ buffer, mimeType, filename }),
+    attachmentId: storedId,
+  };
+}
+
+/**
+ * RS-3: the Number / Qty / Price columns, measured from the page.
+ *
+ * The Mitchell producer welds a part number and its quantity into one text
+ * item, so the reflowed text cannot prove where one ends and the other
+ * begins. The header row's own x positions can. Reuses the extractor the
+ * citation-density lane already runs in this runtime — no second PDF stack.
+ *
+ * Failure here is never fatal: the sheet is built from the text either way,
+ * and the rows keep the caveat they carried before.
+ */
+async function readColumnBands(params: {
+  buffer: Buffer;
+  mimeType: string;
+  filename: string;
+}): Promise<MitchellColumnReading | null> {
+  if (!/pdf/i.test(params.mimeType) && !/\.pdf$/i.test(params.filename)) return null;
+  try {
+    const words = await extractPdfWords(new Uint8Array(params.buffer));
+    if (words.length === 0) return null;
+    return readMitchellColumns(
+      words.map((word) => ({
+        page: word.pageNumber,
+        x: word.x,
+        y: word.y,
+        width: word.width,
+        height: word.height,
+        text: word.text,
+      }))
+    );
+  } catch (error) {
+    console.error("[rekey] column-band extraction failed", {
+      filename: params.filename,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 async function readEmsFilesFromZip(buffer: Buffer): Promise<Array<{ filename: string; bytes: Uint8Array }>> {
@@ -187,7 +248,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const sheet = buildRekeySheet({ text: source.text, sourceFile: source.filename });
+    const sheet = buildRekeySheet({
+      text: source.text,
+      sourceFile: source.filename,
+      columns: source.kind === "document" ? source.columns : null,
+    });
     // Fail closed: an unreadable document yields a convincing-looking sheet of
     // fragments, and a sheet is a thing people key from.
     const quality = assessRekeySheet(sheet);
