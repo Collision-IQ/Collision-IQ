@@ -962,6 +962,12 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
   const rollUps = new Map(
     TOTALS_CATEGORIES.filter((entry) => entry.rollUpOf?.length).map((entry) => [entry.ems, entry.rollUpOf as string[]])
   );
+  // A code the vocabulary says something about says it here too, rather than
+  // falling to the generic line — including where what it has to say is that
+  // the code's meaning is not evidenced.
+  const codeNotes = new Map(
+    TOTALS_CATEGORIES.filter((entry) => entry.note).map((entry) => [entry.ems, entry.note as string])
+  );
   for (const [code, value] of keyedByCode) {
     if (seenCodes.has(code)) continue;
     const keyedValue = value.amount ?? value.hours;
@@ -988,7 +994,11 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
           }
         : rollUpOf
           ? { note: `The export's own roll-up of ${rollUpOf.join(", ")}; those are compared individually.` }
-          : { note: "The export carries this subtotal; the source's totals page prints no such category." }),
+          : {
+              note:
+                codeNotes.get(code) ??
+                "The export carries this subtotal; the source's totals page prints no such category.",
+            }),
     });
   }
   totals.push({

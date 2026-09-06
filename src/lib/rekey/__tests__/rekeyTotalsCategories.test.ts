@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import { normalizeEmsEstimate, readEmsBundle } from "../emsReader";
 import { keyedEstimateFromEms, totalsCategoryCode, verifyRekey } from "../rekeyVerification";
+import VOCABULARY from "../data/rekeyVocabulary.json";
 
 /**
  * Which EMS subtotal answers for a printed totals category.
@@ -68,6 +69,39 @@ describe("the export's roll-ups are named as roll-ups", () => {
   });
 });
 
+describe("EMS subtotal codes are named from evidence, or not named", () => {
+  it("names MASH from the reference implementation, which spells it out", () => {
+    // docs/reference/wo-rk1/ems.py writes the materials profile as
+    // ("MASH", "Shop", ...) beside ("MAPA", "Paint", ...) — the packet's own
+    // naming, not an expansion of the letters.
+    expect(totalsCategoryCode("Shop Materials")).toMatchObject({ code: "MASH", label: "Shop materials" });
+    expect(totalsCategoryCode("Shop Supplies").code).toBe("MASH");
+  });
+
+  it("names the cost codes the reference packet writes by name", () => {
+    // ems.py writes TTL_TYPE "OTAC" with the estimate's other costs, and the
+    // profile table declares TX_TOW_TY "OTTW" and TX_STOR_TY "OTST".
+    expect(totalsCategoryCode("Other Additional Costs").code).toBe("OTAC");
+    expect(totalsCategoryCode("Storage").code).toBe("OTST");
+    expect(totalsCategoryCode("Towing").code).toBe("OTTW");
+  });
+
+  it("says on the row where a code's expansion is read rather than documented", () => {
+    const source = (VOCABULARY.totalsCategories as Array<{ ems: string; note?: string }>).find(
+      (entry) => entry.ems === "MA2S"
+    );
+    expect(source?.note).toMatch(/read from the code family/);
+  });
+
+  it("does not name UPD, because nothing here says what it is", () => {
+    const source = (VOCABULARY.totalsCategories as Array<{ ems: string; label: string; note?: string }>).find(
+      (entry) => entry.ems === "UPD"
+    );
+    expect(source?.label).toBe("UPD");
+    expect(source?.note).toMatch(/no evidence for what it means/);
+  });
+});
+
 describe("the totals table on the real pair", () => {
   const sheet = buildRekeySheet({
     text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk1b-mitchell-text.txt"), "utf8"),
@@ -95,6 +129,21 @@ describe("the totals table on the real pair", () => {
     // differences together would count them twice without this.
     expect(row("PAT")?.note).toMatch(/rolls up new, other and SUBLET parts/);
     expect(row("PAS")?.comparable).toBe(true);
+  });
+
+  it("compares the shop-materials line both sides carry", () => {
+    // The source prints "Shop Materials $0.00" and the export carries MASH at
+    // $0.00 over 2.8 units. They were never connected, because the vocabulary
+    // carried a "SHOP" code that no export writes.
+    expect(row("MASH")).toMatchObject({ source: 0, keyed: 0, comparable: true, matches: true });
+    expect(verification.totals.some((entry) => entry.code === "SHOP")).toBe(false);
+  });
+
+  it("counts the shop-materials line in the materials roll-up", () => {
+    // MAT hours are 24.5 = 17.6 MAPA + 2.8 MASH + 2.0 MA2S + 2.1 MABL, and the
+    // second export agrees: 19.1 = 12.6 + 1.8 + 1.1 + 3.6. Leaving MASH out
+    // named the roll-up as the sum of three of its four parts.
+    expect(row("MAT")?.note).toMatch(/roll-up of MAPA, MASH, MA2S, MABL/);
   });
 
   it("names the export's roll-ups instead of printing bare codes", () => {
