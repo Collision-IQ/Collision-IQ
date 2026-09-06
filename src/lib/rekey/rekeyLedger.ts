@@ -1394,6 +1394,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       keyableRows: folded.filter((row) => row.keyable).length,
       nonKeyableRows,
       foldedRefinishRows,
+      noteLines: mitchellRead?.noteLines.length ?? 0,
       unmappedSections,
       unmappedOperations,
       vendorsAttached: folded.filter((row) => row.vendor !== null).length,

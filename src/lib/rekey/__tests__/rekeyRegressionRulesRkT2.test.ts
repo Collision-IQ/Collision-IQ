@@ -212,7 +212,10 @@ describe("RS-19 — section vocabulary", () => {
     expect(row(7)?.sectionCcc).toBe("QUARTER PANEL");
     expect(row(12)?.sectionCcc).toBe("QUARTER PANEL");
     expect(row(6)?.sectionCcc).toBe("REAR BODY & FLOOR");
-    expect(row(3)?.sectionCcc).toBe("GLASS");
+    // The print's section is "Windshield", and WINDSHIELD is the group name a
+    // real CCC EMS export carries for it (tests/fixtures/ems-rk1a). GLASS was
+    // this repository's assumed name for that group, not CCC's.
+    expect(row(3)?.sectionCcc).toBe("WINDSHIELD");
     expect(row(1)?.sectionCcc).toBe("WHEELS");
     expect(sheet.stats.unmappedSections).toBe(0);
   });
