@@ -46,6 +46,14 @@ type SectionGroupEntry = {
   group: string;
   aliases: string[];
   conditionalDiagnostics?: boolean;
+  /**
+   * A source section that spans more than one CCC group. The first entry whose
+   * keyword appears in the description wins; otherwise the section's own group
+   * stands. Mitchell's "Front Inner Structure" is the case this exists for:
+   * CCC keys its tie-bar and body-support lines under RADIATOR SUPPORT and its
+   * rail and apron lines under FRAME.
+   */
+  descriptionRouting?: Array<{ group: string; keywords: string[] }>;
 };
 
 const OPERATIONS = VOCABULARY.operations as OperationEntry[];
@@ -317,7 +325,8 @@ export function resolveSectionGroup(params: {
     if (entry.conditionalDiagnostics && isDiagnosticsOperation(params.description)) {
       return { group: "VEHICLE DIAGNOSTICS", mapped: true, sourceSection: section };
     }
-    return { group: entry.group, mapped: true, sourceSection: section };
+    const routed = routeByDescription(entry, params.description);
+    return { group: routed ?? entry.group, mapped: true, sourceSection: section };
   }
 
   // An exact match against a CCC group name is identity, not inference.
@@ -325,6 +334,19 @@ export function resolveSectionGroup(params: {
   if (identity) return { group: identity, mapped: true, sourceSection: section };
 
   return { group: UNMAPPED, mapped: false, sourceSection: section };
+}
+
+/** The routed group for a description inside a section that spans two groups. */
+function routeByDescription(entry: SectionGroupEntry, description: string | null | undefined): string | null {
+  if (!entry.descriptionRouting?.length) return null;
+  const padded = ` ${normalizeVocabularyText(description)} `;
+  if (padded.trim() === "") return null;
+  for (const route of entry.descriptionRouting) {
+    if (route.keywords.some((keyword) => padded.includes(` ${normalizeVocabularyText(keyword)} `))) {
+      return route.group;
+    }
+  }
+  return null;
 }
 
 /** Scan / calibration / reset work, which CCC groups under VEHICLE DIAGNOSTICS. */

@@ -82,14 +82,26 @@
     { "group": "ROOF", "aliases": ["ROOF"] },
     { "group": "DECK LID", "aliases": ["DECK LID", "TRUNK LID", "LUGGAGE LID"] },
     { "group": "TAILGATE", "aliases": ["TAILGATE", "LIFTGATE", "LIFT GATE"] },
-    { "group": "FRAME", "aliases": ["FRONT INNER STRUCTURE", "INNER STRUCTURE", "STRUCTURE", "FRAME"] },
+    { "group": "INFORMATION LABELS", "aliases": ["INFORMATION LABELS", "INFORMATION LABEL", "INFORM LABELS", "INFORM LABEL"] },
+    { "group": "MODEL IDENTIFICATION", "aliases": ["MODEL IDENTIFICATION", "VEHICLE IDENTIFICATION"] },
+    { "group": "COWL", "aliases": ["COWL", "COWL PANEL", "COWL GRILLE"] },
+    { "group": "RADIATOR SUPPORT", "aliases": ["RADIATOR SUPPORT", "FRONT INNER STRUCTURE", "INNER STRUCTURE"],
+      "descriptionRouting": [
+        { "group": "FRAME",
+          "keywords": ["FRAME RAIL", "FRONT RAIL", "REAR RAIL", "SIDE RAIL", "RAIL", "APRON", "STRUT TOWER", "SHOCK TOWER", "CROSSMEMBER", "CROSS MEMBER"] }
+      ] },
+    { "group": "FRAME", "aliases": ["STRUCTURE", "FRAME"] },
     { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["BODY UNDER COVERS", "UNDER COVERS", "SPECIAL MANUAL ENTRY", "SPECIAL"] },
     { "group": "MISCELLANEOUS OPERATIONS", "conditionalDiagnostics": true, "aliases": ["ADDITIONAL COSTS MATERIALS", "ADDITIONAL COSTS", "ADDITIONAL COST", "ADDITIONAL OPERATIONS", "ADDITIONAL OPERATION", "SPECIAL MANUAL ENTRY", "MANUAL ENTRY", "MISCELLANEOUS", "MISCELLANEOUS OPERATIONS"] }
   ],
 
   "knownCccGroups": [
+    "MODEL IDENTIFICATION",
+    "INFORMATION LABELS",
     "FRONT BUMPER & GRILLE",
     "FRONT LAMPS",
+    "RADIATOR SUPPORT",
+    "COWL",
     "HOOD",
     "FENDER",
     "COOLING SYSTEM",
@@ -119,8 +131,11 @@
   ],
 
   "groupOrder": [
+    "MODEL IDENTIFICATION",
+    "INFORMATION LABELS",
     "FRONT BUMPER & GRILLE",
     "FRONT LAMPS",
+    "RADIATOR SUPPORT",
     "COOLING SYSTEM",
     "ENGINE / TRANSAXLE",
     "EXHAUST SYSTEM",
@@ -129,6 +144,7 @@
     "FRONT SUSPENSION",
     "STEERING",
     "FRAME",
+    "COWL",
     "GLASS",
     "ROOF",
     "FRONT DOOR",
