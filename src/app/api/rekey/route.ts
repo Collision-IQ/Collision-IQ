@@ -5,7 +5,7 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canUseProIntegrations, PRO_FEATURE_REQUIRED_MESSAGE } from "@/lib/billing/proFeatures";
 import { extractPreviewDataFromBuffer } from "@/lib/attachments/extractPreviewData";
 import { extractPdfWords } from "@/lib/reports/citationDensityRowAnchors";
-import { readMitchellColumns, type MitchellColumnReading } from "@/lib/rekey/mitchellColumnBands";
+import { readEstimateColumns, type MitchellColumnReading } from "@/lib/rekey/mitchellColumnBands";
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
@@ -175,9 +175,10 @@ async function resolveFile(params: {
 /**
  * RS-3: the Number / Qty / Price columns, measured from the page.
  *
- * The Mitchell producer welds a part number and its quantity into one text
- * item, so the reflowed text cannot prove where one ends and the other
- * begins. The header row's own x positions can. Reuses the extractor the
+ * Both prints weld a row's columns together in reflowed text — Mitchell a
+ * part number onto its quantity, CCC a quantity onto its price — so the
+ * text cannot prove where one column ends and the next begins. The header
+ * row's own x positions can, on either layout. Reuses the extractor the
  * citation-density lane already runs in this runtime — no second PDF stack.
  *
  * Failure here is never fatal: the sheet is built from the text either way,
@@ -192,7 +193,7 @@ async function readColumnBands(params: {
   try {
     const words = await extractPdfWords(new Uint8Array(params.buffer));
     if (words.length === 0) return null;
-    return readMitchellColumns(
+    return readEstimateColumns(
       words.map((word) => ({
         page: word.pageNumber,
         x: word.x,

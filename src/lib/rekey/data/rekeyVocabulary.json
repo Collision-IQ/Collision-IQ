@@ -102,6 +102,9 @@
   ],
 
   "$knownCccGroupsComment": "The CCC group names, read off real CCC documents rather than assumed: the group headings a CCC print heads its line bands with, and the LINE_REF=0 heading rows a CCC EMS export carries in its .lin table. Both sources are in tests/fixtures. Groups this repository has not yet seen in a real CCC document keep their place in the order but are not evidence of CCC's own wording.",
+  "$cccLaborMarkersComment": "The letter a CCC print puts beside a line's hours to say which labor type they are. Taken from the abbreviation legend the estimate prints on its own last page: B=BODY LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL.",
+  "cccLaborMarkers": { "B": "LAB", "D": "LAD", "E": "LAE", "F": "LAF", "G": "LAG", "M": "LAM", "P": "LAR", "S": "LAS" },
+
   "knownCccGroups": [
     "MODEL IDENTIFICATION",
     "UPDATE NOTES",
