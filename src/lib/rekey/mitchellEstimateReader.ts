@@ -843,9 +843,28 @@ export interface MitchellTotals {
   grandTotal: number | null;
   taxLanes: Array<{ label: string; amount: number }>;
   deductible: number | null;
+  /** RS-12: the deductible each supplement of a supplemented estimate
+   *  carried, when the print's Global Changes block states them. Empty when
+   *  the document is not a supplement or prints no such block. */
+  deductibleChanges: Array<{ tag: string; amount: number }>;
 }
 
 const LABOR_CATEGORY = /^([A-Za-z]+)Labor(?![A-Za-z])/i;
+
+/**
+ * Whether a totals line's LABEL is the deductible itself.
+ *
+ * The print doubles every label, so the label is "DeductibleDeductible"; and
+ * "Deductible Reduction Credit" is a different row that starts with the same
+ * word. The label is whatever precedes the first value, with the doubling
+ * collapsed, and it has to be the word on its own.
+ */
+function isDeductibleLabel(line: string): boolean {
+  const label = (/^[A-Za-z]+/.exec(line)?.[0] ?? "").toLowerCase();
+  if (!label) return false;
+  const half = label.slice(0, label.length / 2);
+  return label === "deductible" || (label === `${half}${half}` && half === "deductible");
+}
 
 function money(value: string): number {
   return Number(value.replace(/[$,]/g, ""));
@@ -878,9 +897,14 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
     grandTotal: null,
     taxLanes: [],
     deductible: null,
+    deductibleChanges: [],
   };
   let materialsRate: number | null = null;
   let seenTotalsBlock = false;
+  /** A supplemented print restates the adjustments per supplement under a
+   *  "Global Changes" heading whose own line names the supplement columns. */
+  let inGlobalChanges = false;
+  let supplementTags: string[] = [];
   // A cost label that wrapped onto its own line(s) ahead of its values.
   let pendingLabel: string | null = null;
 
@@ -890,6 +914,15 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
       continue;
     }
     if (!seenTotalsBlock) continue;
+
+    const globalChanges = /^globalchanges/i.exec(line);
+    if (globalChanges) {
+      inGlobalChanges = true;
+      supplementTags = dedupeConsecutive(line.slice(globalChanges[0].length).match(/S\d+/g) ?? []);
+      continue;
+    }
+    // Any other block heading closes it. A heading is a line with no values.
+    if (inGlobalChanges && /^[a-z]/i.test(line) && !/\$|\d/.test(line)) inGlobalChanges = false;
 
     const values = dedupeConsecutive(line.match(/\$[\d,]+\.\d{2}|(?<![\d.$])\d{1,3}\.\d(?![\d%])/g) ?? []);
 
@@ -964,8 +997,31 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
       totals.grandTotal = money(values[0]);
       continue;
     }
-    if (/^deductible/i.test(line) && values.length > 0) {
-      totals.deductible = money(values[0]);
+    // RS-12: the deductible is the ADJUSTMENTS row whose label is exactly
+    // "Deductible". Matching the label as a prefix read "Deductible Reduction
+    // Credit" as the deductible, and because that row prints after the
+    // Adjustments block it overwrote the real figure: an estimate carrying a
+    // $500.00 deductible reported $0.00, and the customer-responsibility
+    // number an estimator keys from was short by the whole deductible.
+    // A waived deductible prints the word, not an amount, so it carries no
+    // value for the numeric branch below to find. It is still a stated
+    // deductible of zero, and the difference between "waived" and "the print
+    // does not say" is the difference between keying zero and asking.
+    if (!inGlobalChanges && /^deductible(?:waived)+$/i.test(line)) {
+      if (totals.deductible === null) totals.deductible = 0;
+      continue;
+    }
+    if (isDeductibleLabel(line) && values.length > 0) {
+      if (inGlobalChanges) {
+        // The Global Changes block states the deductible PER SUPPLEMENT,
+        // which is history, not the figure to key.
+        totals.deductibleChanges = values.map((value, index) => ({
+          tag: supplementTags[index] ?? `S${index + 1}`,
+          amount: money(value),
+        }));
+      } else if (totals.deductible === null) {
+        totals.deductible = money(values[0]);
+      }
       continue;
     }
     if (/^taxable\$/i.test(line) && values.length > 0) {

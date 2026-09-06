@@ -340,6 +340,16 @@ export function buildProfileBlock(params: {
   totals: RekeyExpectedTotals | null;
   /** Read off the totals block when that layout prints one there. */
   deductible?: number | null;
+  /** RS-12: the deductible each supplement carried, when the print states
+   *  them. A supplement that changes it moves customer responsibility by the
+   *  whole difference, which is not visible from the current figure alone. */
+  deductibleChanges?: Array<{ tag: string; amount: number }>;
+  /** True when a layout-aware totals parser has already answered for the
+   *  deductible. The whole-text fallback cannot tell an adjustments row from
+   *  a per-supplement history row, so on such a layout it must not run: on a
+   *  supplement whose deductible is waived it found the ORIGINAL $1,000.00
+   *  further down the page and printed it as the figure to key. */
+  deductibleFromTotals?: boolean;
   /** Taxed sublet-type part dollars on the rows, the base the platform marks
    *  up when it prints a parts adjustment. */
   subletPartsTotal?: number;
@@ -474,15 +484,30 @@ export function buildProfileBlock(params: {
     });
   }
 
-  const deductible = params.deductible ?? readDeductible(text);
+  const deductible = params.deductible ?? (params.deductibleFromTotals ? null : readDeductible(text));
+  // A supplement that changed the deductible is stated on the field itself.
+  // The figure to key is the current one; the change is what an appraiser
+  // has to see, because it moves customer responsibility by the difference.
+  const changes = params.deductibleChanges ?? [];
+  const changed = changes.length > 1 && changes.some((entry) => entry.amount !== changes[0].amount);
+  const changeNote = changed
+    ? `Changed by supplement: ${changes.map((entry) => `${entry.tag} ${money(entry.amount)}`).join(" -> ")}. Confirm which applies before keying.`
+    : null;
   fields.push(
     deductible === null
-      ? { field: "Deductible", value: null, display: "not printed", basis: "unavailable" }
+      ? {
+          field: "Deductible",
+          value: null,
+          display: "not printed",
+          basis: "unavailable",
+          ...(changeNote ? { note: changeNote } : {}),
+        }
       : {
           field: "Deductible",
           value: deductible,
           display: deductible === 0 ? "Waived / $0.00" : money(deductible),
           basis: "printed",
+          ...(changeNote ? { note: changeNote } : {}),
         }
   );
 
@@ -1326,10 +1351,13 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     ? [...mitchellRead.unreadable]
     : findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout })
   ).sort((a, b) => a - b);
+  const mitchellTotals = mitchellLayout ? parseMitchellEstimateTotals(text) : null;
   const profile = buildProfileBlock({
     text,
     totals: expectedTotals,
-    deductible: mitchellLayout ? (parseMitchellEstimateTotals(text)?.deductible ?? null) : null,
+    deductible: mitchellLayout ? (mitchellTotals?.deductible ?? null) : null,
+    deductibleChanges: mitchellTotals?.deductibleChanges ?? [],
+    deductibleFromTotals: mitchellLayout,
     subletPartsTotal: round2(
       folded
         .filter((row) => row.keyable && row.misc === null && row.partTypeCcc === "Sublet")
