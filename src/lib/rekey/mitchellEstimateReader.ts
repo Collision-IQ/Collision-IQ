@@ -733,6 +733,10 @@ export interface MitchellEstimateRead {
   rows: EstimateDeltaRow[];
   /** Coded note rows, keyed to the line they follow (RK-05). */
   notes: Map<number, string[]>;
+  /** RK-09: the line numbers the print gave to note blocks. They are not
+   *  keying rows, but they ARE printed lines, so the sheet's line accounting
+   *  cannot close without them. */
+  noteLines: number[];
   /** Printed line numbers whose block could not be read into a row. */
   unreadable: number[];
 }
@@ -748,6 +752,7 @@ export function readMitchellEstimate(text: string): MitchellEstimateRead {
   const { blocks, openingHeading, hasCegColumn } = readMitchellBlocks(text);
   const rows: EstimateDeltaRow[] = [];
   const notes = new Map<number, string[]>();
+  const noteLines: number[] = [];
   const unreadable: number[] = [];
   let section: string | null = openingHeading;
   let lastRowLine: number | null = null;
@@ -761,6 +766,7 @@ export function readMitchellEstimate(text: string): MitchellEstimateRead {
       const heading = trailingKnownHeading(block);
       const prose = (heading ? block.lines.slice(0, -1) : block.lines).join(" ").replace(/\s+/g, " ").trim();
       if (prose && lastRowLine !== null) notes.set(lastRowLine, [...(notes.get(lastRowLine) ?? []), prose]);
+      if (block.lineNumber !== null) noteLines.push(block.lineNumber);
       if (heading) section = heading;
       continue;
     }
@@ -777,7 +783,7 @@ export function readMitchellEstimate(text: string): MitchellEstimateRead {
       section = parsed.trailing;
     }
   }
-  return { rows, notes, unreadable };
+  return { rows, notes, noteLines, unreadable };
 }
 
 export function parseMitchellEstimateRows(text: string): EstimateDeltaRow[] {

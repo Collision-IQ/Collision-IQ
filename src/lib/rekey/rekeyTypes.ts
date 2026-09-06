@@ -197,6 +197,9 @@ export interface RekeySheet {
     keyableRows: number;
     nonKeyableRows: number;
     foldedRefinishRows: number;
+    /** RK-09: printed lines that carry a note to the person keying, attached
+     *  to the row above them. Counted so the line accounting can close. */
+    noteLines: number;
     unmappedSections: number;
     unmappedOperations: number;
     vendorsAttached: number;

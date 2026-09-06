@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { assessRekeySheet, buildRekeySheet } from "../rekeyLedger";
-import { readEmsBundle } from "../emsReader";
+import { parseDbaseTable, readEmsBundle } from "../emsReader";
 import { keyedEstimateFromEms, verifyRekey } from "../rekeyVerification";
+import { buildRekeySheetText } from "../rekeyReportBuilder";
 
 /**
  * F-RK1b: the real Mitchell SUPPLEMENT (RO 21011) whose CCC EMS export is
@@ -62,6 +63,68 @@ describe("F-RK1b — a real supplement print", () => {
     // operation and the row lost its operation.
     expect(row(11)?.operationCcc).toBe("R&I");
     expect(sheet.stats.unmappedOperations).toBe(0);
+  });
+});
+
+describe("F-RK1b — every printed line is accounted for (RK-09)", () => {
+  it("closes the line accounting against the highest line the print numbers", () => {
+    const printed = Math.max(
+      ...sheet.rows.map((candidate) => candidate.sourceLine ?? 0),
+      ...sheet.rows.flatMap((candidate) =>
+        candidate.notes.flatMap((note) => [...note.matchAll(/source line (\d+)/g)].map((match) => Number(match[1])))
+      )
+    );
+    expect(printed).toBe(88);
+    const { keyableRows, foldedRefinishRows, noteLines, nonKeyableRows } = sheet.stats;
+    expect(keyableRows + foldedRefinishRows + noteLines + nonKeyableRows).toBe(printed);
+    expect([keyableRows, foldedRefinishRows, noteLines, nonKeyableRows]).toEqual([76, 7, 4, 1]);
+    expect(sheet.reconciliation.unreadLines).toEqual([]);
+  });
+
+  it("prints the equation on the sheet rather than a bare row count", () => {
+    expect(buildRekeySheetText(sheet)).toContain(
+      "Read 88 printed lines: 76 keying rows + 7 refinish lines folded into their part line + 4 note lines attached to the row above + 1 marked do-not-key = 88."
+    );
+  });
+
+  it("reaches the printed gross from its own rows", () => {
+    expect(sheet.derivedTotals?.check).toMatchObject({ printedGrandTotal: 11262.38, delta: 0, closes: true });
+  });
+});
+
+describe("F-RK1b — the A/C section takes the group CCC gave it on this claim", () => {
+  /**
+   * The CCC EMS export for this same claim carries its group headings as rows
+   * in the .lin table (LINE_REF "0", the group name in LINE_DESC), so the
+   * right CCC group for a Mitchell section is read from the CCC document for
+   * the very estimate the supplement belongs to — not assumed.
+   */
+  const groupsInTheCccExport = () => {
+    const bytes = new Uint8Array(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ems-rk1a/ab7f6e93.lin")));
+    const table = parseDbaseTable("ab7f6e93.lin", bytes);
+    return (table?.records ?? [])
+      .filter((record) => String(record.LINE_REF ?? "").trim() === "0")
+      .map((record) => String(record.LINE_DESC ?? "").trim())
+      .filter(Boolean);
+  };
+
+  it("uses the group name the CCC export prints, not an assumed one", () => {
+    const groups = groupsInTheCccExport();
+    expect(groups).toContain("AIR CONDITIONER & HEATER");
+    // "COOLING SYSTEM" and "GLASS" were this repository's guesses at two of
+    // these names; the export shows CCC's own.
+    expect(groups).toContain("COOLING");
+    expect(groups).toContain("WINDSHIELD");
+
+    const condenser = row(33);
+    expect(condenser?.sectionSource).toBe("A/C Heater Ventilation");
+    expect(condenser?.sectionCcc).toBe("AIR CONDITIONER & HEATER");
+    expect(groups).toContain(condenser?.sectionCcc);
+  });
+
+  it("leaves nothing on this document without a group", () => {
+    expect(sheet.stats.unmappedSections).toBe(0);
+    expect(sheet.rows.some((candidate) => candidate.flags.includes("group: verify"))).toBe(false);
   });
 });
 

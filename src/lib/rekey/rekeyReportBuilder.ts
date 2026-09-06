@@ -185,14 +185,19 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
     lines.push("");
   }
 
+  const printedLines = sheet.stats.sourceRows + sheet.stats.noteLines;
   lines.push(
-    `Read ${sheet.stats.sourceRows} source line${sheet.stats.sourceRows === 1 ? "" : "s"} into ${
-      sheet.stats.keyableRows
-    } keying row${sheet.stats.keyableRows === 1 ? "" : "s"}, ${sheet.stats.foldedRefinishRows} refinish line${
+    `Read ${printedLines} printed line${printedLines === 1 ? "" : "s"}: ${sheet.stats.keyableRows} keying row${
+      sheet.stats.keyableRows === 1 ? "" : "s"
+    } + ${sheet.stats.foldedRefinishRows} refinish line${
       sheet.stats.foldedRefinishRows === 1 ? "" : "s"
-    } folded into their part line, ${sheet.stats.nonKeyableRows} row${
-      sheet.stats.nonKeyableRows === 1 ? "" : "s"
-    } marked do-not-key.`
+    } folded into their part line${
+      sheet.stats.noteLines === 0
+        ? ""
+        : ` + ${sheet.stats.noteLines} note line${sheet.stats.noteLines === 1 ? "" : "s"} attached to the row above`
+    } + ${sheet.stats.nonKeyableRows} marked do-not-key = ${
+      sheet.stats.keyableRows + sheet.stats.foldedRefinishRows + sheet.stats.noteLines + sheet.stats.nonKeyableRows
+    }.`
   );
   // Where the part number and quantity came from is the difference between a
   // number the estimator can key and one he has to check against the print.
