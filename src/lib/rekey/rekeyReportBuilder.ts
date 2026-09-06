@@ -194,6 +194,15 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
       sheet.stats.nonKeyableRows === 1 ? "" : "s"
     } marked do-not-key.`
   );
+  // Where the part number and quantity came from is the difference between a
+  // number the estimator can key and one he has to check against the print.
+  if (sheet.stats.columnsMeasured > 0) {
+    lines.push(
+      `Part number and quantity measured from the page's own column bands on ${sheet.stats.columnsMeasured} row${
+        sheet.stats.columnsMeasured === 1 ? "" : "s"
+      }.`
+    );
+  }
   return lines.join("\n");
 }
 

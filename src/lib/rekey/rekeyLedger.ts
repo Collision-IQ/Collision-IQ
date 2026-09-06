@@ -26,6 +26,7 @@ import {
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
+import type { MitchellColumnReading } from "./mitchellColumnBands";
 import {
   looksLikeMitchellLayout,
   parseMitchellEstimateTotals,
@@ -1003,6 +1004,10 @@ export function assessRekeySheet(sheet: RekeySheet): RekeySheetQuality {
 export interface BuildRekeySheetParams {
   text: string;
   sourceFile: string;
+  /** RS-3: the Number / Qty / Price columns read from the page's own measured
+   *  header bands. Optional — a caller with no page geometry (a text-only
+   *  source, a fixture) gets exactly the behaviour it got before. */
+  columns?: MitchellColumnReading | null;
 }
 
 export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
@@ -1047,9 +1052,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   /** Rows whose quantity the print welded onto the part number — a short
    *  flag rather than a note, because it is the print's normal shape. */
   const weldedQtyRows = new Set<string>();
+  /** Rows the page's own column bands settled, so the welded-quantity caveat
+   *  no longer applies to them. */
+  const columnReadRows = new Set<string>();
   const finishFlags = (row: RekeyLedgerRow) => {
     row.flags = flagsFor(row);
-    if (weldedQtyRows.has(row.id)) row.flags.push("qty welded: verify");
+    if (weldedQtyRows.has(row.id) && !columnReadRows.has(row.id)) row.flags.push("qty welded: verify");
   };
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
@@ -1168,6 +1176,31 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       } else {
         ledgerRow.notes.push(`Verify: ${text.replace(/\s*—\s*verify$/i, "")}.`);
       }
+    }
+
+    // RS-3: where the page's own column bands read this line, they are the
+    // authority on the part number, its quantity and its price — measured
+    // positions rather than a split of a string the producer welded together.
+    // A band that read nothing never erases what the text reader found.
+    const column = row.lineNumber === null ? undefined : params.columns?.rows.get(row.lineNumber);
+    if (column) {
+      if (column.partNumber !== null) {
+        ledgerRow.partNumber = column.partNumber;
+        ledgerRow.partNumberSource = column.partNumber;
+      }
+      // A sublet or manual charge books its money as misc, not as a part
+      // price; the band prints the same dollars in the Total Price column and
+      // must not be written over the top of it as a second copy.
+      if (ledgerRow.misc === null) {
+        if (column.qty !== null) ledgerRow.qty = column.qty;
+        // The column prints the EXTENDED price; the sheet keys the unit price.
+        if (column.price !== null && column.price > 0) {
+          ledgerRow.price = round2(column.price / (column.qty ?? 1));
+        }
+      }
+      if (column.taxable !== null) ledgerRow.taxable = column.taxable;
+      // Measured columns settle what the welded string could not.
+      if (column.qty !== null || column.partNumber !== null) columnReadRows.add(ledgerRow.id);
     }
 
     // Paint materials are a PROFILE setting, not a keyed line — keying them as
@@ -1364,6 +1397,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       unmappedSections,
       unmappedOperations,
       vendorsAttached: folded.filter((row) => row.vendor !== null).length,
+      columnsMeasured: folded.filter((row) => columnReadRows.has(row.id)).length,
     },
     warnings,
   };
