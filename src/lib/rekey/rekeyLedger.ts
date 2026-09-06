@@ -263,6 +263,11 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   }
   if (row.operationCcc === "Manual") flags.push("manual line");
   if (row.partTypeCcc === UNMAPPED && row.partNumber) flags.push("part type: verify");
+  // A stated part type the line prints no number for: the row says so on its
+  // face rather than only in the note, because it changes what gets keyed.
+  if (row.partTypeCcc === "None" && row.partTypeSource && !row.partNumber && row.price !== null) {
+    flags.push("part number: not printed");
+  }
   return flags;
 }
 
@@ -1148,6 +1153,23 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       rawText: row.rawText,
       hasPartNumber: Boolean(partNumberSource),
     });
+    // A part type you ORDER BY NUMBER, on a line that prints no number, is not
+    // a part anyone can key. The word the source prints is kept as the source
+    // label — that is what it says — but the CCC column states no part type
+    // and the export column no parts code, because neither is supported.
+    //
+    // Measured on one claim written in BOTH systems: the Mitchell print bills
+    // "Interior protection kit ... New 1 $3.22" with no part number, and the
+    // CCC estimate of that same claim bills the same $3.22 with NO part type
+    // at all — a priced line, counted in both platforms' parts totals. Ten
+    // more of the shop's charges match across the two documents dollar for
+    // dollar the same way: set back wiring $2.50, raw plastic primer $15.00,
+    // flex additive $12.00, cavity wax $15.13 twice, waste removal $5.00
+    // twice. Calling them OEM put a part type on lines that have no part, and
+    // an OEM line with no number is not keyable in CCC at all. The money is
+    // untouched: the source books these dollars in its parts total, so the
+    // rows keep their price and the sheet closes where it closed before.
+    const numberlessPart = partType.orderedByNumber && !partNumberSource;
     const costOnly = isCostOnlyRow(row);
     const taxable = /\bT(?:\s+\[[^\]]*\])*\s*$/.test(row.rawText ?? "") ? true : null;
     const billsTime = row.labor !== null || row.laborIncluded || row.paint !== null || row.paintIncluded;
@@ -1191,8 +1213,8 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       operationMapped: operation.mapped,
       laborOpCode: operation.laborOpCode,
       partTypeSource: partType.sourceLabel,
-      partTypeCcc: partNumberSource || partType.mapped ? partType.ccc : "None",
-      partTypeEms: partType.ems,
+      partTypeCcc: numberlessPart ? "None" : partNumberSource || partType.mapped ? partType.ccc : "None",
+      partTypeEms: numberlessPart ? null : partType.ems,
       partNumber: partNumberSource ? partNumberSource.replace(/\s+/g, "") : null,
       partNumberSource,
       vendor: partNumberSource
@@ -1219,6 +1241,11 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     if (taxedSubletPart) {
       ledgerRow.notes.push(
         "Taxed sublet: key as a Sublet-type part line, not a sublet labor entry — both platforms book taxed sublet dollars under parts."
+      );
+    }
+    if (numberlessPart) {
+      ledgerRow.notes.push(
+        `The source prints the part type "${partType.sourceLabel ?? ""}" but no part number, so there is no part to order: key the amount as a charge on the line, with no part type. The source counts these dollars in its parts total and so does the other platform.`
       );
     }
     // The reader carries what it could not read cleanly as a bracketed marker

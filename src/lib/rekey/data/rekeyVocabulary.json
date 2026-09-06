@@ -44,11 +44,11 @@
   ],
 
   "partTypes": [
-    { "ccc": "OEM", "ems": "PAN", "aliases": ["NEW OEM", "OEM", "NEW"] },
-    { "ccc": "CAPA A/M", "ems": "PAC", "aliases": ["AFTERMARKET CERTIFIED", "CERTIFIED AFTERMARKET", "CAPA"] },
-    { "ccc": "A/M", "ems": "PAA", "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
-    { "ccc": "LKQ", "ems": "PAL", "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
-    { "ccc": "Recond", "ems": "PAR", "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
+    { "ccc": "OEM", "ems": "PAN", "orderedByNumber": true, "aliases": ["NEW OEM", "OEM", "NEW"] },
+    { "ccc": "CAPA A/M", "ems": "PAC", "orderedByNumber": true, "aliases": ["AFTERMARKET CERTIFIED", "CERTIFIED AFTERMARKET", "CAPA"] },
+    { "ccc": "A/M", "ems": "PAA", "orderedByNumber": true, "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
+    { "ccc": "LKQ", "ems": "PAL", "orderedByNumber": true, "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
+    { "ccc": "Recond", "ems": "PAR", "orderedByNumber": true, "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
     { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"] },
     { "ccc": "Sublet", "ems": "PAS", "miscOnly": true, "aliases": ["SUBLET"] }
   ],

@@ -40,6 +40,8 @@ type PartTypeEntry = {
   aliases: string[];
   laborOnly?: boolean;
   miscOnly?: boolean;
+  /** A part you order by number: OEM, aftermarket, recycled, reconditioned. */
+  orderedByNumber?: boolean;
 };
 
 type SectionGroupEntry = {
@@ -205,6 +207,10 @@ export interface ResolvedPartType {
   laborOnly: boolean;
   /** Sublet — booked as a misc amount, never as a part. */
   miscOnly: boolean;
+  /** A type you ORDER BY NUMBER — OEM, aftermarket, recycled, reconditioned.
+   *  A line carrying one of these but no part number has no part to key; the
+   *  ledger is where that is decided, so this stays a fact about the TYPE. */
+  orderedByNumber: boolean;
 }
 
 /**
@@ -243,6 +249,7 @@ export function resolvePartType(params: {
       mapped: true,
       laborOnly: entry.laborOnly === true,
       miscOnly: entry.miscOnly === true,
+      orderedByNumber: entry.orderedByNumber === true,
     };
   }
 
@@ -255,10 +262,19 @@ export function resolvePartType(params: {
       mapped: Boolean(oem),
       laborOnly: false,
       miscOnly: false,
+      orderedByNumber: true,
     };
   }
 
-  return { ccc: UNMAPPED, ems: null, sourceLabel: null, mapped: false, laborOnly: false, miscOnly: false };
+  return {
+    ccc: UNMAPPED,
+    ems: null,
+    sourceLabel: null,
+    mapped: false,
+    laborOnly: false,
+    miscOnly: false,
+    orderedByNumber: false,
+  };
 }
 
 /**

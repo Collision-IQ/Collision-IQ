@@ -122,19 +122,79 @@ describe("RS-11 — a taxed sublet-type line is a part, an untaxed one is labor"
 });
 
 describe("RS-10 — every part type the prints use resolves to a CCC and an EMS code", () => {
-  it("maps all four types on one document and all six on the other", () => {
-    const types = (text: string) =>
-      [...new Set(buildRekeySheet({ text, sourceFile: "x.pdf" }).rows.map((row) => `${row.partTypeSource}|${row.partTypeCcc}|${row.partTypeEms}`))]
-        .filter((entry) => !entry.startsWith("null|"))
-        .sort();
-    expect(types(FRK2)).toEqual(["EXISTING|None|null", "NEW|OEM|PAN", "SUBLET|Sublet|PAS"]);
+  const types = (text: string) =>
+    [...new Set(buildRekeySheet({ text, sourceFile: "x.pdf" }).rows.map((row) => `${row.partTypeSource}|${row.partTypeCcc}|${row.partTypeEms}`))]
+      .filter((entry) => !entry.startsWith("null|"))
+      .sort();
+
+  it("maps every type these documents print", () => {
+    // "NEW|None|null" is a stated type on a line that prints no part number —
+    // see the block below. Every type printed WITH a number still resolves to
+    // its CCC name and its EMS code.
+    expect(types(FRK2)).toEqual(["EXISTING|None|null", "NEW|None|null", "NEW|OEM|PAN", "SUBLET|Sublet|PAS"]);
     expect(types(FRK1B)).toEqual([
       "AFTERMARKET CERTIFIED|CAPA A/M|PAC",
       "AFTERMARKET NEW|A/M|PAA",
+      "AFTERMARKET NEW|None|null",
       "EXISTING|None|null",
+      "NEW|None|null",
       "NEW|OEM|PAN",
       "QUAL RECYCLED PART|LKQ|PAL",
       "SUBLET|Sublet|PAS",
     ]);
+  });
+});
+
+/**
+ * A part type you order by NUMBER, on a line that prints no number.
+ *
+ * The evidence is one claim written in BOTH systems. The Mitchell print bills
+ * "Interior protection kit ... New 1 $3.22" with no part number; the CCC
+ * estimate of that same claim bills the same $3.22 with NO part type at all,
+ * and both platforms count it in their parts totals. Ten more of the shop's
+ * charges match dollar for dollar across the two documents the same way.
+ * Reporting them as OEM parts put a part type on lines that have no part, and
+ * an OEM line with no number cannot be keyed in CCC at all.
+ */
+describe("a stated part type with no part number is not a part to order", () => {
+  const sheet = buildRekeySheet({ text: FRK2, sourceFile: "frk2.pdf" });
+  const row = (line: number) => sheet.rows.find((entry) => entry.sourceLine === line);
+
+  it("keeps the printed word and withholds the part type it cannot support", () => {
+    const kit = row(86);
+    expect(kit?.descriptionSource).toMatch(/Interior protection kit/i);
+    expect(kit).toMatchObject({ partTypeSource: "NEW", partTypeCcc: "None", partTypeEms: null, partNumber: null });
+    expect(kit?.flags).toContain("part number: not printed");
+    expect(kit?.notes.join(" ")).toMatch(/no part number, so there is no part to order/);
+  });
+
+  it("leaves the money exactly where the source books it", () => {
+    // The source counts these dollars in its printed parts total, so the row
+    // keeps its price and the sheet still closes to the cent. Moving them to
+    // a charge would have broken the parts row by $119.48.
+    expect(row(86)?.price).toBe(3.22);
+    expect(row(86)?.misc).toBeNull();
+    expect(sheet.reconciliation.rows.find((entry) => entry.category === "Parts")).toMatchObject({
+      printed: 7023.83,
+      derived: 7023.83,
+      closes: true,
+    });
+    expect(sheet.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
+  });
+
+  it("touches no line that prints a number to order", () => {
+    // The grille is a real OEM part on the same document, printed with its
+    // number; it keeps its type and its export code.
+    const grille = sheet.rows.find((entry) => entry.partNumber === "53101-06650");
+    expect(grille).toMatchObject({ partTypeCcc: "OEM", partTypeEms: "PAN" });
+    expect(sheet.rows.filter((entry) => entry.flags.includes("part number: not printed")).every((entry) => entry.partNumber === null)).toBe(true);
+  });
+
+  it("applies to any type ordered by number, not only OEM", () => {
+    // F-RK1b bills refrigerant as an aftermarket line with no part number.
+    const frk1b = buildRekeySheet({ text: FRK1B, sourceFile: "frk1b.pdf" });
+    const freon = frk1b.rows.find((entry) => /FREON/i.test(entry.descriptionSource));
+    expect(freon).toMatchObject({ partTypeSource: "AFTERMARKET NEW", partTypeCcc: "None", partTypeEms: null });
+    expect(frk1b.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
   });
 });
