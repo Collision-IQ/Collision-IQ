@@ -211,6 +211,12 @@ export interface EmsLine {
   price: number | null;
   labor: Array<{ type: string | null; hours: number | null; included: boolean | null; opCode: string | null }>;
   misc: { amount: number; sublet: boolean; taxable: boolean | null } | null;
+  /** RS-9: the tax flag for whatever money this line carries. An export
+   *  states tax per COLUMN — TAX_PART for the part, MISC_TAX for a
+   *  miscellaneous charge, LBR_TAX for the labor — so the flag that answers
+   *  "is this line's money taxed" is the one belonging to the column the
+   *  money is in. Null when the line carries no money to tax. */
+  taxable: boolean | null;
   /** Raw records this line collapsed, for evidence. */
   recordCount: number;
 }
@@ -262,6 +268,7 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
         price: pickNumber(record, PRICE_FIELDS),
         labor: [],
         misc: null,
+        taxable: null,
         recordCount: 0,
       };
       byLine.set(key, line);
@@ -277,13 +284,30 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
       line.labor.push({ type: laborType, hours, included, opCode });
     }
 
+    // RS-9: an export writes MISC_AMT on EVERY line, zero where the line has
+    // no miscellaneous charge. Reading a zero as a charge gave every part
+    // line a miscellaneous amount, and the verification then reported
+    // "expected not keyed, found $0.00" against every matched line — noise
+    // that buries the findings an estimator opened the report for.
     const miscAmount = pickNumber(record, ["MISC_AMT", "MISC_AMOUNT"]);
-    if (miscAmount !== null) {
+    const miscSublet = pickBoolean(record, ["MISC_SUBLT", "MISC_SUBLET"]) === true;
+    if (miscAmount !== null && (miscAmount !== 0 || miscSublet)) {
       line.misc = {
         amount: miscAmount,
-        sublet: pickBoolean(record, ["MISC_SUBLT", "MISC_SUBLET"]) === true,
+        sublet: miscSublet,
         taxable: pickBoolean(record, ["MISC_TAX", "MISC_TAXBL"]),
       };
+    }
+
+    // The tax flag for the column this line's money is in.
+    if (line.taxable === null) {
+      const partTax = pickBoolean(record, ["TAX_PART", "PART_TAX"]);
+      const miscTax = pickBoolean(record, ["MISC_TAX", "MISC_TAXBL"]);
+      const laborTax = pickBoolean(record, ["LBR_TAX", "LABOR_TAX"]);
+      const partPrice = pickNumber(record, PRICE_FIELDS);
+      if (partPrice !== null && partPrice !== 0) line.taxable = partTax;
+      else if (miscAmount !== null && miscAmount !== 0) line.taxable = miscTax;
+      else if (hours !== null && hours !== 0) line.taxable = laborTax;
     }
     // A later record may be the one carrying the part or price columns.
     if (line.partNumber === null) line.partNumber = pickString(record, PART_NUMBER_FIELDS);
