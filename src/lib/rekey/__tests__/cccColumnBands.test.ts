@@ -200,6 +200,47 @@ describe("a blank operation column is reported as blank", () => {
   });
 });
 
+describe("the description is read from its column, markers and all", () => {
+  const sheet = buildRekeySheet({ text: TEXT, sourceFile: "ccc.pdf", columns });
+  const row = (line: number) => sheet.rows.find((entry) => entry.sourceLine === line);
+
+  it("does not take a line's own marker as the end of its description", () => {
+    // The structural marker "s" prints to the right of the description and
+    // runs together with it in the reflowed text: "RT Upper arm" + "s".
+    expect(TEXT).toContain("AlgnRT Upper arms0.5");
+    expect(row(44)).toMatchObject({ descriptionSource: "RT Upper arm", operationCcc: "Algn" });
+    expect(row(44)?.flags).toContain("marked LAS");
+  });
+
+  it("keeps a description the reflowed text cut to its first word", () => {
+    expect(row(77)).toMatchObject({ descriptionSource: "High note horn w/o F Sport" });
+    expect(row(78)).toMatchObject({ descriptionSource: "Low note horn w/o F Sport" });
+  });
+
+  it("joins a description that wrapped onto the next line", () => {
+    expect(row(10)?.descriptionSource).toBe("Bumper cover w/park alert US built");
+  });
+
+  it("stops at anything that is not the rest of the description", () => {
+    // A note, a note's own second line, the next page's heading, and the
+    // ESTIMATE TOTALS block all print under a row with no line number of
+    // their own. Joining any of them swallowed whole blocks into a row.
+    expect(row(27)?.descriptionSource).toBe("Emblem");
+    expect(row(33)?.descriptionSource).toBe("Raw plastic primer (Per raw plastic panel)");
+    expect(row(110)).toMatchObject({ descriptionSource: "RTA Agreement", keyable: true });
+    expect(sheet.reconciliation.failures).toEqual([]);
+  });
+
+  it("knows the part number before it resolves the part type from it", () => {
+    // Reading the description off the columns takes the spaced part number
+    // out of it, which is right — and left six OEM parts with no part type
+    // until the measured number was known first.
+    expect(row(4)).toMatchObject({ partNumber: "112980P800", partTypeCcc: "OEM", partTypeEms: "PAN" });
+    expect(row(37)).toMatchObject({ partNumber: "8111006C91", partTypeCcc: "OEM", partTypeEms: "PAN" });
+    expect(sheet.rows.filter((entry) => entry.partNumber && entry.partTypeCcc === "None")).toEqual([]);
+  });
+});
+
 describe("without the geometry the sheet is still refused, not keyed", () => {
   it("fails the gate on the text alone", () => {
     const textOnly = buildRekeySheet({ text: TEXT, sourceFile: "ccc.pdf" });

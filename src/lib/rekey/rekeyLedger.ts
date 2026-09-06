@@ -1107,7 +1107,17 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   parsedRows.forEach((row, index) => {
     const judgment = judgmentValues(row.rawText ?? "");
     const stripped = stripManualEntryCode(row.description ?? "");
-    let operation = resolveOperation({ opCode: row.opCode, description: stripped.description });
+    // RS-3: where the page's own columns are measured, they are the authority
+    // on the operation and the description too. The reflowed text of the CCC
+    // layout welds the line's markers onto its description — a structural "s"
+    // made "RT Upper arm" read "RT Upper arms" — and truncated others to their
+    // first word ("High note horn w/o F Sport" arrived as "High").
+    const measured = row.lineNumber === null ? undefined : params.columns?.rows.get(row.lineNumber);
+    const fromColumns =
+      params.columns?.layout === "ccc" && measured?.description ? measured : undefined;
+    let operation = fromColumns
+      ? resolveOperation({ opCode: fromColumns.operation ?? undefined, description: fromColumns.description as string })
+      : resolveOperation({ opCode: row.opCode, description: stripped.description });
     // The platform prints its own manual-line marker ahead of the description,
     // and its printed legend defines it. A marked row with no operation code
     // is a manual entry BY THE DOCUMENT'S OWN NOTATION, not by inference — so
@@ -1122,7 +1132,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     // A spaced OEM part number left in the description is recovered before
     // anything keys off the description.
     const recovered = row.partNumber ? null : recoverSpacedPartNumber(description);
-    const partNumberSource = recovered?.partNumberSource ?? row.partNumber;
+    // A part number the page's own columns carry is known here, before the
+    // part TYPE is resolved from it. Reading the description off the columns
+    // took the spaced part number out of it — which is right — and without
+    // this the recovery that used to supply the number stopped firing and six
+    // OEM parts came out with no part type at all.
+    const partNumberSource = recovered?.partNumberSource ?? row.partNumber ?? measured?.partNumber ?? null;
     const withoutPartNumber = recovered ? recovered.description || description : description;
 
     const keyedDescription = stripTrailingPartTypeWording(withoutPartNumber) || withoutPartNumber;
@@ -1169,7 +1184,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       sectionSource: row.section ?? null,
       sectionCcc: section.group,
       sectionMapped: section.mapped,
-      descriptionSource: row.description ?? "",
+      descriptionSource: fromColumns?.description ?? row.description ?? "",
       descriptionCcc: keyedDescription,
       operationSource: operation.sourceLabel,
       operationCcc: operation.ccc,

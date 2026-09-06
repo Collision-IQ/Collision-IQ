@@ -69,7 +69,13 @@ describe("RS-9 — the verification compares tax like with like", () => {
   });
 
   it("leaves every other finding standing", () => {
-    // RV-5 later retired the five quantity findings this once counted six of:
+    // RV-5 later retired ten more of these the same way it retired the
+    // quantity findings: an export writes 0 in every column of every line, so
+    // "expected not keyed, found $0.00" against a labor line and "found 0.0 h"
+    // against a part line are the same absence written twice — six prices and
+    // four hour findings here.
+    //
+    // RV-5 also retired the five quantity findings this once counted six of:
     // a labor line has no quantity, and "not printed" against the export's
     // zero is the same absence written twice. The one that survives is a part
     // line whose price also differs, which is a real difference.
@@ -78,14 +84,13 @@ describe("RS-9 — the verification compares tax like with like", () => {
       .reduce<Record<string, number>>((totals, delta) => ({ ...totals, [delta.field]: (totals[delta.field] ?? 0) + 1 }), {});
     expect(counts).toEqual({
       "LAB included flag": 6,
-      "LAB hours": 8,
+      "LAB hours": 5,
       "LAM hours": 3,
-      "LAR hours": 1,
       "miscellaneous amount": 3,
       operation: 6,
       "part number": 2,
       "part type": 2,
-      price: 11,
+      price: 5,
       quantity: 1,
     });
   });

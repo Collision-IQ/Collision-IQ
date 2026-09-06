@@ -487,7 +487,32 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
   const showMoney = (value: number | null) => (value === null ? "not keyed" : `$${value.toFixed(2)}`);
   const showHours = (value: number | null) => (value === null ? "not keyed" : `${value.toFixed(1)} h`);
 
-  if (!sameMoney(row.price, keyed.price)) {
+  // RV-5: an export writes a figure in EVERY column of EVERY line, zero where
+  // the line has none — a labor line still carries ACT_PRICE 0 and a part line
+  // still carries MOD_LB_HRS 0. Against a print, which simply leaves the cell
+  // empty, that is the same absence written twice; on the CCC estimate here it
+  // was 70 of 94 line findings. A zero where the other side has a VALUE is
+  // still reported: only nothing-against-nothing is quiet.
+  const absent = (a: number | null, b: number | null) => (a === null && b === 0) || (b === null && a === 0);
+
+  // The same amount in a different column is one difference, not two. A CCC
+  // print marks a manual charge miscellaneous and its own export books the
+  // identical dollars as a price; reporting that as "price: expected not
+  // keyed, found $12.00" AND "miscellaneous amount: expected $12.00, found not
+  // keyed" says the sheet is wrong twice about a line both sides agree on.
+  const sourceCharge = row.misc?.amount ?? null;
+  const keyedCharge = keyed.misc?.amount ?? null;
+  const sameAmountOtherColumn =
+    (row.price === null && keyedCharge === null && sourceCharge !== null && sameMoney(sourceCharge, keyed.price)) ||
+    (keyed.price === null && sourceCharge === null && keyedCharge !== null && sameMoney(row.price, keyedCharge));
+
+  if (sameAmountOtherColumn) {
+    deltas.push({
+      field: "charge column",
+      expected: row.price === null ? "miscellaneous charge" : "part price",
+      found: keyed.price === null ? "miscellaneous charge" : "part price",
+    });
+  } else if (!sameMoney(row.price, keyed.price) && !absent(row.price, keyed.price)) {
     deltas.push({ field: "price", expected: showMoney(row.price), found: showMoney(keyed.price) });
   }
   const sourceQty = row.qty ?? null;
@@ -562,7 +587,7 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
   for (const type of new Set([...expectedLabor.keys(), ...keyedLabor.keys()])) {
     const expected = expectedLabor.get(type);
     const found = keyedLabor.get(type);
-    if (!sameHours(expected?.hours ?? null, found?.hours ?? null)) {
+    if (!sameHours(expected?.hours ?? null, found?.hours ?? null) && !absent(expected?.hours ?? null, found?.hours ?? null)) {
       deltas.push({
         field: `${type} hours`,
         expected: showHours(expected?.hours ?? null),
@@ -577,7 +602,7 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
     }
   }
 
-  if (!sameMoney(row.misc?.amount ?? null, keyed.misc?.amount ?? null)) {
+  if (!sameAmountOtherColumn && !sameMoney(sourceCharge, keyedCharge) && !absent(sourceCharge, keyedCharge)) {
     deltas.push({
       field: "miscellaneous amount",
       expected: showMoney(row.misc?.amount ?? null),
