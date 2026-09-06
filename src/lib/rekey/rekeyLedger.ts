@@ -63,6 +63,10 @@ const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string
 const AGGREGATE_REFINISH_LABELS = (VOCABULARY.aggregateRefinishLabels as string[]).map(normalizeVocabularyText);
 const CLEAR_COAT_EXCLUSIONS = (VOCABULARY.clearCoatExclusions as string[]).map(normalizeVocabularyText);
 /** Printed names of the CCC sublet / miscellaneous totals category. */
+/** The letter a CCC print puts beside a line's hours to name their labor
+ *  type, from the abbreviation legend the estimate prints on its own page. */
+const CCC_LABOR_MARKERS = VOCABULARY.cccLaborMarkers as Record<string, string>;
+
 const MISC_CATEGORY_ALIASES = new Set(
   (VOCABULARY.totalsCategories as Array<{ ems: string; aliases: string[] }>)
     .filter((entry) => entry.ems === "PAS")
@@ -1080,9 +1084,20 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   /** Rows the page's own column bands settled, so the welded-quantity caveat
    *  no longer applies to them. */
   const columnReadRows = new Set<string>();
+  /** Rows the print marks as a labor type its own totals page does not bill
+   *  separately. The hours go where the print puts them; the mark is kept. */
+  const markedLaborRows = new Map<string, string>();
+  /** The labor types the source's own totals page bills separately. */
+  const printedLaborTypes = new Set(
+    (expectedTotals?.categories ?? [])
+      .map((category) => resolveLaborType(/^(.+?)\s+labor$/i.exec(category.category)?.[1] ?? ""))
+      .filter((type): type is string => type !== null)
+  );
   const finishFlags = (row: RekeyLedgerRow) => {
     row.flags = flagsFor(row);
     if (weldedQtyRows.has(row.id) && !columnReadRows.has(row.id)) row.flags.push("qty welded: verify");
+    const marked = markedLaborRows.get(row.id);
+    if (marked) row.flags.push(`marked ${marked}`);
   };
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
@@ -1216,14 +1231,69 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       // A sublet or manual charge books its money as misc, not as a part
       // price; the band prints the same dollars in the Total Price column and
       // must not be written over the top of it as a second copy.
-      if (ledgerRow.misc === null) {
+      // A CCC print marks a miscellaneous charge on the line itself ("T"
+      // taxed, "X" not). Read as a part price instead, those amounts put the
+      // parts total $416.71 over and the miscellaneous total the same amount
+      // under; split by the mark, both land on the printed figure exactly.
+      if (params.columns?.layout === "ccc" && column.miscMarker) {
+        ledgerRow.misc = {
+          amount: column.price ?? ledgerRow.misc?.amount ?? 0,
+          sublet: operation.sublet || (ledgerRow.misc?.sublet ?? false),
+          taxable: column.miscMarker === "T",
+          judgment: ledgerRow.misc?.judgment ?? false,
+        };
+        ledgerRow.price = null;
+        ledgerRow.qty = null;
+      } else if (params.columns?.layout === "ccc" && (column.partNumber !== null || column.price !== null)) {
+        // No mark and a priced line is a PART, whatever the text made of it.
+        // Three part lines here had their number welded into the description,
+        // so the text reader saw a priced row with no part and booked the
+        // money as a charge — one of them as $422.12, the quantity 2 run
+        // together with the $2.12 price.
+        ledgerRow.misc = null;
         if (column.qty !== null) ledgerRow.qty = column.qty;
         // The column prints the EXTENDED price; the sheet keys the unit price.
         if (column.price !== null && column.price > 0) {
           ledgerRow.price = round2(column.price / (column.qty ?? 1));
         }
+      } else if (ledgerRow.misc === null) {
+        if (column.qty !== null) ledgerRow.qty = column.qty;
+        if (column.price !== null && column.price > 0) {
+          ledgerRow.price = round2(column.price / (column.qty ?? 1));
+        }
       }
       if (column.taxable !== null) ledgerRow.taxable = column.taxable;
+      // A print that gives labor and refinish their own columns is measured
+      // for those too. The reflowed text of the CCC layout welds a row's
+      // numbers together, so its hours were landing in the wrong column and
+      // its clear-coat allowances in none: 31.5 body against a printed 26.8,
+      // and 9.6 refinish against a printed 17.3.
+      if (column.labor !== undefined || column.paint !== undefined) {
+        const measured: RekeyLaborEntry[] = [];
+        const judgmentEntry = ledgerRow.labor.some((entry) => entry.judgment);
+        if (column.labor) {
+          // The letter beside the hours names their labor type, but only the
+          // print's own totals page decides whether that type is billed
+          // separately. This CCC print marks seven lines mechanical and one
+          // structural and then totals all of them under Body Labor — 23.9 +
+          // 1.9 + 1.0 = the 26.8 it prints — because it carries no mechanical
+          // or structural category to bill them to. Splitting them out anyway
+          // would leave the sheet 2.9 h short of the estimate it came from.
+          const marked = CCC_LABOR_MARKERS[(column.laborMarker ?? "").toUpperCase()] ?? null;
+          const billed = marked !== null && printedLaborTypes.has(marked) ? marked : "LAB";
+          if (marked !== null && marked !== billed) markedLaborRows.set(ledgerRow.id, marked);
+          measured.push({
+            type: billed,
+            hours: column.labor.hours ?? 0,
+            included: column.labor.included,
+            judgment: judgmentEntry,
+          });
+        }
+        if (column.paint) {
+          measured.push({ type: "LAR", hours: column.paint.hours ?? 0, included: column.paint.included, judgment: judgmentEntry });
+        }
+        ledgerRow.labor = measured;
+      }
       // Measured columns settle what the welded string could not.
       if (column.qty !== null || column.partNumber !== null) columnReadRows.add(ledgerRow.id);
     }
@@ -1339,7 +1409,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   }
   if (unmappedOperations > 0) {
     warnings.push(
-      `${unmappedOperations} line${unmappedOperations === 1 ? "" : "s"} carry an operation this build does not translate. The source wording is printed verbatim.`
+      `${unmappedOperations} line${unmappedOperations === 1 ? " carries" : "s carry"} an operation this build does not translate. The source wording is printed verbatim.`
     );
   }
   // The Mitchell reader accounts for every anchored block itself — row, note

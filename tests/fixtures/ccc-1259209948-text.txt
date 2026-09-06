@@ -1,0 +1,332 @@
+
+
+conestogacollision.com
+Workfile ID:
+Federal ID:
+4b53232a
+27-0822500
+961 Lancaster Avenue, Berwyn, PA 19312
+Phone: (610) 644-1000
+FAX: (610) 644-1007
+Preliminary Estimate
+RO Number: 20785
+Written By: VINCENT MENICHETTI, 739698
+Adjuster: CRACHA, FERNANDO
+Insured:CONLAN, TUCKERPolicy #:Claim #:0367005210101156
+Type of Loss:Date of Loss:Days to Repair:0
+Point of Impact:
+Owner:Inspection Location:Insurance Company:
+CONLAN, TUCKERconestogacollision.comGEICO
+741 FIRST AVE961 Lancaster Avenue
+BERWYN, PA 19312Berwyn, PA 19312
+(610) 716-9700 CellRepair Facility
+(610) 644-1000 Business
+VEHICLE
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+VIN:58ADZ1B10MU091115Interior Color:Mileage In:Vehicle Out:7/11/2025
+License:MWL3251Exterior Color:BLACKMileage Out:
+State:PAProduction Date:Condition:Job #:
+TRANSMISSIONCONSOLE/STORAGESEARCH/SEEKPOWER STEERING
+AUTOMATIC TRANSMISSIONOVERHEAD CONSOLECD PLAYERPOWER BRAKES
+DRIVER CONVENIENCEHOME LINKAUXILIARY AUDIO CONNECTIONANTI-LOCK BRAKES (4)
+KEYLESS ENTRYINSTRUMENT PANELPREMIUM RADIOGLASS & MIRRORS
+REMOTE STARTERTRACTION CONTROLSATELLITE RADIODUAL MIRRORS
+MESSAGE CENTERSTABILITY CONTROLROOFSIGNAL INTEGRATED MIRRORS
+POWER DRIVER SEATLANE DEPARTURE WARNINGELECTRIC GLASS ROOFTINTED GLASS
+POWER WINDOWSALARMSAFETYSEATS
+POWER LOCKSAIR CONDITIONINGDRIVERS SIDE AIR BAGLEATHER SEATS
+POWER MIRRORSCLIMATE CONTROLPASSENGER AIR BAGBUCKET SEATS
+HEATED MIRRORSREAR DEFOGGERFRONT SIDE IMPACT AIR BAGSRECLINING/LOUNGE SEATS
+CRUISE CONTROLHANDS FREE DEVICEHEAD/CURTAIN AIR BAGSPOWER PASSENGER SEAT
+INTELLIGENT CRUISECOMMUNICATION SYSTEMREAR SIDE IMPACT AIR BAGSREAR END
+INTERMITTENT WIPERSRADIOPAINTBACKUP CAMERA
+TILT WHEELAM RADIOCLEARCOAT PAINTWHEELS
+TELESCOPIC WHEELFM RADIOFRONT END4-WHEEL DISC BRAKES
+STEERING WHEEL TOUCH
+CONTROLS
+STEREOXENON OR L.E.D. HEADLAMPSALUMINUM/ALLOY WHEELS
+Get live updates atwww.carwise.com/e/57jCyf
+9/3/2026 11:13:26 PM300060Page 1
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+1MODEL IDENTIFICATION
+2#** Procedure research &
+documentation **
+1
+Note: OE docs available upon request and via this link:
+https://collisionacademy.egnyte.com/fl/wXxtJVpKMwj9/21'_Lexus_ES350_
+3INFORMATION LABELS
+4ReplEmission label 3.5 liter112980P80011.770.2
+5Rpl information labels0.3
+6ReplAC label887230613012.90Incl.
+7ReplInfo label engine oil153690P01012.30Incl.
+8FRONT BUMPER & GRILLE
+9O/H front bumper2.2
+10ReplBumper cover w/park alert US
+built
+521190X9481461.44Incl.3.0
+11Add for Clear Coat1.2
+12Add for park sensorm0.4
+13ReplRT Bumper cover clip477490202016.03
+14ReplRT Bumper cover bracket521450612016.67
+15R&IRT Side support0.1
+16R&ILT Side support0.1
+17ReplUpper seal5254206010167.65Incl.
+Note: PARTS: Part cannot be reused/reinstalled. LABOR: Time included with overhaul.
+18ReplRT Upper support retainer525210615019.73
+19ReplLT Upper support retainer525210615019.73
+20ReplUpper support5311406260194.130.1
+21ReplAbsorber US built5261106530145.01Incl.
+22*ReplRT Absorber clip US built90467-07049-2311.70
+Note: PARTS: Part cannot be reused/reinstalled.
+23ReplLT Absorber clip US built9046707049C011.98
+Note: PARTS: Part cannot be reused/reinstalled.
+24R&IMount bracketIncl.
+25ReplImpact bar (UHS)52021061901359.150.6
+26ReplGrille assy w/o F Sport, w/o
+hybrid w/park alert, w/o surround
+view
+53101066501741.50Incl.
+27R&IEmblemIncl.
+Note: Possible 1-time use. Open to teardown
+PARTS: Part has related component that cannot be reused/reinstalled; screw.
+28ReplEmblem screw901674005711.09
+29ReplRT Park sensor retainer8934806050110.60Incl.
+30ReplLT Park sensor retainer8934806050110.60Incl.
+31ReplPrep unprimed bumper10.8
+32#Flex additive (Per flexible panel)112.00T
+33#Raw plastic primer (Per raw
+plastic panel)
+115.00T
+9/3/2026 11:13:26 PM300060Page 2
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+34#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+35#Test fit-Front bumper11.0
+Note: Pre-fit prior to refinish to ensure all mounting locations are in-line to avoid damage after final refinish
+36FRONT LAMPS
+37ReplRT Headlamp8111006C9111,788.430.4
+38Aim headlamps0.5
+39R&ILT R&I headlamp assy0.3
+Note: Open to hidden damage pending teardown
+40#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+41#Test fit-RT Headlamp10.5
+Note: Required to ensure all mounting locations are in-line prior to final refinish to avoid damage to newly painted
+panels
+42RADIATOR SUPPORT
+43ReplUpper tie bar53205069041160.670.90.6
+44*AlgnRT Upper arms0.5
+45*AlgnLT Upper arms0.5
+46*R&IRT Diagonal brace0.2
+47*R&ILT Diagonal brace0.2
+48ReplSight shield US built53295062401235.780.2
+49*ReplSight shield plate US built5329906010121.15
+50#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.13T0.2
+51#Set up vehicle on frame bench
+(Unibody)
+12.0
+Note: Measure underhood dimensions to ensure all is in-line
+52HOOD
+53ReplHood (ALU)533010639011,041.781.52.8
+54Add for Clear Coat1.1
+55Add for Underside(Complete)1.4
+56Add for Clear Coat0.3
+57ReplFront seal5338106170146.06Incl.
+58#ReplWindshield wassher hose clips853710601049.52
+59*AlgnRT Hinge0.5
+60*AlgnLT Hinge0.5
+61ReplLatch US built5351006421189.800.3
+62ReplLatch mount bolt US built90119A048422.12
+63*R&IRelease cable US built0.5
+Note: Labor reduced to reflect partial for time to run in & out of upper tie bar & latch
+64ReplRelease cable clamp827111E34012.70
+65#RprCollision Access - Hood will not
+open when engaged
+1.0
+66#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.13T0.2
+67#Test fit-Hood11.0
+Note: Pre-fit prior to refinish to ensure all mounting locations are in-line to avoid damage after final refinish
+9/3/2026 11:13:26 PM300060Page 3
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+68FENDER
+69*BlndRT Fender (ALU)1.8
+70*BlndLT Fender (ALU)1.8
+71R&IRT Protector0.2
+72R&ILT Protector0.2
+73R&IRT Fender liner local part0.4
+74R&ILT Fender liner local part0.4
+75ELECTRICAL
+76*RprBattery US builtm0.3
+Note: D&R 12 Volt
+77R&IHigh note horn w/o F Sportm0.2
+78R&ILow note horn w/o F Sportm0.2
+79#Reset electrical components10.3
+Note: Return vehicle settings (seat position, mirror position, volume, etc.) to owners preference for safety
+80ENGINE / TRANSAXLE
+81R&IAir hosem0.1
+82R&IAir inletm0.2
+83COWL
+84R&ICowl grille1.0
+85RESTRAINT SYSTEMS
+86ReplAir bag system diagnosis1m0.5
+Note: Please see ADAS report. Cost open to invoice
+87PILLARS, ROCKER & FLOOR
+88R&IRT Rocker molding US built0.9
+89R&ILT Rocker molding US built0.9
+90VEHICLE DIAGNOSTICS
+91*SublPre-repair scan +34%1201.00T m
+92#REVVAdas Report125.00T0.5
+Note: ADAS report available upon request and via this link:
+https://collisionacademy.egnyte.com/dl/vPVd3ychvBgh/ADAS-58ADZ1B10MU091115.pdf_
+93#SublIn-proc repair scan +34%1167.50T
+Note: Required to ensure no faults, wiring breaks, communication issues and/or connector malfunction prior to
+final assembly & post-scan. Cost open to invoice
+94#SublFront radar static calibration
++34%
+1469.00T
+Note: Please see ADAS report. Cost open to invoice
+95#SublSeat belt dynamic function test
++34%
+190.45T
+Note: Required to ensure no faults, wiring breaks, communication issues and/or connector malfunction prior to
+final assembly & post-scan. Please see ADAS report. Cost open to invoice
+96#SublParking sensor static calibration
+(Front) +34%
+1335.00T
+Note: Please see ADAS report. Cost open to invoice
+97#SublSeat weight sensor zero point
+calibration +34%
+1201.00T
+Note: Please see ADAS report. Cost open to invoice
+98*SublPost-repair scan +34%1201.00T m
+9/3/2026 11:13:26 PM300060Page 4
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+99#RprFinal road test for safety & quality
+check
+0.5
+100MISCELLANEOUS OPERATIONS
+101#Pre wash vehicle15.00T0.5
+102#ReplInterior Protection kit13.220.1
+103#Mask for refinishing110.00T0.5
+104#Mask jambs (0.3 Hours and $3.00
+per panel)
+19.00T0.9
+105#Tint color10.5
+106#Finish sand & polish (0.5 Refinish
+per panel)
+12.0
+107#Clean vehicle for delivery15.00T0.5
+108#Hazardous waste removal15.00T
+109#Solid waste removal15.00T
+110#RTA Agreement179.17
+SUBTOTALS7,105.5926.817.3
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts5,314.38
+Body Labor26.8 hrs@$ 75.00 /hr2,010.00
+Paint Labor17.3 hrs@$ 75.00 /hr1,297.50
+Paint Supplies17.3 hrs@$ 60.00 /hr1,038.00
+Miscellaneous1,791.21
+Subtotal11,451.09
+Sales Tax$ 11,451.09@6.0000 %687.07
+Grand Total12,138.16
+This estimate is based on our initial visual inspection. Ocassionally, addtional worn and/or damaged parts are
+discovered upon commencement of repairs. This estimate cannot allow for such contingencies. All part prices are
+subject to invoice. All damaged parts will discarded unless we are otherwise notified prior to disposal.
+9/3/2026 11:13:26 PM300060Page 5
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+ANY PERSON WHO KNOWINGLY AND WITH INTENT TO DEFRAUD ANY INSURANCE COMPANY OR OTHER PERSON
+FILES AN APPLICATION FOR INSURANCE OR STATEMENT OF CLAIM CONTAINING ANY MATERIALLY FALSE
+INFORMATION OR CONCEALS FOR THE PURPOSE OF MISLEADING, INFORMATION CONCERNING ANY FACT
+MATERIAL THERETO COMMITS A FRAUDULENT INSURANCE ACT, WHICH IS A CRIME AND SUBJECTS SUCH PERSON
+TO CRIMINAL AND CIVIL PENALTIES.
+THE FOLLOWING IS A LIST OF ABBREVIATIONS OR SYMBOLS THAT MAY BE USED TO DESCRIBE WORK TO BE
+DONE OR PARTS TO BE REPAIRED OR REPLACED:D=DISCONTINUED PART A=APPROXIMATE PRICE B=BODY
+LABOR  D=DIAGNOSTIC E=ELECTRICAL F=FRAME  G=GLASS M=MECHANICAL P=PAINT LABOR  S=STRUCTURAL
+T=TAXED MISCELLANEOUS X=NON TAXED MISCELLANEOUS ADJ=ADJACENT ALGN=ALIGN  A/M=AFTERMARKET
+BLND=BLEND CAPA=CERTIFIED AUTOMOTIVE PARTS ASSOCIATION  D&R=DISCONNECT AND RECONNECT
+EST=ESTIMATE  EXT. PRICE=UNIT PRICE MULTIPLIED BY THE QUANTITY INCL=INCLUDED MISC=MISCELLANEOUS
+NON-ADJ=NON ADJACENT O/H=OVERHAUL OP=OPERATION NO=LINE NUMBER QTY=QUANTITY
+RECOND=RECONDITION REFN=REFINISH REPL=REPLACE R&I=REMOVE AND INSTALL R&R=REMOVE AND
+REPLACE RPR=REPAIR RT=RIGHT SECT=SECTION SUBL=SUBLET LT=LEFT W/O=WITHOUT W/_=WITH/_
+#=MANUAL LINE ENTRY *=OTHER [IE..MOTORS DATABASE INFORMATION WAS CHANGED]. **=DATABASE LINE
+WITH AFTERMARKET N=NOTES ATTACHED TO LINE NAGS=NATIONAL AUTO GLASS SPECIFICATIONS. OPT
+OEM=ORIGINAL EQUIPMENT MANUFACTURER PARTS EITHER OPTIONALLY SOURCED OR OTHERWISE PROVIDED
+WITH SOME UNIQUE PRICING OR DISCOUNT.
+THE ATTACHED ESTIMATE REPRESENTS AN APPRAISAL OF THE COST OF REPAIR FOR THE VISIBLE DAMAGE TO
+THE VEHICLE NOTED AT THE TIME OF INSPECTION NECESSARY TO RETURN THE VEHICLE TO ITS PREDAMAGED
+CONDITION.  COSTS ABOVE THE APPRAISED AMOUNT MAY BE THE RESPONSIBILITY OF THE VEHICLE OWNER.
+THERE IS NO REQUIREMENT THAT THE VEHICLE OWNER USE ANY SPECIFIED REPAIR SHOP. INFORMATION
+REGARDING REPAIR FACILITIES WHICH WILL BE ABLE TO REPAIR THE VEHICLE FOR THE APPRAISED AMOUNT IS
+AVAILABLE FROM THE INSURANCE COMPANY. IF USED PARTS ARE SPECIFIED, THEY ARE REQUIRED TO BE OF
+LIKE KIND AND QUALITY TO THOSE BEING REPLACED. INCIDENTAL CHARGES SUCH AS TOWING, PROTECTIVE
+CARE, CUSTODY, STORAGE, DEPRECIATION, BATTERY AND TIRE REPLACEMENT ARE NOTED WHEN APPLICABLE.
+9/3/2026 11:13:26 PM300060Page 6
+
+Preliminary Estimate
+RO Number: 20785
+2021 LEXU ES 350 FWD 4D SED 6-3.5L Gasoline Port/Direct Injection BLACK
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide ARB8923, CCC Data Date 09/01/2026, and potentially other
+third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for the
+vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM parts
+are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM (Alternative
+OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM vehicle
+dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or labor data
+provided by third party sources of data may have been modified or may have come from an alternate data source.
+Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category.
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category.
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel.
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part.
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet.
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+9/3/2026 11:13:26 PM300060Page 7
