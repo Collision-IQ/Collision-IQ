@@ -118,15 +118,34 @@ export function resolveOperation(params: {
 
   if (opCode) {
     const entry = OPERATION_ALIAS_INDEX.find(([alias]) => alias === normalizeVocabularyText(opCode));
+    // An op code the vocabulary does not know is not an operation, and taking
+    // it as one costs twice: it puts a word CCC has no operation for on the
+    // sheet, and it leaves the description without its own first word. A CCC
+    // print's "Add for Clear Coat" arrives with "Add" read as the code, and
+    // the sheet said to key "Add" against "for Clear Coat". The word goes
+    // back where the print put it and the line is reported as carrying no
+    // operation, which is what its operation column actually says.
+    if (!entry) {
+      return {
+        ccc: UNMAPPED,
+        laborOpCode: null,
+        sourceLabel: null,
+        description: `${opCode} ${description}`.trim(),
+        mapped: false,
+        refinishOnly: false,
+        sublet: false,
+        manualEntry: false,
+      };
+    }
     return {
       ccc: opCode,
-      laborOpCode: entry?.[1].laborOpCode ?? null,
+      laborOpCode: entry[1].laborOpCode,
       sourceLabel: opCode,
       description,
       mapped: true,
-      refinishOnly: entry?.[1].refinishOnly === true,
-      sublet: entry?.[1].sublet === true,
-      manualEntry: entry?.[1].manualEntry === true,
+      refinishOnly: entry[1].refinishOnly === true,
+      sublet: entry[1].sublet === true,
+      manualEntry: entry[1].manualEntry === true,
     };
   }
 

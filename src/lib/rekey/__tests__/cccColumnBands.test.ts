@@ -150,11 +150,44 @@ describe("a blank operation column is reported as blank", () => {
   });
 
   it("counts the two causes separately, because they call for different work", () => {
-    expect(sheet.stats).toMatchObject({ unmappedOperations: 1, untranslatedOperations: 0, unstatedOperations: 1 });
+    // Six: this line, and the five "Add for ..." allowances whose operation
+    // column is equally empty.
+    expect(sheet.stats).toMatchObject({ unmappedOperations: 6, untranslatedOperations: 0, unstatedOperations: 6 });
     expect(sheet.warnings).toContain(
-      "1 line has no operation printed against it. Choose the operation from the line's own wording when keying."
+      "6 lines have no operation printed against them. Choose the operation from the line's own wording when keying."
     );
     expect(sheet.warnings.some((warning) => /does not translate/.test(warning))).toBe(false);
+  });
+
+  it("does not take a word off the front of a description and call it an operation", () => {
+    // "Add" was an alias of the manual-entry operation, so a CCC print's
+    // "Add for Clear Coat" — a refinish allowance in an EMPTY operation
+    // column — was read as operation "Add" against description "for Clear
+    // Coat". CCC has no "Add" operation, and the description lost its
+    // subject. Both halves are back where the print put them.
+    const adds = sheet.rows.filter((entry) => [11, 12, 54, 55, 56].includes(entry.sourceLine ?? -1));
+    expect(adds.map((entry) => entry.descriptionCcc)).toEqual([
+      "Add for Clear Coat",
+      "Add for park sensor",
+      "Add for Clear Coat",
+      "Add for Underside(Complete)",
+      "Add for Clear Coat",
+    ]);
+    expect(adds.every((entry) => entry.operationSource === null && !entry.operationMapped)).toBe(true);
+  });
+
+  it("leaves a head word that IS an operation exactly where it was", () => {
+    // Both of these print with an empty operation column too, but O/H and Aim
+    // are real CCC operations, so reading them off the description head is
+    // right and the sheet keeps doing it.
+    expect(sheet.rows.find((entry) => entry.sourceLine === 9)).toMatchObject({
+      operationCcc: "O/H",
+      descriptionCcc: "front bumper",
+    });
+    expect(sheet.rows.find((entry) => entry.sourceLine === 38)).toMatchObject({
+      operationCcc: "Aim",
+      descriptionCcc: "headlamps",
+    });
   });
 
   it("leaves a print that states every operation saying nothing at all", () => {
