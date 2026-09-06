@@ -79,6 +79,8 @@ export interface KeyedLine {
   price: number | null;
   labor: Array<{ type: string | null; hours: number; included: boolean }>;
   misc: { amount: number; sublet: boolean; taxable: boolean | null } | null;
+  /** RS-9: the tax flag for the column this line's money is in. */
+  taxable: boolean | null;
   group: string | null;
   operation: string | null;
 }
@@ -148,6 +150,7 @@ export function keyedEstimateFromEms(bundle: EmsBundle, sourceFile: string): {
         included: entry.included === true,
       })),
     misc: line.misc,
+    taxable: line.taxable,
     group: null,
     operation: line.labor.find((entry) => entry.opCode)?.opCode ?? null,
   }));
@@ -215,6 +218,7 @@ export function keyedEstimateFromDocument(params: { text: string; sourceFile: st
       price: row.price,
       labor: row.labor.map((entry) => ({ type: entry.type, hours: entry.hours, included: entry.included })),
       misc: row.misc ? { amount: row.misc.amount, sublet: row.misc.sublet, taxable: row.misc.taxable } : null,
+      taxable: row.taxable,
       group: row.sectionCcc,
       operation: row.operationCcc,
     }));
@@ -531,14 +535,23 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
       found: keyed.misc?.sublet ? "sublet" : "not sublet",
     });
   }
-  // Tax is only compared when BOTH sides print it; an absent marker is not a
-  // claim that the line is untaxed.
-  if (row.taxable !== null && keyed.misc?.taxable !== null && keyed.misc?.taxable !== undefined) {
-    if (row.taxable !== keyed.misc.taxable) {
+  // RS-9: compare like with like. Each side states tax against the column
+  // its money is in, so a part's tax flag belongs against the other side's
+  // PART tax flag — reading it against the miscellaneous flag reported every
+  // taxed part on the sheet as "found: not taxable", because a part line
+  // carries no miscellaneous charge to tax.
+  //
+  // Tax is only compared when BOTH sides state it; an absent marker is not a
+  // claim that the line is untaxed. A Mitchell print leaves the cell blank on
+  // a line whose money is taxed through another lane, so blank means unknown.
+  const sourceTaxable = row.taxable ?? row.misc?.taxable ?? null;
+  const keyedTaxable = keyed.taxable ?? keyed.misc?.taxable ?? null;
+  if (sourceTaxable !== null && keyedTaxable !== null) {
+    if (sourceTaxable !== keyedTaxable) {
       deltas.push({
         field: "tax flag",
-        expected: row.taxable ? "taxable" : "not taxable",
-        found: keyed.misc.taxable ? "taxable" : "not taxable",
+        expected: sourceTaxable ? "taxable" : "not taxable",
+        found: keyedTaxable ? "taxable" : "not taxable",
       });
     }
   }
