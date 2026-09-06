@@ -988,7 +988,7 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
     if (tax && values.length > 0) {
       const amount = money(values[0]);
       if (amount > 0) {
-        totals.tax = (totals.tax ?? 0) + amount;
+        totals.tax = round2((totals.tax ?? 0) + amount);
         totals.taxLanes.push({ label: `Tax ${tax[1]}%`, amount });
       }
       continue;

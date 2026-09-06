@@ -69,6 +69,10 @@ describe("RS-9 — the verification compares tax like with like", () => {
   });
 
   it("leaves every other finding standing", () => {
+    // RV-5 later retired the five quantity findings this once counted six of:
+    // a labor line has no quantity, and "not printed" against the export's
+    // zero is the same absence written twice. The one that survives is a part
+    // line whose price also differs, which is a real difference.
     const counts = verification.lineFindings
       .flatMap((finding) => finding.deltas)
       .reduce<Record<string, number>>((totals, delta) => ({ ...totals, [delta.field]: (totals[delta.field] ?? 0) + 1 }), {});
@@ -82,7 +86,7 @@ describe("RS-9 — the verification compares tax like with like", () => {
       "part number": 2,
       "part type": 2,
       price: 11,
-      quantity: 6,
+      quantity: 1,
     });
   });
 });
