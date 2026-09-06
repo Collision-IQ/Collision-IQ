@@ -45,6 +45,7 @@ import {
   stripTrailingPartTypeWording,
 } from "./rekeyVocabulary";
 import type {
+  RekeyDerivedTotals,
   RekeyExpectedTotals,
   RekeyGroup,
   RekeyLaborEntry,
@@ -585,20 +586,251 @@ export function findUnreadLineNumbers(params: {
  * row, fails the sheet — a footnote under a sheet that is short by a labor
  * category is exactly what an estimator does not read.
  */
-export function reconcileRekeySheet(params: {
+/**
+ * RS-2: the totals the KEYED estimate will read, computed from the rows under
+ * the profile — then checked against the gross the source prints.
+ *
+ * Until this existed the sheet's totals block was the source's totals page
+ * copied verbatim. That block agrees with the source unconditionally, which is
+ * the problem: it agrees whether or not the rows above it can produce it, so a
+ * sheet missing a labor line still printed a gross the estimator would never
+ * reach by keying what he was given. Computing the block from the rows makes
+ * the printed gross an independent check instead of the answer key.
+ *
+ * Where a number genuinely cannot come from the rows it is carried from the
+ * print and said so, in `basis` and in `check.caveats`, rather than being
+ * back-derived into a figure that would agree by construction.
+ */
+function laborRateField(laborType: string): string | null {
+  if (laborType === "LAB") return "Body rate (LAB)";
+  if (laborType === "LAR") return "Paint rate (LAR)";
+  if (laborType === "LAM") return "Mechanical rate (LAM)";
+  return null;
+}
+
+export function deriveRekeyTotals(params: {
   rows: RekeyLedgerRow[];
-  totals: RekeyExpectedTotals | null;
-  unreadLines: number[];
-  /** Mitchell books sublet dollars inside its labor categories and prints an
-   *  "Other Additional Costs" line; the CCC print does neither. */
+  profile: RekeyProfileField[];
+  printed: RekeyExpectedTotals | null;
   mitchellLayout: boolean;
-}): RekeyReconciliation {
-  const rows = params.rows.filter((row) => row.keyable);
+}): RekeyDerivedTotals | null {
+  const printed = params.printed;
+  if (!printed) return null;
+  const { hoursByType, extraByType, parts, otherCosts } = sumKeyableRows(params.rows);
+
+  const profileValue = (field: string) => params.profile.find((entry) => entry.field === field)?.value ?? null;
+  const profileBasis = (field: string) => params.profile.find((entry) => entry.field === field)?.basis ?? null;
+  const rateFor = (laborType: string, category: string): number | null =>
+    profileValue(laborRateField(laborType) ?? "") ?? profileValue(`${category} rate`);
+
+  const categories: RekeyDerivedTotals["categories"] = [];
+  const caveats: string[] = [];
+  // A rate the source never printed is recovered by dividing its printed cost
+  // by its printed hours and rounded to the cent — the rate the estimator will
+  // actually type. Multiplying it back cannot land on the printed cost to the
+  // cent, so the check carries a budget for exactly that half-cent per hour
+  // rather than reporting a rounding artifact as a sheet that will not close.
+  let rateRounding = 0;
+  const budgetFor = (field: string, hours: number) => {
+    if (profileBasis(field) === "derived") rateRounding += hours * 0.005;
+  };
+  const carryPrinted = (category: string, cost: number | null, why: string) => {
+    categories.push({ category, hours: null, unit: "hours", rate: null, extra: null, cost: cost ?? 0, basis: why, fromRows: false });
+    if ((cost ?? 0) !== 0) caveats.push(`${category} (${money(cost)}) — ${why}`);
+  };
+
+  for (const category of printed.categories) {
+    const laborWord = /^(.+?)\s+labor$/i.exec(category.category)?.[1] ?? null;
+    const laborType = laborWord ? resolveLaborType(laborWord) : null;
+    if (laborType) {
+      const hours = round1(hoursByType.get(laborType) ?? 0);
+      const rate = rateFor(laborType, category.category);
+      budgetFor(laborRateField(laborType) ?? `${category.category} rate`, hours);
+      const extra = params.mitchellLayout ? round2(extraByType.get(laborType) ?? 0) : 0;
+      if (rate === null) {
+        carryPrinted(category.category, category.cost, "no rate in the profile, so the rows cannot price it");
+        continue;
+      }
+      categories.push({
+        category: category.category,
+        hours,
+        unit: "hours",
+        rate,
+        extra: extra === 0 ? null : extra,
+        cost: round2(hours * rate + extra),
+        basis: `${hours.toFixed(1)} h on the rows x ${money(rate)}${extra === 0 ? "" : ` + ${money(extra)} sublet / additional`}`,
+        fromRows: true,
+      });
+      continue;
+    }
+
+    if (/^(?:taxable\s+)?parts$/i.test(category.category)) {
+      categories.push({
+        category: category.category,
+        hours: null,
+        unit: "hours",
+        rate: null,
+        extra: null,
+        cost: parts,
+        basis: "extended price of every part row",
+        fromRows: true,
+      });
+      continue;
+    }
+
+    // Paint materials are rate x refinish units, the way the platform computes
+    // them — which is why the materials rate sits in the profile block.
+    if (/paint (?:supplies|materials?)/i.test(category.category)) {
+      const rate = profileValue("Paint supplies rate (MAPA)");
+      const units = round1(hoursByType.get("LAR") ?? 0);
+      budgetFor("Paint supplies rate (MAPA)", units);
+      if (rate === null) {
+        carryPrinted(category.category, category.cost, "no materials rate in the profile, so the rows cannot price it");
+        continue;
+      }
+      categories.push({
+        category: category.category,
+        hours: units,
+        unit: "units",
+        rate,
+        extra: null,
+        cost: round2(units * rate),
+        basis: `${units.toFixed(1)} refinish units on the rows x ${money(rate)}`,
+        fromRows: true,
+      });
+      continue;
+    }
+
+    // A parts adjustment is a markup the source states as an amount. Its rate
+    // was back-derived FROM that amount, so re-deriving the amount from the
+    // rate would agree with the print no matter what the rows hold. It is
+    // carried as printed and named as the one figure the check does not test.
+    if (/parts adjustments?/i.test(category.category)) {
+      const markup = profileValue("Sublet parts markup");
+      const derivedRate = profileBasis("Sublet parts markup") === "derived";
+      carryPrinted(
+        category.category,
+        category.cost,
+        derivedRate && markup !== null
+          ? `the source's stated markup amount, ${markup.toFixed(2)}% of the rows' marked-up parts; it prints no rate to recompute it from`
+          : "stated by the source as an amount, with no rate to recompute it from"
+      );
+      continue;
+    }
+
+    if (params.mitchellLayout && /other additional costs/i.test(category.category)) {
+      categories.push({
+        category: category.category,
+        hours: null,
+        unit: "hours",
+        rate: null,
+        extra: null,
+        cost: otherCosts,
+        basis: "charges on the rows that are not sublet inside a labor category",
+        fromRows: true,
+      });
+      continue;
+    }
+
+    if (!params.mitchellLayout && MISC_CATEGORY_ALIASES.has(normalizeVocabularyText(category.category))) {
+      categories.push({
+        category: category.category,
+        hours: null,
+        unit: "hours",
+        rate: null,
+        extra: null,
+        cost: round2([...extraByType.values()].reduce((total, amount) => total + amount, 0) + otherCosts),
+        basis: "every miscellaneous and sublet amount on the rows",
+        fromRows: true,
+      });
+      continue;
+    }
+
+    // A category the rows have no way to produce. At zero that is simply true
+    // of the rows too; above zero it is a hole in the derivation, said so.
+    carryPrinted(
+      category.category,
+      category.cost,
+      (category.cost ?? 0) === 0 ? "zero on the source, and no row bills to it" : "from the source's totals page; no row bills to it"
+    );
+  }
+
+  const subtotal = round2(categories.reduce((total, entry) => total + entry.cost, 0));
+
+  // The tax rate the source itself uses, taken only when the source's own
+  // print proves it applies to everything: a lane rate that reproduces the
+  // printed tax from the printed subtotal. When part of the estimate is not
+  // taxed, the lanes and the gross disagree and no single rate is honest.
+  const laneRates = printed.taxLanes
+    .map((lane) => /(\d+(?:\.\d+)?)\s*%/.exec(lane.label)?.[1] ?? null)
+    .map((value) => (value === null ? null : Number(value) / 100));
+  const uniformLaneRate =
+    laneRates.length > 0 && laneRates.every((rate) => rate !== null && Math.abs(rate - (laneRates[0] as number)) < 1e-9)
+      ? (laneRates[0] as number)
+      : null;
+  const impliedRate =
+    printed.tax !== null && printed.subtotal !== null && printed.subtotal > 0 ? printed.tax / printed.subtotal : null;
+
+  let taxRate: RekeyDerivedTotals["taxRate"] = null;
+  if (uniformLaneRate !== null && impliedRate !== null && Math.abs(uniformLaneRate - impliedRate) < 0.0005) {
+    taxRate = {
+      rate: uniformLaneRate,
+      basis: `${(uniformLaneRate * 100).toFixed(4)}% — the rate the source's tax lanes print, and the rate its own printed tax works out to.`,
+    };
+  } else if (uniformLaneRate !== null && impliedRate !== null) {
+    caveats.push(
+      `the source prints tax at ${(uniformLaneRate * 100).toFixed(4)}% but its printed tax is ${(impliedRate * 100).toFixed(
+        4
+      )}% of its printed subtotal, so part of the estimate is not taxed and the tax on a rekey cannot be derived from the rows.`
+    );
+  } else if (impliedRate !== null) {
+    taxRate = {
+      rate: impliedRate,
+      basis: `${money(printed.tax)} ÷ ${money(printed.subtotal)} of the source's printed subtotal — the source prints no rate.`,
+    };
+  } else {
+    caveats.push("the source prints no tax the sheet could apply to the rows.");
+  }
+
+  const tax = taxRate === null ? null : round2(subtotal * taxRate.rate);
+  const grandTotal = tax === null ? null : round2(subtotal + tax);
+  const printedGrandTotal = printed.grandTotal;
+  const delta = grandTotal === null || printedGrandTotal === null ? null : round2(grandTotal - printedGrandTotal);
+
+  return {
+    categories,
+    subtotal,
+    taxRate,
+    tax,
+    grandTotal,
+    check: {
+      printedGrandTotal,
+      delta,
+      closes: delta !== null && Math.abs(delta) < round2(rateRounding * (1 + (taxRate?.rate ?? 0))) + 0.011,
+      caveats,
+    },
+  };
+}
+
+/**
+ * What the keyable rows themselves bill: hours by labor type, sublet dollars
+ * booked inside a labor category, part dollars and other charges.
+ *
+ * Both the derived totals block and the reconciliation read the rows through
+ * this one function, so the block an estimator keys from and the check that
+ * clears it can never be counting different things.
+ */
+function sumKeyableRows(all: RekeyLedgerRow[]): {
+  hoursByType: Map<string, number>;
+  extraByType: Map<string, number>;
+  parts: number;
+  otherCosts: number;
+} {
   const hoursByType = new Map<string, number>();
   const extraByType = new Map<string, number>();
   let parts = 0;
   let otherCosts = 0;
-  for (const row of rows) {
+  for (const row of all.filter((entry) => entry.keyable)) {
     for (const entry of row.labor) {
       if (entry.included) continue;
       hoursByType.set(entry.type, round1((hoursByType.get(entry.type) ?? 0) + entry.hours));
@@ -614,6 +846,21 @@ export function reconcileRekeySheet(params: {
       parts = round2(parts + extendedPrice(row));
     }
   }
+  return { hoursByType, extraByType, parts, otherCosts };
+}
+
+export function reconcileRekeySheet(params: {
+  rows: RekeyLedgerRow[];
+  totals: RekeyExpectedTotals | null;
+  /** RS-2: what the rows and profile add up to. Its gross is checked against
+   *  the printed gross here so one failure list covers both. */
+  derived?: RekeyDerivedTotals | null;
+  unreadLines: number[];
+  /** Mitchell books sublet dollars inside its labor categories and prints an
+   *  "Other Additional Costs" line; the CCC print does neither. */
+  mitchellLayout: boolean;
+}): RekeyReconciliation {
+  const { hoursByType, extraByType, parts, otherCosts } = sumKeyableRows(params.rows);
 
   const out: RekeyReconciliationRow[] = [];
   const failures: string[] = [];
@@ -669,6 +916,31 @@ export function reconcileRekeySheet(params: {
     if (checkedLaborTypes.has(laborType)) continue;
     out.push({ category: `${laborType} sublet / additional`, unit: "amount", printed: null, derived: amount, delta: null, closes: true });
   }
+  // RS-2: the one line that covers every other. A gross built from the rows
+  // and the profile either lands on the gross the source prints or it does
+  // not, and an estimator keying this sheet will land where the rows land.
+  const derived = params.derived ?? null;
+  if (derived && derived.check.printedGrandTotal !== null) {
+    out.push({
+      category: "Gross total",
+      unit: "amount",
+      printed: derived.check.printedGrandTotal,
+      derived: derived.grandTotal ?? 0,
+      delta: derived.check.delta,
+      closes: derived.check.closes,
+    });
+    // A category carried from the print contributes the printed figure itself,
+    // so it cannot open a gap — only a gross that could not be computed at all
+    // (no derivable tax) has nothing to compare, and that lands as `null`.
+    if (!derived.check.closes && derived.grandTotal !== null) {
+      failures.push(
+        `Gross total: the rows and profile add to ${money(derived.grandTotal)}, the source prints ${money(
+          derived.check.printedGrandTotal
+        )}.`
+      );
+    }
+  }
+
   const totalsClose = failures.length === 0;
   if (params.unreadLines.length > 0) {
     failures.push(
@@ -1021,9 +1293,21 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     ? [...mitchellRead.unreadable]
     : findUnreadLineNumbers({ text, rows: folded, foldedLines, mitchellLayout })
   ).sort((a, b) => a - b);
+  const profile = buildProfileBlock({
+    text,
+    totals: expectedTotals,
+    deductible: mitchellLayout ? (parseMitchellEstimateTotals(text)?.deductible ?? null) : null,
+    subletPartsTotal: round2(
+      folded
+        .filter((row) => row.keyable && row.misc === null && row.partTypeCcc === "Sublet")
+        .reduce((total, row) => total + extendedPrice(row), 0)
+    ),
+  });
+  const derivedTotals = deriveRekeyTotals({ rows: folded, profile, printed: expectedTotals, mitchellLayout });
   const reconciliation = reconcileRekeySheet({
     rows: folded,
     totals: expectedTotals,
+    derived: derivedTotals,
     unreadLines: unread,
     mitchellLayout,
   });
@@ -1065,19 +1349,11 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       // year-anchored search that can land on a loss date.
       vehicle: (mitchellLayout ? readMitchellVehicle(text) : null) ?? identity.vehicle,
     },
-    profile: buildProfileBlock({
-      text,
-      totals: expectedTotals,
-      deductible: mitchellLayout ? (parseMitchellEstimateTotals(text)?.deductible ?? null) : null,
-      subletPartsTotal: round2(
-        folded
-          .filter((row) => row.keyable && row.misc === null && row.partTypeCcc === "Sublet")
-          .reduce((total, row) => total + extendedPrice(row), 0)
-      ),
-    }),
+    profile,
     groups,
     rows: folded,
     expectedTotals,
+    derivedTotals,
     reconciliation,
     partsVendorsBlock: partsVendors.lines,
     stats: {

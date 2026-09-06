@@ -115,7 +115,7 @@ Refinish3.0
 Additional Costs & Materials
 16AUTOPaint/MaterialsAdditional
 Cost
-$344.40Yes
+$319.20Yes
 17900500Hazardous Waste DisposalAdditional
 Cost
 $4.00*Yes
@@ -163,7 +163,7 @@ Tax 6.0000%$ 1 2 2 . 8 4$ 1 2 2 . 8 4
 Non-Taxable$ 0 . 0 0$ 0 . 0 0
 Pa rts   T ota lPa rts   T ota l$ 2 , 1 7 0 . 2 0$ 2 , 1 7 0 . 2 0
 CostsAmo u n tAmo u n t
-Paint Materials$344.40$344.40$344.40$344.40
+Paint Materials$319.20$319.20$319.20$319.20
 Shop Materials$0.00$0.00$0.00$0.00
 Other Additional
 Costs
@@ -172,17 +172,17 @@ Paint Materials:
       - Refinish Units: 7.6 units
       - Rate: $42.00
       - Rate Max: 99.9 units
-Taxable$ 3 4 8 . 4 0$ 3 4 8 . 4 0
-Tax 6.0000%$ 2 0 . 9 0$ 2 0 . 9 0
+Taxable$ 3 2 3 . 2 0$ 3 2 3 . 2 0
+Tax 6.0000%$ 1 9 . 3 9$ 1 9 . 3 9
 Non-Taxable$ 0 . 0 0$ 0 . 0 0
-Cos ts   T ota lCos ts   T ota l$ 3 6 9 . 3 0$ 3 6 9 . 3 0
+Cos ts   T ota lCos ts   T ota l$ 3 4 2 . 5 9$ 3 4 2 . 5 9
 Gross TotalsAmo u n tAmo u n t
-Gross Total$4,657.49$4,657.49$4,657.49$4,657.49
-Taxable$ 4 , 3 9 3 . 8 6$ 4 , 3 9 3 . 8 6
-Tax$ 2 6 3 . 6 3$ 2 6 3 . 6 3
+Gross Total$4,630.78$4,630.78$4,630.78$4,630.78
+Taxable$ 4 , 3 6 8 . 6 6$ 4 , 3 6 8 . 6 6
+Tax$ 2 6 2 . 1 2$ 2 6 2 . 1 2
 Non-Taxable$ 0 . 0 0$ 0 . 0 0
-G ros s   T ota lG ros s   T ota l$ 4 , 6 5 7 . 4 9$ 4 , 6 5 7 . 4 9
+G ros s   T ota lG ros s   T ota l$ 4 , 6 3 0 . 7 8$ 4 , 6 3 0 . 7 8
 AdjustmentsAmo u n tAmo u n t
 Deductible- $500.00- $500.00
-Net Estimate TotalNet Estimate Total$4,157.49$4,157.49
+Net Estimate TotalNet Estimate Total$4,130.78$4,130.78
 Estimate TotalsEstimate Totals
