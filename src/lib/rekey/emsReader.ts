@@ -8,8 +8,9 @@
  * fields they write, so every field lookup takes a candidate list and reports
  * what it actually found.
  *
- * Read-only. Nothing in this module writes, imports, or generates a file for
- * any estimating system.
+ * Read-only. Nothing in THIS module writes a file; the export writer added
+ * later lives in `emsWriter.ts` and shares only this module's dBase parser as
+ * its round-trip check. No workfile copy is read or generated anywhere.
  *
  * Byte access is `Uint8Array`/`DataView` rather than `Buffer` so the same
  * reader runs unchanged in the browser and on the server.

@@ -10,6 +10,7 @@ import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAt
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
 import { isEmsCompanionFile, readEmsBundle } from "@/lib/rekey/emsReader";
+import { isRekeyEmsWriterEnabled } from "@/lib/rekey/emsWriter";
 import {
   explainDocumentIsNotVerification,
   keyedEstimateFromEms,
@@ -413,6 +414,9 @@ export async function POST(request: NextRequest) {
         verificationText: verification ? buildRekeyVerificationText(verification) : null,
         keyedFilename,
         keyedNotice,
+        // The EMS export is flagged off by default; the panel offers it only
+        // where the flag is on, rather than showing a button that 503s.
+        emsExportAvailable: isRekeyEmsWriterEnabled(),
       },
       { headers: { "Cache-Control": "no-store" } }
     );

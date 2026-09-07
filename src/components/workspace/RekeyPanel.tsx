@@ -27,6 +27,7 @@ type RekeyResponse = {
   verificationText: string | null;
   keyedFilename: string | null;
   keyedNotice: string | null;
+  emsExportAvailable?: boolean;
 };
 
 const RESOLUTION_LABEL: Record<string, string> = {
@@ -118,6 +119,8 @@ export default function RekeyPanel() {
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState<string | null>(null);
   const [result, setResult] = useState<RekeyResponse | null>(null);
+  const [emsBusy, setEmsBusy] = useState(false);
+  const [emsNotes, setEmsNotes] = useState<string[] | null>(null);
 
   const buildSheet = async () => {
     if (!sourceFile || running) return;
@@ -166,6 +169,38 @@ export default function RekeyPanel() {
       setError("The rekey sheet could not be built. Your files were kept.");
     } finally {
       setRunning(false);
+    }
+  };
+
+  /**
+   * The EMS export (flagged). It pre-populates a receiving system; it does not
+   * rekey one, and the notes the server returns say what it cannot carry, so
+   * they are shown next to the download rather than buried in the file.
+   */
+  const downloadEmsExport = async () => {
+    if (!result || emsBusy) return;
+    setEmsBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/rekey/ems", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheet: result.sheet }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { filename: string; zipBase64: string; notes: string[]; error?: string }
+        | null;
+      if (!response.ok || !data?.zipBase64) {
+        setError(data?.error ?? "The EMS export could not be built.");
+        return;
+      }
+      const bytes = Uint8Array.from(atob(data.zipBase64), (character) => character.charCodeAt(0));
+      await downloadBlob(new Blob([bytes], { type: "application/zip" }), data.filename, "EMS export");
+      setEmsNotes(data.notes ?? []);
+    } catch {
+      setError("The EMS export could not be built.");
+    } finally {
+      setEmsBusy(false);
     }
   };
 
@@ -253,6 +288,17 @@ export default function RekeyPanel() {
             >
               <Download size={11} /> Ledger JSON
             </button>
+            {result.emsExportAvailable ? (
+              <button
+                type="button"
+                onClick={() => void downloadEmsExport()}
+                disabled={emsBusy}
+                title="Writes the sheet as a CIECA EMS export for import. Every line arrives as a manually entered line."
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-[11px] font-medium hover:bg-background disabled:opacity-60"
+              >
+                {emsBusy ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />} EMS export (beta)
+              </button>
+            ) : null}
             <span className="text-xs text-muted-foreground">
               Saved to Reports (#{result.reportId.slice(0, 8)}…)
             </span>
@@ -268,6 +314,16 @@ export default function RekeyPanel() {
       {error ? <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{error}</p> : null}
       {result?.keyedNotice ? (
         <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">{result.keyedNotice}</p>
+      ) : null}
+      {emsNotes && emsNotes.length > 0 ? (
+        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">What the EMS export carries</p>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {emsNotes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       {result ? (
