@@ -18,18 +18,22 @@
     "verbatim and flagged for the estimator — it is never guessed."
   ],
 
+  "$targetTermsComment": "A \"mitchell\" term beside a \"ccc\" one is the word the OTHER platform's print uses for the same operation or part type — the name an estimator keying into that platform types. Read off the two real Mitchell estimates in this repository, which between them print these nine operations and five part types. An entry with no \"mitchell\" term has none in evidence (CAPA A/M and Recond appear on neither print) and is reported as untranslated rather than guessed. \"mitchellCharge\" is a second word for one CCC operation: Mitchell prints a manual line as \"Additional Cost\" where it carries a charge and no hours (its $912.00 materials line) and \"Additional Operation\" where it bills hours (Clear Coat, Cover Car).",
+
   "operations": [
-    { "ccc": "Repl", "laborOpCode": "OP11", "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"] },
-    { "ccc": "R&I", "laborOpCode": "OP2", "aliases": ["REMOVE INSTALL", "REMOVE AND INSTALL", "R I", "REMOVE REINSTALL"] },
-    { "ccc": "Rpr", "laborOpCode": "OP9", "aliases": ["REPAIR", "RPR"] },
-    { "ccc": "Blnd", "laborOpCode": "OP15", "aliases": ["BLEND", "BLND"] },
-    { "ccc": "Refn", "laborOpCode": null, "refinishOnly": true, "aliases": ["REFINISH ONLY", "REFINISH", "REFN"] },
-    { "ccc": "O/H", "laborOpCode": null, "aliases": ["OVERHAUL", "O H"] },
-    { "ccc": "Aim", "laborOpCode": null, "aliases": ["CHECK ADJUST", "CHECK AND ADJUST", "AIM"] },
-    { "ccc": "Algn", "laborOpCode": "OP4", "aliases": ["ALIGN", "ALIGNMENT", "ALGN"] },
-    { "ccc": "Subl", "laborOpCode": "OP16", "sublet": true, "aliases": ["SUBLET", "SUBL"] },
+    { "ccc": "Repl", "mitchell": "Remove Replace", "laborOpCode": "OP11", "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"] },
+    { "ccc": "R&I", "mitchell": "Remove Install", "laborOpCode": "OP2", "aliases": ["REMOVE INSTALL", "REMOVE AND INSTALL", "R I", "REMOVE REINSTALL"] },
+    { "ccc": "Rpr", "mitchell": "Repair", "laborOpCode": "OP9", "aliases": ["REPAIR", "RPR"] },
+    { "ccc": "Blnd", "mitchell": "Blend", "laborOpCode": "OP15", "aliases": ["BLEND", "BLND"] },
+    { "ccc": "Refn", "mitchell": "Refinish Only", "laborOpCode": null, "refinishOnly": true, "aliases": ["REFINISH ONLY", "REFINISH", "REFN"] },
+    { "ccc": "O/H", "mitchell": "Overhaul", "laborOpCode": null, "aliases": ["OVERHAUL", "O H"] },
+    { "ccc": "Aim", "mitchell": "Check Adjust", "laborOpCode": null, "aliases": ["CHECK ADJUST", "CHECK AND ADJUST", "AIM"] },
+    { "ccc": "Algn", "mitchell": "Align", "laborOpCode": "OP4", "aliases": ["ALIGN", "ALIGNMENT", "ALGN"] },
+    { "ccc": "Subl", "mitchell": "Sublet", "laborOpCode": "OP16", "sublet": true, "aliases": ["SUBLET", "SUBL"] },
     {
       "ccc": "Manual",
+      "mitchell": "Additional Operation",
+      "mitchellCharge": "Additional Cost",
       "laborOpCode": "OP0",
       "manualEntry": true,
       "aliases": [
@@ -44,14 +48,14 @@
   ],
 
   "partTypes": [
-    { "ccc": "OEM", "ems": "PAN", "orderedByNumber": true, "aliases": ["NEW OEM", "OEM", "NEW"] },
+    { "ccc": "OEM", "mitchell": "New", "ems": "PAN", "orderedByNumber": true, "aliases": ["NEW OEM", "OEM", "NEW"] },
     { "ccc": "CAPA A/M", "ems": "PAC", "orderedByNumber": true, "aliases": ["AFTERMARKET CERTIFIED", "CERTIFIED AFTERMARKET", "CAPA"] },
-    { "ccc": "A/M", "ems": "PAA", "orderedByNumber": true, "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
-    { "ccc": "LKQ", "ems": "PAL", "orderedByNumber": true, "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
+    { "ccc": "A/M", "mitchell": "Aftermarket New", "ems": "PAA", "orderedByNumber": true, "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
+    { "ccc": "LKQ", "mitchell": "Qual Recycled Part", "ems": "PAL", "orderedByNumber": true, "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
     { "ccc": "Recond", "ems": "PAR", "orderedByNumber": true, "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
-    { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"], "emsAliases": ["PAE", "PAO"],
+    { "ccc": "None", "mitchell": "Existing", "ems": null, "laborOnly": true, "aliases": ["EXISTING"], "emsAliases": ["PAE", "PAO"],
       "$emsAliasesComment": "Codes a real export writes for a line that buys no part. Mitchell writes PART_TYPE \"PAE\" on the lines its print types \"Existing\" — the overhaul and R&I lines that bill labor against a part already on the vehicle. CCC writes \"PAO\" on the R&I and align lines that name the part they work on (\"RT Side support\", part 5211506050, R&I 0.1 h, no price) and on its sublet charge lines; its own print states no part type on either, and neither is a part type an estimator keys." },
-    { "ccc": "Sublet", "ems": "PAS", "miscOnly": true, "aliases": ["SUBLET"] }
+    { "ccc": "Sublet", "mitchell": "Sublet", "ems": "PAS", "miscOnly": true, "aliases": ["SUBLET"] }
   ],
 
   "laborTypes": [

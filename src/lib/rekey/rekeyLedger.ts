@@ -27,6 +27,7 @@ import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
 import { looksLikeCccLayout, type MitchellColumnReading } from "./mitchellColumnBands";
+import { targetGaps, translateOperation, translatePartType, type RekeyTarget } from "./rekeyTargets";
 import { mergeSourceExportRows } from "./emsSourceRows";
 import type { EmsEstimate } from "./emsReader";
 import {
@@ -265,6 +266,10 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   }
   if (row.operationCcc === "Manual") flags.push("manual line");
   if (row.partTypeCcc === UNMAPPED && row.partNumber) flags.push("part type: verify");
+  // A term the target platform has no evidenced word for. The warning names
+  // the class; the flag names the line.
+  if (row.operationTarget === null && row.operationCcc !== UNMAPPED) flags.push("operation: not translated");
+  if (row.partTypeTarget === null && row.partTypeCcc !== "None") flags.push("part type: not translated");
   // A stated part type the line prints no number for: the row says so on its
   // face rather than only in the note, because it changes what gets keyed.
   if (row.partTypeCcc === "None" && row.partTypeSource && !row.partNumber && row.price !== null) {
@@ -1056,6 +1061,13 @@ export interface BuildRekeySheetParams {
    * `emsSourceRows.ts` for what is taken and what is left alone.
    */
   sourceExport?: EmsEstimate | null;
+  /**
+   * Which system the sheet is keyed INTO. Defaults to the one this build has
+   * always produced, so an existing caller gets exactly the sheet it got
+   * before. A target whose vocabulary is incomplete says so in the warnings
+   * rather than emitting another platform's words as if they were its own.
+   */
+  target?: RekeyTarget;
 }
 
 export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
@@ -1101,6 +1113,10 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     notesByLine.set(line, [...(notesByLine.get(line) ?? []), ...notes]);
   }
   const warnings: string[] = [];
+  // The target is settled before any row is translated, and what it cannot yet
+  // say is said once, at the top, rather than discovered row by row.
+  const target: RekeyTarget = params.target ?? "ccc";
+  for (const gap of targetGaps(target)) warnings.push(gap);
 
   const ledger: RekeyLedgerRow[] = [];
   /** Rows whose quantity the print welded onto the part number — a short
@@ -1232,10 +1248,28 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       descriptionCcc: keyedDescription,
       operationSource: operation.sourceLabel,
       operationCcc: operation.ccc,
+      // The target's own word for it. One CCC operation is two words on the
+      // other platform, and the split is not "carries a charge": that print
+      // puts its sublet scans under Additional OPERATIONS though they carry a
+      // charge and no hours, and only the cost it computes from a profile
+      // setting under Additional COSTS. So the discriminator is the one this
+      // build already knows — a printed cost that belongs in the profile block
+      // rather than on a line.
+      operationTarget: translateOperation(operation.ccc, target, {
+        carriesCharge:
+          (costOnly || pricedWithoutPart) && matchesLabel(keyedDescription, PROFILE_ROUTED_COST_LABELS),
+      }),
       operationMapped: operation.mapped,
       laborOpCode: operation.laborOpCode,
       partTypeSource: partType.sourceLabel,
       partTypeCcc: numberlessPart ? "None" : partNumberSource || partType.mapped ? partType.ccc : "None",
+      // A part type withheld for want of a part number states nothing, and it
+      // must not acquire one in translation: the other platform's word for
+      // "None" is "Existing", which claims a part already on the vehicle — the
+      // opposite of a manual charge line that names no part at all.
+      partTypeTarget: numberlessPart
+        ? null
+        : translatePartType(partNumberSource || partType.mapped ? partType.ccc : "None", target),
       partTypeEms: numberlessPart ? null : partType.ems,
       partNumber: partNumberSource ? partNumberSource.replace(/\s+/g, "") : null,
       partNumberSource,
@@ -1569,6 +1603,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     // Which platform WROTE this estimate, from its own print. The column
     // reading answers first because it measured the page; the text anchor
     // answers where no geometry was available; neither guesses.
+    target,
     sourcePlatform: mitchellLayout
       ? "mitchell"
       : params.columns?.layout === "ccc" || looksLikeCccLayout(text)

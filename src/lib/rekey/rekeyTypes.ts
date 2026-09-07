@@ -35,10 +35,19 @@ export interface RekeyLedgerRow {
   descriptionCcc: string;
   operationSource: string | null;
   operationCcc: string;
+  /**
+   * The same operation in the TARGET system's words — what an estimator keying
+   * into it types. Equal to the CCC term while the target is CCC; null where no
+   * document has shown this build what that platform calls it.
+   */
+  operationTarget: string | null;
   operationMapped: boolean;
   laborOpCode: string | null;
   partTypeSource: string | null;
   partTypeCcc: string;
+  /** The same part type in the TARGET system's words, or null where none is in
+   *  evidence. */
+  partTypeTarget: string | null;
   partTypeEms: string | null;
   /** Whitespace-stripped, the form CCC is keyed with. */
   partNumber: string | null;
@@ -177,10 +186,15 @@ export interface RekeyReconciliation {
  *  neither layout claimed it — an unknown print is never asserted to be one. */
 export type RekeySourcePlatform = "mitchell" | "ccc";
 
+import type { RekeyTarget } from "./rekeyTargets";
+
 export interface RekeySheet {
   sourceFile: string;
   /** Which platform wrote the source estimate, when its own print says so. */
   sourcePlatform: RekeySourcePlatform | null;
+  /** Which system this sheet is keyed INTO. Every row's translated fields are
+   *  this target's vocabulary. */
+  target: RekeyTarget;
   identity: {
     vin: string | null;
     claimNumber: string | null;
