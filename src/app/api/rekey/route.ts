@@ -9,10 +9,11 @@ import { readEstimateColumns, type MitchellColumnReading } from "@/lib/rekey/mit
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
-import { isEmsCompanionFile, readEmsBundle } from "@/lib/rekey/emsReader";
+import { classifyEmsSelection, readEmsBundle } from "@/lib/rekey/emsReader";
 import { isRekeyEmsWriterEnabled } from "@/lib/rekey/emsWriter";
 import {
   explainDocumentIsNotVerification,
+  explainKeyedExport,
   keyedEstimateFromEms,
   verifyRekey,
   type RekeyVerification,
@@ -239,28 +240,20 @@ async function resolveEmsFiles(params: {
   if (params.inputs.length > MAX_EMS_FILES) {
     return { ok: false, error: `Select at most ${MAX_EMS_FILES} files from the EMS export folder.`, status: 400 };
   }
-  const files: Array<{ filename: string; bytes: Uint8Array }> = [];
-  const skipped: string[] = [];
+  const selected: Array<{ filename: string; bytes: Uint8Array }> = [];
   let total = 0;
   for (const input of params.inputs) {
     const filename =
       typeof input.filename === "string" && input.filename.trim() ? input.filename.trim().split(/[\\/]/).pop()! : "";
     const dataUrl = typeof input.dataUrl === "string" ? input.dataUrl : "";
     if (!filename || !dataUrl) continue;
-    // The estimate PDF and the workfile copy sit in the same folder as the
-    // tables. They are not part of the export, so they are left out here
-    // rather than reported as unreadable tables.
-    if (isEmsCompanionFile(filename)) {
-      skipped.push(filename);
-      continue;
-    }
     const buffer = dataUrlToBuffer(dataUrl);
     if (!buffer) return { ok: false, error: `${filename} could not be decoded.`, status: 400 };
     total += buffer.byteLength;
     if (total > MAX_FILE_BYTES) {
       return { ok: false, error: "The EMS export must be under 20 MB in total.", status: 413 };
     }
-    files.push({ filename, bytes: new Uint8Array(buffer) });
+    selected.push({ filename, bytes: new Uint8Array(buffer) });
     // Same promise as every other upload: the file is kept whatever the parse
     // produces.
     await saveUploadedAttachment({
@@ -271,6 +264,16 @@ async function resolveEmsFiles(params: {
       sizeBytes: buffer.byteLength,
       source: "direct_upload",
     }).catch(() => null);
+  }
+  // An archive in the selection is opened rather than thrown away, and what
+  // comes out of it is classified the same way.
+  const sorted = classifyEmsSelection(selected);
+  const files = [...sorted.tables];
+  const skipped = [...sorted.skipped];
+  for (const archive of sorted.archives) {
+    const inner = classifyEmsSelection(await readEmsFilesFromZip(Buffer.from(archive.bytes)));
+    files.push(...inner.tables);
+    skipped.push(...inner.skipped);
   }
   if (files.length === 0) {
     return {
@@ -350,8 +353,9 @@ export async function POST(request: NextRequest) {
       const loose = await resolveEmsFiles({ inputs: looseEmsFiles, userId: user.id });
       if (!loose.ok) return NextResponse.json({ error: loose.error }, { status: loose.status });
       keyedFilename = loose.filename;
-      const result = keyedEstimateFromEms(readEmsBundle(loose.files), loose.filename);
-      if (!result.ok) keyedNotice = result.reason;
+      const bundle = readEmsBundle(loose.files);
+      const result = keyedEstimateFromEms(bundle, loose.filename);
+      if (!result.ok) keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason });
       else verification = verifyRekey({ sheet, keyed: result.estimate });
       // Say what was read and what was passed over, so the estimator can see
       // that the estimate PDF sitting in the same folder was not the thing
@@ -375,7 +379,7 @@ export async function POST(request: NextRequest) {
       if (keyed.kind === "ems") {
         const bundle = readEmsBundle(await readEmsFilesFromZip(keyed.buffer));
         const result = keyedEstimateFromEms(bundle, keyed.filename);
-        if (!result.ok) keyedNotice = result.reason;
+        if (!result.ok) keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason });
         else verification = verifyRekey({ sheet, keyed: result.estimate });
       } else if (!keyed.text.trim()) {
         keyedNotice =

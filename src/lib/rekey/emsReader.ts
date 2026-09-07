@@ -155,6 +155,36 @@ export function isEmsCompanionFile(filename: string): boolean {
 }
 
 /**
+ * Sort a file SELECTION into the export's tables, the archives to open, and
+ * the companions to leave out.
+ *
+ * A shop selects what is in front of them. On a real export folder that is the
+ * tables, the estimate PDF, a BMS xml, and — often — the export zipped up
+ * beside them. Discarding the archive for being an archive and then reporting
+ * "no EMS tables were found in that selection" is a true sentence about the
+ * wrong file: the tables were inside the thing that was thrown away.
+ */
+export function classifyEmsSelection(files: Array<{ filename: string; bytes: Uint8Array }>): {
+  tables: Array<{ filename: string; bytes: Uint8Array }>;
+  archives: Array<{ filename: string; bytes: Uint8Array }>;
+  skipped: string[];
+} {
+  const tables: Array<{ filename: string; bytes: Uint8Array }> = [];
+  const archives: Array<{ filename: string; bytes: Uint8Array }> = [];
+  const skipped: string[] = [];
+  for (const file of files) {
+    // The archive test is on the bytes, not the name: a zip is a zip whatever
+    // it is called, and a table is never one.
+    const isArchive =
+      file.bytes.length > 4 && file.bytes[0] === 0x50 && file.bytes[1] === 0x4b && /\.zip$/i.test(file.filename);
+    if (isArchive) archives.push(file);
+    else if (isEmsCompanionFile(file.filename)) skipped.push(file.filename);
+    else tables.push(file);
+  }
+  return { tables, archives, skipped };
+}
+
+/**
  * Build a bundle from the files of an EMS export. Keys are the file extension
  * (the CIECA table name); a file with no recognizable dBase header is recorded
  * as an error and skipped.

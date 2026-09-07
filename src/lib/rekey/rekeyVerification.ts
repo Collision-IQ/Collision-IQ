@@ -296,6 +296,49 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
   return `The second upload is ${platform}, so no verification was produced. Verification proves a rekey closed against its source and takes the EMS export (ZIP) of the rekeyed CCC workfile as the keyed side. Two estimates for the same vehicle are a shop-versus-carrier comparison — run them through the Estimate Delta report instead. The rekey sheet above is complete and unaffected.`;
 }
 
+/**
+ * Why an EMS export the gate refused was refused — in the estimator's terms.
+ *
+ * The gate answers one question: is this the export of the CCC workfile the
+ * sheet was keyed into. It has no idea what else the file might be, so when a
+ * shop uploads the SOURCE estimate's own export — the Mitchell estimate on
+ * upload 1 and Mitchell's own EMS folder on upload 2, same VIN, same claim —
+ * the refusal reads "an export from another platform is a cross-platform
+ * comparison, use the Estimate Delta report", which is about a comparison the
+ * estimator never asked for and describes the wrong file.
+ *
+ * Named here from the two facts that settle it: whose export it is, and
+ * whether it is the same vehicle and claim as the sheet.
+ */
+export function explainKeyedExport(params: {
+  sheet: RekeySheet;
+  bundle: EmsBundle;
+  reason: string;
+}): string {
+  const estimate = normalizeEmsEstimate(params.bundle);
+  const system = (estimate.estimatingSystem ?? "").trim();
+  if (!system || /^c$|ccc/i.test(system)) return params.reason;
+
+  const sameVin = Boolean(
+    estimate.vin &&
+      params.sheet.identity.vin &&
+      estimate.vin.trim().toUpperCase() === params.sheet.identity.vin.trim().toUpperCase()
+  );
+  const sameClaim = Boolean(
+    estimate.claimNumber &&
+      params.sheet.identity.claimNumber &&
+      sameClaimTolerant(estimate.claimNumber, params.sheet.identity.claimNumber)
+  );
+  if (!sameVin && !sameClaim) return params.reason;
+
+  const lines = estimate.lines.length;
+  return `That export is the SOURCE estimate's own — same ${
+    sameVin ? "VIN" : "claim number"
+  } as the sheet, written by the estimating system the source came from, ${lines} line${
+    lines === 1 ? "" : "s"
+  }. It is not a rekey of anything, so there is nothing to verify against yet: verification takes the export of the workfile AFTER the sheet has been keyed into the receiving system. The sheet above is complete and unaffected.`;
+}
+
 export type RekeyLineResolution = "exact" | "value_delta" | "missing_in_keyed" | "unmatched";
 
 export interface RekeyFieldDelta {
