@@ -29,6 +29,9 @@ type OperationEntry = {
   ccc: string;
   laborOpCode: string | null;
   aliases: string[];
+  /** Aliases that name the operation but stay in the description — see the
+   *  vocabulary's own comment for the document that settles it. */
+  aliasesKeptInDescription?: string[];
   refinishOnly?: boolean;
   sublet?: boolean;
   manualEntry?: boolean;
@@ -85,6 +88,10 @@ function aliasIndex<T>(entries: T[], aliasesOf: (entry: T) => string[]): Array<[
 }
 
 const OPERATION_ALIAS_INDEX = aliasIndex(OPERATIONS, (entry) => entry.aliases);
+/** Operation words that identify the operation WITHOUT being taken out of the
+ *  description. Consulted after the ordinary aliases, so a word that is both
+ *  keeps its ordinary meaning. */
+const OPERATION_KEPT_ALIAS_INDEX = aliasIndex(OPERATIONS, (entry) => entry.aliasesKeptInDescription ?? []);
 const PART_TYPE_ALIAS_INDEX = aliasIndex(PART_TYPES, (entry) => entry.aliases);
 const LABOR_TYPE_ALIAS_INDEX = aliasIndex(LABOR_TYPES, (entry) => entry.aliases);
 const SECTION_GROUP_ALIAS_INDEX = aliasIndex(SECTION_GROUPS, (entry) => entry.aliases);
@@ -121,7 +128,12 @@ export function resolveOperation(params: {
   const opCode = (params.opCode ?? "").trim();
 
   if (opCode) {
-    const entry = OPERATION_ALIAS_INDEX.find(([alias]) => alias === normalizeVocabularyText(opCode));
+    const stated = normalizeVocabularyText(opCode);
+    const entry =
+      OPERATION_ALIAS_INDEX.find(([alias]) => alias === stated) ??
+      // A word printed IN the operation column is an operation whichever list
+      // it lives in; the kept list is only about not editing a description.
+      OPERATION_KEPT_ALIAS_INDEX.find(([alias]) => alias === stated);
     // An op code the vocabulary does not know is not an operation, and taking
     // it as one costs twice: it puts a word CCC has no operation for on the
     // sheet, and it leaves the description without its own first word. A CCC
@@ -141,8 +153,13 @@ export function resolveOperation(params: {
         manualEntry: false,
       };
     }
+    // The TABLE's term, not the printed one. They are the same word on every
+    // code these documents print, but they need not be: one print writes "Rpl"
+    // where the table says "Repl", and a row carrying "Rpl" as its canonical
+    // operation is a row nothing downstream can translate, code or compare —
+    // the printed spelling is kept as the source label, which is its job.
     return {
-      ccc: opCode,
+      ccc: entry[1].ccc,
       laborOpCode: entry[1].laborOpCode,
       sourceLabel: opCode,
       description,
@@ -165,6 +182,24 @@ export function resolveOperation(params: {
       laborOpCode: entry.laborOpCode,
       sourceLabel: dropLeadingWords(description, 0, wordCount).consumed,
       description: dropLeadingWords(description, 0, wordCount).rest,
+      mapped: true,
+      refinishOnly: entry.refinishOnly === true,
+      sublet: entry.sublet === true,
+      manualEntry: entry.manualEntry === true,
+    };
+  }
+
+  for (const [alias, entry] of OPERATION_KEPT_ALIAS_INDEX) {
+    if (!alias) continue;
+    if (normalized !== alias && !normalized.startsWith(`${alias} `)) continue;
+    // The operation is read; the wording is not touched. The source's own
+    // system keeps these words in the description, and a sheet that edits them
+    // out stops matching that system's export.
+    return {
+      ccc: entry.ccc,
+      laborOpCode: entry.laborOpCode,
+      sourceLabel: dropLeadingWords(description, 0, alias.split(" ").length).consumed,
+      description,
       mapped: true,
       refinishOnly: entry.refinishOnly === true,
       sublet: entry.sublet === true,

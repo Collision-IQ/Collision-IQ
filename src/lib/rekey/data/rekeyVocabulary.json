@@ -20,8 +20,9 @@
 
   "$targetTermsComment": "A \"mitchell\" term beside a \"ccc\" one is the word the OTHER platform's print uses for the same operation or part type — the name an estimator keying into that platform types. Read off the two real Mitchell estimates in this repository, which between them print these nine operations and five part types. An entry with no \"mitchell\" term has none in evidence (CAPA A/M and Recond appear on neither print) and is reported as untranslated rather than guessed. \"mitchellCharge\" is a second word for one CCC operation: Mitchell prints a manual line as \"Additional Cost\" where it carries a charge and no hours (its $912.00 materials line) and \"Additional Operation\" where it bills hours (Clear Coat, Cover Car).",
 
+  "$operationsAliasesKeptInDescriptionComment": "An alias that names the operation but STAYS in the description. A word in an operation column is an operation; the same word at the head of a description may be part of the description, and one document settles which: a CCC print writes \"Rpl information labels\" with an EMPTY operation column, and that estimate's own EMS export stores all three words as LINE_DESC. Taking \"Rpl\" out left the row reading \"information labels\", which matched the export's section-heading line instead of its own and reported a labor delta that was not there. So the operation is read and the wording is left exactly as the source keeps it.",
   "operations": [
-    { "ccc": "Repl", "mitchell": "Remove Replace", "laborOpCode": "OP11", "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"] },
+    { "ccc": "Repl", "mitchell": "Remove Replace", "laborOpCode": "OP11", "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"], "aliasesKeptInDescription": ["RPL"] },
     { "ccc": "R&I", "mitchell": "Remove Install", "laborOpCode": "OP2", "aliases": ["REMOVE INSTALL", "REMOVE AND INSTALL", "R I", "REMOVE REINSTALL"] },
     { "ccc": "Rpr", "mitchell": "Repair", "laborOpCode": "OP9", "aliases": ["REPAIR", "RPR"] },
     { "ccc": "Blnd", "mitchell": "Blend", "laborOpCode": "OP15", "aliases": ["BLEND", "BLND"] },

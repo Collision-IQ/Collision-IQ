@@ -165,6 +165,10 @@ describe("RV-5 — an export's zeros are not values", () => {
     const counts = check.lineFindings
       .flatMap((finding) => finding.deltas)
       .reduce<Record<string, number>>((totals, delta) => ({ ...totals, [delta.field]: (totals[delta.field] ?? 0) + 1 }), {});
+    // Fourteen would mean line 5 had been mispaired: the sheet reads its
+    // operation off "Rpl information labels" without editing the words, so it
+    // still pairs with the export's own line 5 rather than with the
+    // INFORMATION LABELS heading above it.
     expect(counts).toEqual({ "charge column": 13 });
     expect(check.summary.exact).toBe(82);
     expect(check.summary.missing).toBe(0);

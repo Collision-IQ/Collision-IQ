@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { assessRekeySheet, buildRekeySheet } from "../rekeyLedger";
 import { readCccColumns, readEstimateColumns, readMitchellColumns, type MitchellPageWord } from "../mitchellColumnBands";
+import { resolveOperation } from "../rekeyVocabulary";
 
 /**
  * The CCC print, read from its own column bands.
@@ -140,23 +141,63 @@ describe("a blank operation column is reported as blank", () => {
   const sheet = buildRekeySheet({ text: TEXT, sourceFile: "ccc.pdf", columns });
   const line5 = sheet.rows.find((entry) => entry.sourceLine === 5);
 
-  it("does not tell the estimator to read wording that is not there", () => {
-    // Line 5 prints "Rpl information labels" with an EMPTY Oper column. Saying
-    // it "carries an operation this build does not translate" sends him
-    // looking for a word the print never wrote.
-    expect(line5?.operationSource).toBeNull();
-    expect(line5?.flags).toContain("operation: not printed");
+  it("reads the operation the line's own wording states, and keeps the wording", () => {
+    // Line 5 prints "Rpl information labels" with an EMPTY Oper column: the
+    // estimator typed the operation into the description because a manual line
+    // gives him nowhere else to put it. Telling him to "choose the operation
+    // from the line's own wording" when the wording says Rpl is telling him to
+    // read a word this build can read.
+    //
+    // The description is NOT edited, and that is the part the documents
+    // settle: this estimate's own EMS export stores all three words as
+    // LINE_DESC. Taking "Rpl" out left the row reading "information labels",
+    // which matched the export's INFORMATION LABELS section-heading line
+    // instead of its own and reported a 0.3 h labor delta that was not there.
+    expect(line5).toMatchObject({
+      operationSource: "Rpl",
+      operationCanonical: "Repl",
+      descriptionTarget: "Rpl information labels",
+    });
+    expect(line5?.flags).not.toContain("operation: not printed");
     expect(line5?.flags).not.toContain("operation: verify");
   });
 
   it("counts the two causes separately, because they call for different work", () => {
-    // Six: this line, and the five "Add for ..." allowances whose operation
-    // column is equally empty.
-    expect(sheet.stats).toMatchObject({ unmappedOperations: 6, untranslatedOperations: 0, unstatedOperations: 6 });
+    // Five: the "Add for ..." allowances, whose operation column is equally
+    // empty and whose wording names no operation either — an allowance added
+    // to the line above it, which is exactly what the estimator must decide.
+    expect(sheet.stats).toMatchObject({ unmappedOperations: 5, untranslatedOperations: 0, unstatedOperations: 5 });
     expect(sheet.warnings).toContain(
-      "6 lines have no operation printed against them. Choose the operation from the line's own wording when keying."
+      "5 lines have no operation printed against them. Choose the operation from the line's own wording when keying."
     );
     expect(sheet.warnings.some((warning) => /does not translate/.test(warning))).toBe(false);
+    expect(
+      sheet.rows.filter((row) => row.flags.includes("operation: not printed")).map((row) => row.sourceLine)
+    ).toEqual([11, 12, 54, 55, 56]);
+  });
+
+  it("keeps the operation word where the source keeps it, and only there", () => {
+    // The two halves of the rule, stated on the resolver itself. A word in an
+    // operation COLUMN is an operation and the description never had it; the
+    // same word at the head of a description names the operation and stays.
+    expect(resolveOperation({ opCode: "Rpl", description: "information labels" })).toMatchObject({
+      ccc: "Repl",
+      sourceLabel: "Rpl",
+      description: "information labels",
+    });
+    expect(resolveOperation({ description: "Rpl information labels" })).toMatchObject({
+      ccc: "Repl",
+      sourceLabel: "Rpl",
+      description: "Rpl information labels",
+    });
+    // An ordinary alias is still consumed: this is how a Mitchell print, which
+    // welds the operation onto the description, reads at all.
+    expect(resolveOperation({ description: "Remove Replace Frt Bumper Cover" })).toMatchObject({
+      ccc: "Repl",
+      description: "Frt Bumper Cover",
+    });
+    // And the printed spelling never becomes the canonical term.
+    expect(resolveOperation({ opCode: "REPL", description: "x" }).ccc).toBe("Repl");
   });
 
   it("does not take a word off the front of a description and call it an operation", () => {
