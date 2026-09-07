@@ -4,8 +4,9 @@ import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import JSZip from "jszip";
 import { classifyEmsSelection, normalizeEmsEstimate, readEmsBundle } from "../emsReader";
-import { explainKeyedExport, isSourceOwnExport, keyedEstimateFromEms } from "../rekeyVerification";
+import { explainKeyedExport, isSourceOwnExport, keyedEstimateFromEms, verifyRekey } from "../rekeyVerification";
 import { isManualEntry } from "../emsSourceRows";
+import { readEstimateColumns } from "../mitchellColumnBands";
 
 /**
  * The SOURCE estimate's own EMS export, uploaded as the second file.
@@ -277,5 +278,65 @@ describe("a line the estimator typed, stated by the export", () => {
     const text = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8");
     const ccc = buildRekeySheet({ text, sourceFile: "ccc.pdf", sourceExport: cccExport });
     expect(ccc.rows.some((row) => row.flags.includes("no database entry"))).toBe(false);
+  });
+});
+
+/**
+ * RV-9 — a description cut off at the export's field width.
+ *
+ * CIECA EMS gives LINE_DESC 40 characters. A longer description arrives cut
+ * off, and on the real CCC pair that is "Raw plastic primer (Per raw plastic
+ * pane" — one letter short of its own last word. Every description key missed
+ * it, and the line was reported twice: once as never keyed, once as keyed but
+ * not in the source. That is the failure the matcher's operation-free key
+ * exists to prevent, arriving through the field width instead.
+ */
+describe("a keyed description may be a truncated form of the source's", () => {
+  const dir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+  const bundle = readEmsBundle(
+    fs.readdirSync(dir).map((name) => ({
+      filename: name,
+      bytes: new Uint8Array(fs.readFileSync(path.join(dir, name))),
+    }))
+  );
+  // With the page's own column bands, as the build reads a real CCC PDF.
+  const words = (
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+      p: number;
+      x: number;
+      y: number;
+      w: number;
+      t: string;
+    }>
+  ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+  const cccSheet = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
+    sourceFile: "CCC Estimate.pdf",
+    columns: readEstimateColumns(words),
+  });
+  const keyed = keyedEstimateFromEms(bundle, "ccc.zip");
+  if (!keyed.ok) throw new Error(keyed.reason);
+
+  it("pairs the line instead of reporting it as both missing and extra", () => {
+    const truncated = keyed.estimate.lines.find((line) => /^Raw plastic primer/i.test(line.description ?? ""));
+    expect(truncated?.description).toBe("Raw plastic primer (Per raw plastic pane");
+    expect(truncated?.description).toHaveLength(40);
+
+    const check = verifyRekey({ sheet: cccSheet, keyed: keyed.estimate });
+    const finding = check.lineFindings.find((entry) => /^Raw plastic primer/i.test(entry.description));
+    expect(finding?.resolution).not.toBe("missing_in_keyed");
+    expect(finding?.matchedBy).toBe("description");
+    expect(check.extraLines.some((line) => /^Raw plastic primer/i.test(line.description ?? ""))).toBe(false);
+  });
+
+  it("does not let a short name stand for a longer one", () => {
+    // The prefix rule has a floor: below it a name is short enough to be a
+    // different part's whole name, and pairing on it would be a guess.
+    const check = verifyRekey({ sheet: cccSheet, keyed: keyed.estimate });
+    expect(check.summary.unmatched).toBe(0);
+    expect(check.summary.missing).toBe(0);
+    // Every pairing still reports the same single fact about this pair.
+    const fields = new Set(check.lineFindings.flatMap((entry) => entry.deltas).map((delta) => delta.field));
+    expect([...fields]).toEqual(["charge column"]);
   });
 });

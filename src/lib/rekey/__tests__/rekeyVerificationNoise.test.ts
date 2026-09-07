@@ -155,11 +155,20 @@ describe("RV-5 — an export's zeros are not values", () => {
     // The two documents ARE the same workfile, so every remaining finding is
     // one fact: the print marks a manual charge miscellaneous and its own
     // export books the identical dollars as a price.
+    //
+    // Thirteen, not twelve: the thirteenth is "Raw plastic primer (Per raw
+    // plastic panel)", whose description is longer than the 40 characters an
+    // EMS export gives LINE_DESC. Cut off one letter into its last word it
+    // matched nothing, and the same line was reported twice — once as never
+    // keyed, once as keyed but not in the source — until the matcher learned
+    // to read a keyed description as a prefix of the source's.
     const counts = check.lineFindings
       .flatMap((finding) => finding.deltas)
       .reduce<Record<string, number>>((totals, delta) => ({ ...totals, [delta.field]: (totals[delta.field] ?? 0) + 1 }), {});
-    expect(counts).toEqual({ "charge column": 12 });
+    expect(counts).toEqual({ "charge column": 13 });
     expect(check.summary.exact).toBe(82);
+    expect(check.summary.missing).toBe(0);
+    expect(check.summary.unmatched).toBe(0);
     expect(check.identity.verdict).toBe("match");
   });
 

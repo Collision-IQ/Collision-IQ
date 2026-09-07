@@ -874,6 +874,25 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     return null;
   };
 
+  /** Shortest cut-off description that may stand for a longer one. Below this
+   *  a name is short enough to be a different part's whole name. */
+  const TRUNCATED_DESCRIPTION_FLOOR = 24;
+  const takeTruncatedDescription = (description: string | null, pool: Map<string, KeyedLine>): KeyedLine | null => {
+    const source = (description ?? "").trim();
+    if (source.length <= TRUNCATED_DESCRIPTION_FLOOR) return null;
+    const sourceSide = detectSide(source);
+    for (const line of pool.values()) {
+      const keyedDescription = (line.description ?? "").trim();
+      if (keyedDescription.length < TRUNCATED_DESCRIPTION_FLOOR) continue;
+      if (keyedDescription.length >= source.length) continue;
+      const lineSide = detectSide(keyedDescription);
+      if (sourceSide && lineSide && sourceSide !== lineSide) continue;
+      if (canonKey(source.slice(0, keyedDescription.length)).key !== canonKey(keyedDescription).key) continue;
+      return line;
+    }
+    return null;
+  };
+
   const lineFindings: RekeyLineFinding[] = [];
   for (const row of keyable) {
     let match: KeyedLine | null = null;
@@ -889,6 +908,19 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       match = takeFirstAvailable(byOperationDescription.get(keys.withOperation));
       if (!match) match = takeFirstAvailable(byDescription.get(keys.withoutOperation));
       if (!match) match = takeFirstAvailable(byDescriptionNoGroup.get(keys.withoutGroup));
+      // RV-9: an export's description field has a WIDTH, and a longer
+      // description arrives cut off at it. CIECA EMS gives LINE_DESC 40
+      // characters, so "Raw plastic primer (Per raw plastic panel)" is written
+      // as "…plastic pane" — one letter short of its own last word, which is
+      // enough for every key above to miss. The line was then reported twice,
+      // once as never keyed and once as keyed but not in the source: the exact
+      // failure the operation-free key exists to prevent, arriving through the
+      // field width instead.
+      //
+      // No width is assumed. The keyed side is tried as a PREFIX of the
+      // source's own description, at whatever length it happens to be, with a
+      // floor long enough that a short name cannot swallow a longer one.
+      if (!match) match = takeTruncatedDescription(row.descriptionCcc, remaining);
       if (match) matchedBy = "description";
     }
     // §4.3d nomenclature — the same line under the other database's name.
