@@ -318,6 +318,50 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
  * whether it is the same vehicle and claim as the sheet.
  */
 /**
+ * An export from the OTHER platform, for the same vehicle — and still refused.
+ *
+ * The gate's own words are about the direction this build once had: a rekey
+ * INTO CCC, verified against the CCC workfile's export. Either platform's
+ * estimate can be the source now, but the SHEET still translates into CCC
+ * only — the groups, the operation codes and the part types above are CCC's
+ * vocabulary — so an export from any other system is not the workfile this
+ * sheet was keyed into, whatever else it may be. Telling the estimator to go
+ * and run a comparison report on what could be their own rekeyed workfile is
+ * the wrong instruction; naming what the file is, and why it is not the keyed
+ * side, is the right one.
+ *
+ * Returns null where this does not apply, and the caller keeps the gate's own
+ * words.
+ */
+function explainOtherPlatformExport(params: { sheet: RekeySheet; estimate: EmsEstimate }): string | null {
+  const system = (params.estimate.estimatingSystem ?? "").trim();
+  const target = ESTIMATING_SYSTEMS.find((entry) => entry.platform === "ccc");
+  const wrote = ESTIMATING_SYSTEMS.find((entry) => entry.ems.toUpperCase() === system.toUpperCase());
+  if (!system || !wrote || !target || wrote.ems.toUpperCase() === target.ems.toUpperCase()) return null;
+
+  const sameVin = Boolean(
+    params.estimate.vin &&
+      params.sheet.identity.vin &&
+      params.estimate.vin.trim().toUpperCase() === params.sheet.identity.vin.trim().toUpperCase()
+  );
+  const sameClaim = Boolean(
+    params.estimate.claimNumber &&
+      params.sheet.identity.claimNumber &&
+      sameClaimTolerant(params.estimate.claimNumber, params.sheet.identity.claimNumber)
+  );
+  if (!sameVin && !sameClaim) return null;
+
+  const lines = params.estimate.lines.length;
+  return `That export is a ${wrote.label} workfile for the same ${
+    sameVin ? "VIN" : "claim number"
+  } as the sheet, ${lines} line${lines === 1 ? "" : "s"}, and it was not verified against the sheet. The sheet above keys into ${
+    target.label
+  } — its groups, operation codes and part types are ${target.label}'s vocabulary — so verification takes the export of the ${
+    target.label
+  } workfile it was keyed into. If the rekey went the other way, this build has no sheet for that direction yet. The sheet above is complete and unaffected.`;
+}
+
+/**
  * Is this export the SOURCE estimate's own, or the workfile keyed from it?
  *
  * Both carry the same VIN and the same claim number, so identity cannot tell
@@ -373,7 +417,7 @@ export function explainKeyedExport(params: {
 }): string {
   const estimate = normalizeEmsEstimate(params.bundle);
   const own = isSourceOwnExport({ sheet: params.sheet, estimate });
-  if (!own.yes) return params.reason ?? "";
+  if (!own.yes) return explainOtherPlatformExport({ sheet: params.sheet, estimate }) ?? params.reason ?? "";
 
   const lines = estimate.lines.length;
   const used =

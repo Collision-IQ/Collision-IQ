@@ -427,3 +427,61 @@ describe("the source's platform decides what the second upload is", () => {
     expect(merged.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
   });
 });
+
+/**
+ * The fourth pairing: a source estimate from one platform, and an export from
+ * the other that is NOT this build's rekey target.
+ *
+ * Either platform's estimate can be the source, but the sheet still translates
+ * into CCC only. So a Mitchell workfile export against a CCC-sourced sheet is
+ * refused — correctly — and the refusal has to say what the file is rather
+ * than sending the estimator off to a comparison report on what may be their
+ * own rekeyed workfile.
+ */
+describe("an export from a platform this sheet does not key into", () => {
+  const cccWords = (
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+      p: number;
+      x: number;
+      y: number;
+      w: number;
+      t: string;
+    }>
+  ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+  const cccSheet = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
+    sourceFile: "CCC Estimate.pdf",
+    columns: readEstimateColumns(cccWords),
+  });
+  const bundle = readEmsBundle(files());
+  const estimate = normalizeEmsEstimate(bundle);
+  const refused = keyedEstimateFromEms(bundle, "29508501.zip");
+
+  it("is neither the source's own nor a keyed side", () => {
+    expect(isSourceOwnExport({ sheet: cccSheet, estimate }).yes).toBe(false);
+    expect(refused.ok).toBe(false);
+  });
+
+  it("names the file and why it was not verified", () => {
+    if (refused.ok) throw new Error("expected the gate to refuse this export");
+    const explained = explainKeyedExport({ sheet: cccSheet, bundle, reason: refused.reason });
+    expect(explained).toMatch(/a Mitchell workfile for the same VIN as the sheet, 93 lines/);
+    expect(explained).toMatch(/The sheet above keys into CCC/);
+    expect(explained).toMatch(/no sheet for that direction yet/);
+    // Not the old instruction, which pointed at a comparison nobody asked for.
+    expect(explained).not.toMatch(/Estimate Delta/);
+  });
+
+  it("keeps the gate's own words for an export of another vehicle", () => {
+    if (refused.ok) throw new Error("expected the gate to refuse this export");
+    const other = buildRekeySheet({
+      text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk1b-mitchell-text.txt"), "utf8"),
+      sourceFile: "other.pdf",
+    });
+    expect(explainKeyedExport({ sheet: other, bundle, reason: refused.reason })).toBe(refused.reason);
+  });
+
+  it("leaves the sheet alone", () => {
+    expect(cccSheet.derivedTotals?.check).toMatchObject({ printedGrandTotal: 12138.16, delta: 0, closes: true });
+  });
+});
