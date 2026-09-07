@@ -1118,11 +1118,15 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       .map((category) => resolveLaborType(/^(.+?)\s+labor$/i.exec(category.category)?.[1] ?? ""))
       .filter((type): type is string => type !== null)
   );
+  /** Rows the SOURCE'S OWN EXPORT marks as typed by the estimator rather than
+   *  taken from its parts and labor database. */
+  const manualEntryRows = new Set<string>();
   const finishFlags = (row: RekeyLedgerRow) => {
     row.flags = flagsFor(row);
     if (weldedQtyRows.has(row.id) && !columnReadRows.has(row.id)) row.flags.push("qty welded: verify");
     const marked = markedLaborRows.get(row.id);
     if (marked) row.flags.push(`marked ${marked}`);
+    if (manualEntryRows.has(row.id)) row.flags.push("no database entry");
   };
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
@@ -1265,6 +1269,17 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       ledgerRow.notes.push(
         `The source prints the part type "${partType.sourceLabel ?? ""}" but no part number, so there is no part to order: key the amount as a charge on the line, with no part type. The source counts these dollars in its parts total and so does the other platform.`
       );
+    }
+    // The source's own export says this line was typed rather than pulled from
+    // the estimating database. That is the system's own word for it, not this
+    // build's reading of a page, and it changes what the estimator keys: a
+    // typed line stays typed in the receiving system, and its price and hours
+    // are the estimator's figures rather than database ones.
+    if (row.lineNumber !== null && fromExport?.manualLines.has(row.lineNumber)) {
+      ledgerRow.notes.push(
+        "The source's own export marks this line as typed by the estimator rather than taken from its parts and labor database. Key it as a manual line: its price and hours are the estimator's own figures, and no database entry stands behind them."
+      );
+      manualEntryRows.add(ledgerRow.id);
     }
     // The reader carries what it could not read cleanly as a bracketed marker
     // on the row text; it is an instruction to the estimator, so it is a note.

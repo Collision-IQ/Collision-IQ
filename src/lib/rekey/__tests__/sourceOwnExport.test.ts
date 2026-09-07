@@ -5,6 +5,7 @@ import { buildRekeySheet } from "../rekeyLedger";
 import JSZip from "jszip";
 import { classifyEmsSelection, normalizeEmsEstimate, readEmsBundle } from "../emsReader";
 import { explainKeyedExport, isSourceOwnExport, keyedEstimateFromEms } from "../rekeyVerification";
+import { isManualEntry } from "../emsSourceRows";
 
 /**
  * The SOURCE estimate's own EMS export, uploaded as the second file.
@@ -194,5 +195,75 @@ describe("the source's own export supplies the line values", () => {
       built.derivedTotals?.categories.find((category) => /^parts$/i.test(category.category))?.cost;
     expect(parts(buildRekeySheet({ text, sourceFile: "ccc.pdf" }))).toBeCloseTo(15346.23, 2);
     expect(parts(buildRekeySheet({ text, sourceFile: "ccc.pdf", sourceExport: cccExport }))).toBeCloseTo(5440.64, 2);
+  });
+});
+
+/**
+ * The manual-entry marker, taken from the export instead of inferred.
+ *
+ * An estimating system writes its own reference on every line it pulled from
+ * the parts and labor database, and a manual-entry code on every line the
+ * estimator typed. That is the system's word for it — the sheet had been
+ * reasoning about the same fact from what the page showed.
+ */
+describe("a line the estimator typed, stated by the export", () => {
+  const estimate = normalizeEmsEstimate(readEmsBundle(files()));
+  const withExport = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk2-mitchell-text.txt"), "utf8"),
+    sourceFile: "Mitchell Estimate.pdf",
+    sourceExport: estimate,
+  });
+  const flagged = withExport.rows.filter((row) => row.flags.includes("no database entry"));
+
+  it("marks every line the export marks, and no other", () => {
+    // The same estimate's BMS carries ManualLineInd=1 on 29 lines. Two files
+    // written by the same system from the same workfile, agreeing.
+    expect(estimate.lines.filter((line) => isManualEntry(line.databaseRef))).toHaveLength(29);
+    expect(flagged).toHaveLength(29);
+    expect(flagged.map((row) => row.sourceLine)).toEqual([
+      8, 10, 11, 12, 23, 31, 32, 38, 41, 45, 48, 50, 64, 65, 71, 77, 79, 80, 81, 82, 84, 85, 86, 88, 89, 90, 91, 92, 93,
+    ]);
+  });
+
+  it("says what it means for the keying", () => {
+    expect(flagged[0].notes.join(" ")).toMatch(/typed by the estimator rather than taken from its parts and labor database/);
+    expect(flagged[0].notes.join(" ")).toMatch(/Key it as a manual line/);
+  });
+
+  it("confirms the reading the sheet made from the page alone", () => {
+    // Every row this build called a charge because the print stated a part
+    // type with no part number is a row the export independently marks as
+    // typed. The inference and the system's own marker agree, 15 for 15.
+    const numberless = withExport.rows.filter((row) => row.flags.includes("part number: not printed"));
+    expect(numberless).toHaveLength(15);
+    expect(numberless.every((row) => row.flags.includes("no database entry"))).toBe(true);
+  });
+
+  it("changes no figure on the sheet", () => {
+    expect(withExport.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
+  });
+
+  it("is positive evidence only", () => {
+    // One platform writes this reference on every line; the other leaves the
+    // field empty throughout. A line with no marker is a line nothing is known
+    // about — never a line proved to be database-backed.
+    expect(isManualEntry(null)).toBe(false);
+    expect(isManualEntry("")).toBe(false);
+    expect(isManualEntry("   ")).toBe(false);
+    expect(isManualEntry("203597")).toBe(false);
+
+    const cccDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+    const cccExport = normalizeEmsEstimate(
+      readEmsBundle(
+        fs.readdirSync(cccDir).map((name) => ({
+          filename: name,
+          bytes: new Uint8Array(fs.readFileSync(path.join(cccDir, name))),
+        }))
+      )
+    );
+    expect(cccExport.lines.every((line) => (line.databaseRef ?? "") === "")).toBe(true);
+    const text = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8");
+    const ccc = buildRekeySheet({ text, sourceFile: "ccc.pdf", sourceExport: cccExport });
+    expect(ccc.rows.some((row) => row.flags.includes("no database entry"))).toBe(false);
   });
 });

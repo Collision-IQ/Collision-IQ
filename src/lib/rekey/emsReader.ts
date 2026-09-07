@@ -274,6 +274,19 @@ export interface EmsLine {
    *  "is this line's money taxed" is the one belonging to the column the
    *  money is in. Null when the line carries no money to tax. */
   taxable: boolean | null;
+  /**
+   * The estimating database's own reference for this line, verbatim.
+   *
+   * A line pulled from the database carries its record id; a line the
+   * estimator typed carries the system's manual-entry code. Read here as the
+   * FIELD it is, with no judgment about what a given value means — the
+   * vocabulary owns that, because the codes differ by platform.
+   *
+   * Not every producer fills it: measured across the real exports here, one
+   * platform writes it on all 93 lines and the other leaves it empty on all
+   * 289. An absent reference therefore proves nothing about a line.
+   */
+  databaseRef: string | null;
   /** Raw records this line collapsed, for evidence. */
   recordCount: number;
 }
@@ -326,6 +339,7 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
         labor: [],
         misc: null,
         taxable: null,
+        databaseRef: pickString(record, ["DB_REF", "DB_REF_NO", "DBREF"]),
         recordCount: 0,
       };
       byLine.set(key, line);
@@ -372,6 +386,7 @@ export function normalizeEmsEstimate(bundle: EmsBundle): EmsEstimate {
     if (line.qty === null) line.qty = pickNumber(record, QTY_FIELDS);
     if (line.partType === null) line.partType = pickString(record, PART_TYPE_FIELDS);
     if (line.description === null) line.description = pickString(record, LINE_DESCRIPTION_FIELDS);
+    if (line.databaseRef === null) line.databaseRef = pickString(record, ["DB_REF", "DB_REF_NO", "DBREF"]);
   }
 
   // The subtotal table carries the GROUP in TTL_TYPE ("LA", "PA") and the

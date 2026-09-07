@@ -33,6 +33,20 @@ const LABOR_LETTER_BY_CODE = new Map(
   Object.entries(VOCABULARY.cccLaborMarkers as Record<string, string>).map(([letter, code]) => [code, letter])
 );
 
+/**
+ * The codes an estimating system writes where a database reference would be,
+ * to say the estimator typed this line rather than pulling it from the parts
+ * and labor database. The same code appears as `VendorRefNum` in that
+ * estimate's BMS, which is how the reading was confirmed: on the real pair,
+ * both files mark the same 29 lines.
+ *
+ * POSITIVE EVIDENCE ONLY. One platform writes this reference on every line and
+ * the other leaves the field empty throughout, so a line with no marker is a
+ * line this build knows nothing about — never a line proved to be
+ * database-backed.
+ */
+const MANUAL_ENTRY_CODES = new Set((VOCABULARY.manualEntryCodes as string[]).map((code) => code.trim()));
+
 const PART_TYPES = VOCABULARY.partTypes as Array<{
   ccc: string;
   ems: string | null;
@@ -62,6 +76,8 @@ export interface SourceExportMerge {
   merged: number;
   /** Lines the export carries that no printed row matched, by line number. */
   unmatched: number[];
+  /** Line numbers the export itself marks as typed by the estimator. */
+  manualLines: Set<number>;
 }
 
 /**
@@ -83,11 +99,13 @@ export function mergeSourceExportRows(params: {
   }
 
   const matched = new Set<number>();
+  const manualLines = new Set<number>();
   let merged = 0;
   const rows = params.rows.map((row) => {
     const line = row.lineNumber === null ? undefined : byLine.get(row.lineNumber);
     if (!line) return row;
     matched.add(row.lineNumber as number);
+    if (isManualEntry(line.databaseRef)) manualLines.add(row.lineNumber as number);
     merged += 1;
     return mergeRow(row, line);
   });
@@ -96,7 +114,15 @@ export function mergeSourceExportRows(params: {
     rows,
     merged,
     unmatched: [...byLine.keys()].filter((line) => !matched.has(line)).sort((a, b) => a - b),
+    manualLines,
   };
+}
+
+/** Whether the export's own database reference says the estimator typed this
+ *  line. False for an absent reference, which states nothing either way. */
+export function isManualEntry(databaseRef: string | null | undefined): boolean {
+  const code = (databaseRef ?? "").trim();
+  return code !== "" && MANUAL_ENTRY_CODES.has(code);
 }
 
 function mergeRow(row: EstimateDeltaRow, line: EmsLine): EstimateDeltaRow {
