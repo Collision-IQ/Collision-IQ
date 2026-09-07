@@ -209,3 +209,49 @@ describe("RV-5 — an export's zeros are not values", () => {
     expect(check.summary.totalsRowsOff).toBe(2);
   });
 });
+
+/**
+ * RV-10 — the same part number, written two ways.
+ *
+ * One platform prints "88723-06130" and the other writes "8872306130". The
+ * matcher already treats those as the same part — it pairs the two lines on
+ * exactly that equivalence — and then the comparison reported the raw forms as
+ * a difference. On the real cross-platform pair that was 24 findings of 83
+ * rows: noise sitting on top of the differences an estimator opened the report
+ * for.
+ */
+describe("RV-10 — a part number is compared the way it is matched", () => {
+  const mitchellSheet = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk2-mitchell-text.txt"), "utf8"),
+    sourceFile: "Mitchell Estimate.pdf",
+  });
+  const cccDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+  const keyed = keyedEstimateFromEms(
+    readEmsBundle(
+      fs.readdirSync(cccDir).map((name) => ({
+        filename: name,
+        bytes: new Uint8Array(fs.readFileSync(path.join(cccDir, name))),
+      }))
+    ),
+    "ccc.zip"
+  );
+  if (!keyed.ok) throw new Error(keyed.reason);
+  const check = verifyRekey({ sheet: mitchellSheet, keyed: keyed.estimate });
+  const partNumberDeltas = check.lineFindings
+    .flatMap((finding) => finding.deltas)
+    .filter((delta) => delta.field === "part number");
+
+  it("reports only the numbers that are actually different", () => {
+    // One survives on this pair, and it is a real difference: the two files
+    // carry different suffixes on the same clip.
+    expect(partNumberDeltas).toHaveLength(1);
+    expect(partNumberDeltas[0]).toMatchObject({ expected: "90467-07049-23", found: "9046707049C0" });
+  });
+
+  it("still pairs the lines it stopped reporting", () => {
+    // The lines did not go missing when the finding did.
+    const label = check.lineFindings.find((finding) => /Inform Label Cooler Caution/i.test(finding.description));
+    expect(label?.matchedBy).toBe("part number");
+    expect(label?.deltas.some((delta) => delta.field === "part number")).toBe(false);
+  });
+});

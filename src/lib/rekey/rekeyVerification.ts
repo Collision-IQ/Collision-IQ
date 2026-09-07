@@ -625,7 +625,16 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
       found: keyedQty === null ? "not keyed" : String(keyedQty),
     });
   }
-  if (row.partNumber && keyed.partNumber && row.partNumber !== keyed.partNumber) {
+  // The same part number, written two ways, is not a difference. One platform
+  // prints "88723-06130" and the other writes "8872306130", and the pair was
+  // MATCHED on exactly that equivalence a moment ago — then reported as a
+  // finding on 24 of 83 rows of one real pair, which is noise sitting on top
+  // of the differences an estimator opened the report for.
+  if (
+    row.partNumber &&
+    keyed.partNumber &&
+    partNumberKey(row.partNumber) !== partNumberKey(keyed.partNumber)
+  ) {
     deltas.push({ field: "part number", expected: row.partNumber, found: keyed.partNumber });
   }
   // Part type is compared on the CCC term OR its EMS code, because the two
