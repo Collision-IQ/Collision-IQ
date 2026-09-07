@@ -14,6 +14,7 @@
 import type { RekeySheet } from "./rekeyTypes";
 import type { RekeyVerification } from "./rekeyVerification";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import { targetLabel } from "./rekeyTargets";
 
 const RESOLUTION_LABEL: Record<string, string> = {
   exact: "matches",
@@ -34,6 +35,9 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
   const lines: string[] = [];
   lines.push("REKEY SHEET");
   lines.push(`Source document: ${sheet.sourceFile}`);
+  // Which system the words on this sheet belong to. It governs every operation
+  // and part-type term below, so it is stated before any of them.
+  lines.push(`Keying into: ${targetLabel(sheet.target)}`);
   const identity = [
     sheet.identity.vehicle ? `Vehicle: ${sheet.identity.vehicle}` : null,
     sheet.identity.vin ? `VIN: ${sheet.identity.vin}` : null,

@@ -3,7 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import { buildRekeySheetText } from "../rekeyReportBuilder";
-import { targetGaps, targetLabel, translateOperation, translatePartType } from "../rekeyTargets";
+import {
+  isTargetEstimatingSystem,
+  targetEmsCode,
+  targetGaps,
+  targetLabel,
+  translateOperation,
+  translatePartType,
+} from "../rekeyTargets";
 
 /**
  * WHICH system the sheet keys into.
@@ -192,5 +199,24 @@ describe("the sheet an estimator reads carries the target's word", () => {
     // "Existing" claims a part already on the vehicle; a line naming no part at
     // all must not acquire one on the way to the page.
     expect(line(printed, withheld?.sourceLine ?? -1)).not.toContain("Existing");
+  });
+});
+
+describe("the sheet says which system it keys into", () => {
+  it("states the target before any of the words it governs", () => {
+    expect(buildRekeySheetText(sheetFor("mitchell")).split("\n")[2]).toBe("Keying into: Mitchell");
+    expect(buildRekeySheetText(sheetFor("ccc")).split("\n")[2]).toBe("Keying into: CCC");
+  });
+
+  it("names the code each system writes in its own export", () => {
+    // Read off the real exports: both CCC exports here carry "C", the
+    // Mitchell export "M". The code is what an export is recognised by.
+    expect(targetEmsCode("ccc")).toBe("C");
+    expect(targetEmsCode("mitchell")).toBe("M");
+    expect(isTargetEstimatingSystem("M", "mitchell")).toBe(true);
+    expect(isTargetEstimatingSystem("M", "ccc")).toBe(false);
+    // Some exports write the platform name where the code belongs.
+    expect(isTargetEstimatingSystem("CCC ONE", "ccc")).toBe(true);
+    expect(isTargetEstimatingSystem("", "ccc")).toBe(false);
   });
 });

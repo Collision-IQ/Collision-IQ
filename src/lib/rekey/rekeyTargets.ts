@@ -47,6 +47,35 @@ export function targetLabel(target: RekeyTarget): string {
   return TARGET_LABEL.get(target) ?? target;
 }
 
+/** The CIECA `EST_SYSTEM` code the target platform writes in its own exports —
+ *  which is how an export is told to be that platform's. */
+const TARGET_EMS_CODE = new Map(
+  (VOCABULARY.estimatingSystems as Array<{ platform: string; ems: string }>).map((entry) => [
+    entry.platform,
+    entry.ems,
+  ])
+);
+
+export function targetEmsCode(target: RekeyTarget): string | null {
+  return TARGET_EMS_CODE.get(target) ?? null;
+}
+
+/**
+ * Whether an export's stated estimating system is the target's.
+ *
+ * The code is the evidence — one letter, written by the system itself — and
+ * the platform's own name is accepted alongside it, because some exports write
+ * the name where the code belongs.
+ */
+export function isTargetEstimatingSystem(estimatingSystem: string | null | undefined, target: RekeyTarget): boolean {
+  const stated = (estimatingSystem ?? "").trim();
+  if (!stated) return false;
+  const code = targetEmsCode(target);
+  if (code && stated.toLowerCase() === code.toLowerCase()) return true;
+  const label = targetLabel(target);
+  return stated.toLowerCase().includes(label.toLowerCase());
+}
+
 function term(entry: TargetTerms | undefined, target: RekeyTarget, carriesCharge: boolean): string | null {
   if (!entry) return null;
   if (target === "ccc") return entry.ccc;

@@ -14,6 +14,7 @@ import {
 import { isNative, saveAndShareBlob } from "@/lib/native";
 import { buildRekeyPdfBlob } from "@/lib/rekey/rekeySheetPdf";
 import type { RekeySheet } from "@/lib/rekey/rekeyTypes";
+import { REKEY_TARGETS, targetGaps, targetLabel, type RekeyTarget } from "@/lib/rekey/rekeyTargets";
 import type { RekeyVerification } from "@/lib/rekey/rekeyVerification";
 
 // Rekey Sheet (Pro-only). The backend enforces entitlements; this panel
@@ -104,6 +105,10 @@ function RekeyFilePicker({
 
 export default function RekeyPanel() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  // WHICH system the sheet is keyed into. It is chosen before the build
+  // because it governs every word on the sheet, and the verification takes the
+  // export of THAT system's workfile.
+  const [target, setTarget] = useState<RekeyTarget>("ccc");
   // An EMS export is a FOLDER of dBase tables, not one file — the second slot
   // takes the whole selection.
   const [keyedFiles, setKeyedFiles] = useState<File[]>([]);
@@ -129,6 +134,7 @@ export default function RekeyPanel() {
     setLocked(null);
     try {
       const payload: Record<string, unknown> = {
+        target,
         source: {
           filename: sourceFile.name,
           mimeType: sourceFile.type || "application/pdf",
@@ -221,10 +227,42 @@ export default function RekeyPanel() {
       <p className="mt-1 text-sm text-muted-foreground">
         Upload the estimate that has to be rekeyed. Collision iQ translates every line into the receiving
         system&apos;s vocabulary, groups them in keying order, and prints the profile settings to set first. Once
-        the sheet has been keyed, add the EMS export of the rekeyed CCC workfile and it is verified against the
-        sheet, line by line. Two estimates for the same vehicle are a comparison, not a rekey — use the Estimate
-        Delta report for that.
+        the sheet has been keyed, add the EMS export of the rekeyed {targetLabel(target)} workfile and it is
+        verified against the sheet, line by line. Two estimates for the same vehicle are a comparison, not a
+        rekey — use the Estimate Delta report for that.
       </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="ci-eyebrow text-muted-foreground">Keying into</span>
+        <div role="group" aria-label="Keying into" className="inline-flex rounded-md border border-border bg-muted p-0.5">
+          {REKEY_TARGETS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={target === option}
+              onClick={() => setTarget(option)}
+              disabled={running}
+              className={`cursor-pointer rounded px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                target === option
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {targetLabel(option)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* What this target cannot yet say, said BEFORE the sheet is built —
+          the same sentences the sheet itself carries, so the choice is made
+          with them in view rather than after the work. */}
+      {targetGaps(target).length > 0 ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-amber-600 dark:text-amber-300">
+          {targetGaps(target).map((gap, index) => (
+            <li key={index}>{gap}</li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
         <RekeyFilePicker

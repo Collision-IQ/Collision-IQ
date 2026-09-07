@@ -372,16 +372,23 @@ describe("RV-9 — the claim number is compared, or its absence is stated", () =
   });
 });
 
-describe("RV-7 — verification takes an EMS export of a CCC workfile, nothing else", () => {
+describe("RV-7 — verification takes an EMS export of the TARGET's workfile, nothing else", () => {
   it("explains why a second estimate document is not run through verification", () => {
     expect(explainDocumentIsNotVerification({ keyedText: SOURCE_ESTIMATE_TEXT })).toMatch(/Estimate Delta/);
     expect(explainDocumentIsNotVerification({ keyedText: TEXT })).toMatch(/Mitchell estimate/);
   });
 
-  it("refuses an export written by another estimating system", () => {
-    const keyed = keyedEstimateFromEms(readEmsBundle(buildEmsExportFiles({ estimatingSystem: "M" })), "export.zip");
+  it("refuses an export written by a system other than the one keyed into", () => {
+    const other = readEmsBundle(buildEmsExportFiles({ estimatingSystem: "M" }));
+    const keyed = keyedEstimateFromEms(other, "export.zip");
     expect(keyed.ok).toBe(false);
-    if (!keyed.ok) expect(keyed.reason).toMatch(/not CCC ONE/);
+    // The refusal names the sheet's own target, not a platform written here:
+    // the same export is the right one when the sheet keys into that system.
+    if (!keyed.ok) expect(keyed.reason).toMatch(/not CCC — the system this sheet keys into/);
+    expect(keyedEstimateFromEms(other, "export.zip", "mitchell").ok).toBe(true);
+    expect(keyedEstimateFromEms(readEmsBundle(buildEmsExportFiles({ estimatingSystem: "C" })), "export.zip", "mitchell").ok).toBe(
+      false
+    );
   });
 
   it("accepts the code a real CCC export writes", () => {

@@ -16,6 +16,8 @@
  * reader runs unchanged in the browser and on the server.
  */
 
+import { isTargetEstimatingSystem, targetLabel, type RekeyTarget } from "./rekeyTargets";
+
 export type EmsValue = string | number | boolean | null;
 export type EmsRecord = Record<string, EmsValue>;
 
@@ -475,18 +477,22 @@ export interface EmsGateResult {
  * records means no report at all. A verification built on an empty or
  * unidentified export would be a fabricated pass.
  */
-export function gateEmsEstimate(estimate: EmsEstimate): EmsGateResult {
+export function gateEmsEstimate(estimate: EmsEstimate, target: RekeyTarget = "ccc"): EmsGateResult {
   if (!estimate.estimatingSystem) {
     return { ok: false, reason: "The export does not identify an estimating system, so it cannot be verified." };
   }
-  // RV-7: verification proves a CCC rekey against its source, so the keyed
-  // side must be the CCC workfile's own export. A real CCC export writes the
-  // CIECA code "C" (F-RK1a); the platform name is accepted as well. An export
-  // from another platform is a cross-platform comparison, not a rekey.
-  if (!/^c$|ccc/i.test(estimate.estimatingSystem.trim())) {
+  // RV-7: verification proves a rekey against its source, so the keyed side
+  // must be the export of the workfile in the system the sheet was keyed
+  // INTO — which is the sheet's target, not a system named here. Each system
+  // writes its own CIECA code in EST_SYSTEM (F-RK1a) and the platform name is
+  // accepted alongside it. An export from any other platform is a
+  // cross-platform comparison, not a rekey.
+  if (!isTargetEstimatingSystem(estimate.estimatingSystem, target)) {
     return {
       ok: false,
-      reason: `The export was written by estimating system "${estimate.estimatingSystem.trim()}", not CCC ONE. Verification proves a CCC rekey against its source; an export from another platform is a cross-platform comparison, which is the Estimate Delta report.`,
+      reason: `The export was written by estimating system "${estimate.estimatingSystem.trim()}", not ${targetLabel(
+        target
+      )} — the system this sheet keys into. Verification proves a rekey against its source; an export from another platform is a cross-platform comparison, which is the Estimate Delta report.`,
     };
   }
   if (!estimate.emsVersion) {

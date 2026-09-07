@@ -399,6 +399,30 @@ describe("the source's platform decides what the second upload is", () => {
     expect(keyed.ok).toBe(true);
   });
 
+  it("verifies against the export of the system the sheet says it keys into", () => {
+    // The fourth quadrant, and the one the gate used to refuse outright: a CCC
+    // estimate keyed INTO Mitchell is proved by the MITCHELL workfile's
+    // export. The gate follows the sheet's target rather than naming a
+    // platform, so the same export is right or wrong depending only on where
+    // the estimator said they were keying.
+    const cccIntoMitchell = buildRekeySheet({
+      text: cccText,
+      sourceFile: "c.pdf",
+      columns: cccColumns,
+      target: "mitchell",
+    });
+    expect(cccIntoMitchell.target).toBe("mitchell");
+    expect(isSourceOwnExport({ sheet: cccIntoMitchell, estimate: mitchellExport }).yes).toBe(false);
+    const keyed = keyedEstimateFromEms(readEmsBundle(files()), "mitchell-workfile.zip", cccIntoMitchell.target);
+    expect(keyed.ok).toBe(true);
+
+    // And the same export against a sheet keyed into CCC is still refused, in
+    // the target's own words.
+    const refused = keyedEstimateFromEms(readEmsBundle(files()), "mitchell-workfile.zip", cccMeasured.target);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toMatch(/not CCC — the system this sheet keys into/);
+  });
+
   it("asserts nothing when the print does not say which platform wrote it", () => {
     const unknown = buildRekeySheet({ text: "nothing an estimate would print", sourceFile: "x.pdf" });
     expect(isSourceOwnExport({ sheet: unknown, estimate: cccExport }).yes).toBe(false);
@@ -499,7 +523,9 @@ describe("an export from a platform this sheet does not key into", () => {
     const explained = explainKeyedExport({ sheet: cccSheet, bundle, reason: refused.reason });
     expect(explained).toMatch(/a Mitchell workfile for the same VIN as the sheet, 93 lines/);
     expect(explained).toMatch(/The sheet above keys into CCC/);
-    expect(explained).toMatch(/no sheet for that direction yet/);
+    // The direction now exists, so the message names the way out of it
+    // rather than a limit that has been lifted.
+    expect(explained).toMatch(/build the sheet again with Mitchell chosen as the system you are keying into/);
     // Not the old instruction, which pointed at a comparison nobody asked for.
     expect(explained).not.toMatch(/Estimate Delta/);
   });

@@ -29,6 +29,7 @@ import {
 import { buildRekeySheet } from "./rekeyLedger";
 import { looksLikeMitchellLayout } from "./mitchellEstimateReader";
 import { gateEmsEstimate, normalizeEmsEstimate, type EmsBundle, type EmsEstimate } from "./emsReader";
+import { targetLabel, type RekeyTarget } from "./rekeyTargets";
 import type { RekeyLedgerRow, RekeySheet } from "./rekeyTypes";
 
 /** The code each platform's export writes in `.env EST_SYSTEM`. */
@@ -155,13 +156,13 @@ export function totalsCategoryCode(name: string): {
   return { code: normalized || "UNKNOWN", label: name.trim() || "Unknown category", unit: "amount", comparable: true };
 }
 
-export function keyedEstimateFromEms(bundle: EmsBundle, sourceFile: string): {
+export function keyedEstimateFromEms(bundle: EmsBundle, sourceFile: string, target: RekeyTarget = "ccc"): {
   ok: true;
   estimate: KeyedEstimate;
   raw: EmsEstimate;
 } | { ok: false; reason: string } {
   const raw = normalizeEmsEstimate(bundle);
-  const gate = gateEmsEstimate(raw);
+  const gate = gateEmsEstimate(raw, target);
   if (!gate.ok) return { ok: false, reason: gate.reason ?? "The export could not be verified." };
 
   const lines: KeyedLine[] = raw.lines.map((line, index) => ({
@@ -298,9 +299,10 @@ export function keyedEstimateFromDocument(params: { text: string; sourceFile: st
  * through this module it can only ever fail, and every "finding" would be a
  * scope difference reported as a keying error.
  */
-export function explainDocumentIsNotVerification(params: { keyedText: string }): string {
+export function explainDocumentIsNotVerification(params: { keyedText: string; target?: RekeyTarget }): string {
   const platform = looksLikeMitchellLayout(params.keyedText) ? "a Mitchell estimate" : "an estimate document";
-  return `The second upload is ${platform}, so no verification was produced. Verification proves a rekey closed against its source and takes the EMS export (ZIP) of the rekeyed CCC workfile as the keyed side. Two estimates for the same vehicle are a shop-versus-carrier comparison — run them through the Estimate Delta report instead. The rekey sheet above is complete and unaffected.`;
+  const label = targetLabel(params.target ?? "ccc");
+  return `The second upload is ${platform}, so no verification was produced. Verification proves a rekey closed against its source and takes the EMS export (ZIP) of the rekeyed ${label} workfile as the keyed side. Two estimates for the same vehicle are a shop-versus-carrier comparison — run them through the Estimate Delta report instead. The rekey sheet above is complete and unaffected.`;
 }
 
 /**
@@ -320,12 +322,11 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
 /**
  * An export from the OTHER platform, for the same vehicle — and still refused.
  *
- * The gate's own words are about the direction this build once had: a rekey
- * INTO CCC, verified against the CCC workfile's export. Either platform's
- * estimate can be the source now, but the SHEET still translates into CCC
- * only — the groups, the operation codes and the part types above are CCC's
- * vocabulary — so an export from any other system is not the workfile this
- * sheet was keyed into, whatever else it may be. Telling the estimator to go
+ * The gate's own words are about a platform; the sheet is about a target. An
+ * export from any system other than the one the sheet says it keys into is
+ * not the workfile this sheet was keyed into, whatever else it may be — and
+ * when the estimator meant to key into that other system, the answer is to
+ * say so on the sheet, not to run a comparison. Telling the estimator to go
  * and run a comparison report on what could be their own rekeyed workfile is
  * the wrong instruction; naming what the file is, and why it is not the keyed
  * side, is the right one.
@@ -335,7 +336,7 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
  */
 function explainOtherPlatformExport(params: { sheet: RekeySheet; estimate: EmsEstimate }): string | null {
   const system = (params.estimate.estimatingSystem ?? "").trim();
-  const target = ESTIMATING_SYSTEMS.find((entry) => entry.platform === "ccc");
+  const target = ESTIMATING_SYSTEMS.find((entry) => entry.platform === params.sheet.target);
   const wrote = ESTIMATING_SYSTEMS.find((entry) => entry.ems.toUpperCase() === system.toUpperCase());
   if (!system || !wrote || !target || wrote.ems.toUpperCase() === target.ems.toUpperCase()) return null;
 
@@ -358,7 +359,7 @@ function explainOtherPlatformExport(params: { sheet: RekeySheet; estimate: EmsEs
     target.label
   } — its groups, operation codes and part types are ${target.label}'s vocabulary — so verification takes the export of the ${
     target.label
-  } workfile it was keyed into. If the rekey went the other way, this build has no sheet for that direction yet. The sheet above is complete and unaffected.`;
+  } workfile it was keyed into. If the rekey went the other way, build the sheet again with ${wrote.label} chosen as the system you are keying into. The sheet above is complete and unaffected.`;
 }
 
 /**

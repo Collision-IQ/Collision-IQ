@@ -1,7 +1,11 @@
 # Keying into Mitchell — scope
 
-**Status:** scope only. Nothing here is built. Today every sheet this build
-produces keys into CCC, whichever platform's estimate was uploaded.
+**Status:** partly built. The sheet now takes a TARGET — the estimator chooses
+it in the panel before the build ("Keying into: CCC / Mitchell"), the API takes
+it, the sheet states it, and verification takes the export of THAT system's
+workfile. What is not built is the section taxonomy (§2), which is a document
+gate rather than an engineering one; a Mitchell-targeted sheet says so in its
+own warnings, before and after the build.
 
 ## The answer first
 
@@ -141,22 +145,24 @@ CIECA code.
 
 ## Sequence, and effort
 
-1. **Target on the sheet, one output name per table** — the parameterization,
-   the resolvers, the nine evidenced operations and five part types, with an
-   unknown left unresolved. ~2 days. Verifiable on the documents in hand.
+1. ~~**Target on the sheet, one output name per table**~~ — done, with the
+   selector wired through the panel, the API and the EMS export's system code.
 2. ~~**The naming decision** (§4)~~ — done; the fields carry the split.
 3. **Gather Mitchell estimates** across impact areas and enumerate the section
    taxonomy from their own headings. The gate; no code until it is done.
 4. **Section routing, CCC group → Mitchell section**, description-driven, built
    the way `descriptionRouting` already is. ~3 days once the taxonomy exists.
-5. **Open the verification gate to a Mitchell keyed side** — one condition, once
-   a sheet can target Mitchell. Half a day, and the machinery behind it is
-   already proven against the real Mitchell export.
+5. ~~**Open the verification gate to a Mitchell keyed side**~~ — done. The gate
+   asks whether the export's `EST_SYSTEM` is the SHEET's target rather than
+   naming a platform, so the same Mitchell export is the keyed side of a sheet
+   keyed into Mitchell and refused for one keyed into CCC. Measured on the real
+   documents: a CCC estimate keyed into Mitchell now verifies against the
+   Mitchell export instead of being refused outright.
 
 Roughly a week of engineering, gated on step 3, which is document collection
 rather than code.
 
-## Worth asking before any of it
+## Worth asking
 
 Who rekeys a CCC estimate into Mitchell? A Mitchell shop taking a carrier's CCC
 estimate is a real population, and it is the mirror of the case this build

@@ -11,6 +11,7 @@ import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
 import { classifyEmsSelection, normalizeEmsEstimate, readEmsBundle, type EmsBundle } from "@/lib/rekey/emsReader";
 import type { RekeySheet } from "@/lib/rekey/rekeyTypes";
+import { isRekeyTarget, type RekeyTarget } from "@/lib/rekey/rekeyTargets";
 import { isRekeyEmsWriterEnabled } from "@/lib/rekey/emsWriter";
 import {
   explainDocumentIsNotVerification,
@@ -307,6 +308,9 @@ function readKeyedExport(params: {
   filename: string;
   source: { text: string; filename: string; columns: MitchellColumnReading | null };
 }): { sheet: RekeySheet; verification: RekeyVerification | null; notice: string | null } {
+  // The sheet says which system it was keyed into, so the export that proves
+  // the rekey is that system's — not a platform named here.
+  const target = params.sheet.target;
   const estimate = normalizeEmsEstimate(params.bundle);
   if (isSourceOwnExport({ sheet: params.sheet, estimate }).yes) {
     const rebuilt = buildRekeySheet({
@@ -328,7 +332,7 @@ function readKeyedExport(params: {
     return { sheet, verification: null, notice: explainKeyedExport({ sheet, bundle: params.bundle, usedForRows }) };
   }
 
-  const result = keyedEstimateFromEms(params.bundle, params.filename);
+  const result = keyedEstimateFromEms(params.bundle, params.filename, target);
   if (result.ok) {
     return { sheet: params.sheet, verification: verifyRekey({ sheet: params.sheet, keyed: result.estimate }), notice: null };
   }
@@ -357,7 +361,13 @@ export async function POST(request: NextRequest) {
       source?: FileInput;
       keyed?: FileInput;
       keyedFiles?: FileInput[];
+      target?: unknown;
     } | null;
+    // WHICH system the sheet is keyed into. Anything this build does not know
+    // how to key into falls back to the default rather than being refused —
+    // an unknown value is a client that is ahead of the server, not an
+    // estimator to stop.
+    const target: RekeyTarget = isRekeyTarget(body?.target) ? body.target : "ccc";
     // One file still comes through the single-upload path — a ZIP, or the
     // document that gets explained rather than verified.
     const looseEmsFiles = Array.isArray(body?.keyedFiles) ? body.keyedFiles.filter(Boolean) : [];
@@ -383,6 +393,7 @@ export async function POST(request: NextRequest) {
       text: source.text,
       sourceFile: source.filename,
       columns: source.kind === "document" ? source.columns : null,
+      target,
     });
     // Fail closed: an unreadable document yields a convincing-looking sheet of
     // fragments, and a sheet is a thing people key from.
@@ -440,7 +451,7 @@ export async function POST(request: NextRequest) {
         // is a shop-versus-carrier comparison of two estimates, which is the
         // Estimate Delta report. Verification takes only the EMS export of
         // the rekeyed CCC workfile; a document is explained and left out.
-        keyedNotice = explainDocumentIsNotVerification({ keyedText: keyed.text });
+        keyedNotice = explainDocumentIsNotVerification({ keyedText: keyed.text, target: sheet.target });
       }
     }
 
@@ -454,6 +465,7 @@ export async function POST(request: NextRequest) {
     // Metadata-only logging.
     console.info("[rekey] sheet built", {
       reportId: saved.id,
+      target: sheet.target,
       sourceRows: sheet.stats.sourceRows,
       keyableRows: sheet.stats.keyableRows,
       verified: verification !== null,

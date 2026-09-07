@@ -5,6 +5,7 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canUseProIntegrations, PRO_FEATURE_REQUIRED_MESSAGE } from "@/lib/billing/proFeatures";
 import { buildEmsExport, isRekeyEmsWriterEnabled } from "@/lib/rekey/emsWriter";
 import type { RekeySheet } from "@/lib/rekey/rekeyTypes";
+import { isRekeyTarget, targetEmsCode } from "@/lib/rekey/rekeyTargets";
 
 /**
  * The EMS export of a rekey sheet (Pro, and behind a flag).
@@ -50,10 +51,17 @@ export async function POST(request: NextRequest) {
     }
 
     const stem = safeStem(body?.stem);
+    // The system code the export announces itself with. An explicit request
+    // wins; otherwise it is the system the SHEET says it keys into, because
+    // that is the system about to import this folder. The writer still never
+    // invents one: a sheet with no known target and no configured code writes
+    // no system at all.
     const estimatingSystem =
       typeof body?.estimatingSystem === "string" && /^[A-Za-z]$/.test(body.estimatingSystem.trim())
         ? body.estimatingSystem.trim().toUpperCase()
-        : (process.env.REKEY_EMS_WRITER_SYSTEM_CODE ?? null);
+        : isRekeyTarget(sheet.target)
+          ? targetEmsCode(sheet.target)
+          : (process.env.REKEY_EMS_WRITER_SYSTEM_CODE ?? null);
 
     const written = buildEmsExport({ sheet, stem, estimatingSystem });
     const zip = new JSZip();
