@@ -32,7 +32,7 @@ const mapping = () => {
   const seen = new Map<string, string>();
   for (const row of sheet.rows) {
     if (row.sectionSource === null) continue;
-    const key = `${row.sectionSource} -> ${row.sectionCcc}`;
+    const key = `${row.sectionSource} -> ${row.sectionTarget}`;
     seen.set(key, key);
   }
   return [...seen.keys()].sort();
@@ -63,7 +63,7 @@ describe("section groups match the CCC estimate the Mitchell was keyed into", ()
   });
 
   it("carries the three label lines with their part numbers", () => {
-    const labels = sheet.rows.filter((row) => row.sectionCcc === "INFORMATION LABELS");
+    const labels = sheet.rows.filter((row) => row.sectionTarget === "INFORMATION LABELS");
     expect(labels.map((row) => row.partNumber)).toEqual(["88723-06130", "11298-0P800", "15369-0P010"]);
     expect(labels.every((row) => !row.flags.includes("group: verify"))).toBe(true);
   });

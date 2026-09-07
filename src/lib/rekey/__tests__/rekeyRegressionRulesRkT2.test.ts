@@ -111,7 +111,7 @@ describe("RK-03 — the Number / Qty / Price / Tax band", () => {
       qty: 1,
       price: 1570.81,
       taxable: true,
-      partTypeCcc: "OEM",
+      partTypeCanonical: "OEM",
     });
   });
 
@@ -128,7 +128,7 @@ describe("RK-03 — the Number / Qty / Price / Tax band", () => {
 
 describe("RS-21 — taxed sublet dollars are parts", () => {
   it("keys a taxed sublet-type line as a Sublet part with the CIECA code", () => {
-    expect(row(23)).toMatchObject({ partTypeCcc: "Sublet", partTypeEms: "PAS", price: 12, misc: null, taxable: true });
+    expect(row(23)).toMatchObject({ partTypeCanonical: "Sublet", partTypeEms: "PAS", price: 12, misc: null, taxable: true });
     expect(row(23)?.flags).toContain("sublet part");
   });
 
@@ -163,8 +163,8 @@ describe("RK-05 — notes are never keyed", () => {
 
   it("recovers a section heading printed inside a note block", () => {
     expect(row(21)?.sectionSource).toBe("Special / Manual Entry");
-    expect(row(21)?.sectionCcc).toBe("MISCELLANEOUS OPERATIONS");
-    expect(row(19)?.descriptionCcc).not.toMatch(/Special/);
+    expect(row(21)?.sectionTarget).toBe("MISCELLANEOUS OPERATIONS");
+    expect(row(19)?.descriptionTarget).not.toMatch(/Special/);
   });
 });
 
@@ -209,14 +209,14 @@ describe("RK-12 — clear-coat classifier", () => {
 
 describe("RS-19 — section vocabulary", () => {
   it("maps the sections the RK-T2 print used", () => {
-    expect(row(7)?.sectionCcc).toBe("QUARTER PANEL");
-    expect(row(12)?.sectionCcc).toBe("QUARTER PANEL");
-    expect(row(6)?.sectionCcc).toBe("REAR BODY & FLOOR");
+    expect(row(7)?.sectionTarget).toBe("QUARTER PANEL");
+    expect(row(12)?.sectionTarget).toBe("QUARTER PANEL");
+    expect(row(6)?.sectionTarget).toBe("REAR BODY & FLOOR");
     // The print's section is "Windshield", and WINDSHIELD is the group name a
     // real CCC EMS export carries for it (tests/fixtures/ems-rk1a). GLASS was
     // this repository's assumed name for that group, not CCC's.
-    expect(row(3)?.sectionCcc).toBe("WINDSHIELD");
-    expect(row(1)?.sectionCcc).toBe("WHEELS");
+    expect(row(3)?.sectionTarget).toBe("WINDSHIELD");
+    expect(row(1)?.sectionTarget).toBe("WHEELS");
     expect(sheet.stats.unmappedSections).toBe(0);
   });
 });
@@ -279,16 +279,16 @@ describe("RV-10 — no findings where only one side made a claim", () => {
     sourceLine: 1,
     supplementTag: null,
     sectionSource: "Additional Operations",
-    sectionCcc: "MISCELLANEOUS OPERATIONS",
+    sectionTarget: "MISCELLANEOUS OPERATIONS",
     sectionMapped: true,
     descriptionSource: "Pre Repair Scan",
-    descriptionCcc: "Pre Repair Scan",
+    descriptionTarget: "Pre Repair Scan",
     operationSource: "Additional Operation",
-    operationCcc: "Manual",
+    operationCanonical: "Manual",
     operationMapped: true,
     laborOpCode: "OP0",
     partTypeSource: null,
-    partTypeCcc: "None",
+    partTypeCanonical: "None",
     partTypeEms: null,
     partNumber: null,
     partNumberSource: null,
@@ -327,7 +327,7 @@ describe("RV-10 — no findings where only one side made a claim", () => {
   it("still reports a real quantity or operation difference", () => {
     expect(compareRekeyFields({ ...base, qty: 2 }, keyed).some((delta) => delta.field === "quantity")).toBe(true);
     expect(
-      compareRekeyFields({ ...base, operationCcc: "Rpr" }, { ...keyed, operation: "Repl" }).some(
+      compareRekeyFields({ ...base, operationCanonical: "Rpr" }, { ...keyed, operation: "Repl" }).some(
         (delta) => delta.field === "operation"
       )
     ).toBe(true);

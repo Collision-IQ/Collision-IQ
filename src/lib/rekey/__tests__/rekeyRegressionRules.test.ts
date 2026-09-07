@@ -85,7 +85,7 @@ describe("RK-07 — quantity and unit price", () => {
     expect(multi?.qty).toBe(2);
     expect(multi?.price).toBe(1.98);
     // The column spelled into the description is removed once read.
-    expect(multi?.descriptionCcc).toBe("Frt Bumper Clip");
+    expect(multi?.descriptionTarget).toBe("Frt Bumper Clip");
   });
 
   it("separates a quantity welded onto the part number", () => {

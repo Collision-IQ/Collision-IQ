@@ -61,7 +61,7 @@ describe("F-RK1b — a real supplement print", () => {
   it("reads a description that ends in the platform's labor marker", () => {
     // "Cooling Unit Assy -MRemove / Install" — the marker was welded to the
     // operation and the row lost its operation.
-    expect(row(11)?.operationCcc).toBe("R&I");
+    expect(row(11)?.operationCanonical).toBe("R&I");
     expect(sheet.stats.unmappedOperations).toBe(0);
   });
 });
@@ -118,8 +118,8 @@ describe("F-RK1b — the A/C section takes the group CCC gave it on this claim",
 
     const condenser = row(33);
     expect(condenser?.sectionSource).toBe("A/C Heater Ventilation");
-    expect(condenser?.sectionCcc).toBe("AIR CONDITIONER & HEATER");
-    expect(groups).toContain(condenser?.sectionCcc);
+    expect(condenser?.sectionTarget).toBe("AIR CONDITIONER & HEATER");
+    expect(groups).toContain(condenser?.sectionTarget);
   });
 
   it("leaves nothing on this document without a group", () => {

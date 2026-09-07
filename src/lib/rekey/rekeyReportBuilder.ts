@@ -76,12 +76,17 @@ export function buildRekeySheetText(sheet: RekeySheet): string {
       const labor = row.labor
         .map((entry) => `${entry.type} ${entry.included ? "Incl." : entry.hours.toFixed(1)}`)
         .join(" · ");
+      // The words an estimator types are the TARGET platform's, falling back to
+      // the canonical term where no document has shown this build that
+      // platform's word — the row's own flag says which happened. "None" is
+      // not a part type anyone keys, so it prints as nothing.
+      const partTypeWord = row.partTypeTarget ?? row.partTypeCanonical;
       const parts = [
         `${supplement}${row.sourceLine ?? "—"}`,
-        row.operationCcc,
-        row.descriptionCcc,
+        row.operationTarget ?? row.operationCanonical,
+        row.descriptionTarget,
         row.partNumber ? `#${row.partNumber}` : null,
-        row.partTypeCcc !== "None" ? row.partTypeCcc : null,
+        partTypeWord !== "None" ? partTypeWord : null,
         row.vendor ? `vendor ${row.vendor}` : null,
         row.qty !== null ? `qty ${row.qty}` : null,
         row.price !== null ? money(row.price) : null,

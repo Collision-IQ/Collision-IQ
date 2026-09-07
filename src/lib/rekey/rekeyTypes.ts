@@ -29,24 +29,39 @@ export interface RekeyLedgerRow {
   /** Supplement-of-record tag printed with the line ("S1", "S2"). */
   supplementTag: string | null;
   sectionSource: string | null;
-  sectionCcc: string;
+  /**
+   * The group this line is keyed under on the TARGET platform. Still CCC's
+   * group whatever the target, because a CCC group cannot be turned back into
+   * another platform's section — `targetGaps` says so in the estimator's own
+   * words rather than letting the field imply otherwise.
+   */
+  sectionTarget: string;
   sectionMapped: boolean;
   descriptionSource: string;
-  descriptionCcc: string;
+  /** The description an estimator types on the target platform. Nomenclature,
+   *  not vocabulary: it is normalized, never translated. */
+  descriptionTarget: string;
   operationSource: string | null;
-  operationCcc: string;
+  /**
+   * The operation as this build names it — CCC's term, which is the canonical
+   * value everything downstream keys off: the verification, the EMS codes, the
+   * writer. It is a key, not a word to show an estimator.
+   */
+  operationCanonical: string;
   /**
    * The same operation in the TARGET system's words — what an estimator keying
-   * into it types. Equal to the CCC term while the target is CCC; null where no
-   * document has shown this build what that platform calls it.
+   * into it types, and what the sheet and the panel display. Equal to the
+   * canonical term while the target is CCC; null where no document has shown
+   * this build what that platform calls it.
    */
   operationTarget: string | null;
   operationMapped: boolean;
   laborOpCode: string | null;
   partTypeSource: string | null;
-  partTypeCcc: string;
+  /** The part type as this build names it — CCC's term, the canonical key. */
+  partTypeCanonical: string;
   /** The same part type in the TARGET system's words, or null where none is in
-   *  evidence. */
+   *  evidence. What the sheet and the panel display. */
   partTypeTarget: string | null;
   partTypeEms: string | null;
   /** Whitespace-stripped, the form CCC is keyed with. */

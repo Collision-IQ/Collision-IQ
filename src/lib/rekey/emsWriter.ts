@@ -233,7 +233,7 @@ export function buildEmsExport(params: {
         LINE_IND: ESTIMATE_VERSION,
         TRAN_CODE: TRANSACTION_ADD,
         UNQ_SEQ: sequence,
-        LINE_DESC: row.descriptionCcc,
+        LINE_DESC: row.descriptionTarget,
         PART_TYPE: row.partTypeEms,
         OEM_PARTNO: row.partNumber,
         PART_QTY: row.qty,

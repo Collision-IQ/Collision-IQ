@@ -98,7 +98,7 @@ describe("RS-9 — the verification compares tax like with like", () => {
 
 describe("RS-11 — a taxed sublet-type line is a part, an untaxed one is labor", () => {
   const sheet = buildRekeySheet({ text: FRK2, sourceFile: "frk2.pdf" });
-  const subletParts = sheet.rows.filter((row) => row.partTypeCcc === "Sublet" && row.misc === null);
+  const subletParts = sheet.rows.filter((row) => row.partTypeCanonical === "Sublet" && row.misc === null);
   const subletCharges = sheet.rows.filter((row) => row.misc?.sublet === true);
 
   it("keeps the taxed sublet lines in the parts column, where the source books them", () => {
@@ -123,7 +123,7 @@ describe("RS-11 — a taxed sublet-type line is a part, an untaxed one is labor"
 
 describe("RS-10 — every part type the prints use resolves to a CCC and an EMS code", () => {
   const types = (text: string) =>
-    [...new Set(buildRekeySheet({ text, sourceFile: "x.pdf" }).rows.map((row) => `${row.partTypeSource}|${row.partTypeCcc}|${row.partTypeEms}`))]
+    [...new Set(buildRekeySheet({ text, sourceFile: "x.pdf" }).rows.map((row) => `${row.partTypeSource}|${row.partTypeCanonical}|${row.partTypeEms}`))]
       .filter((entry) => !entry.startsWith("null|"))
       .sort();
 
@@ -163,7 +163,7 @@ describe("a stated part type with no part number is not a part to order", () => 
   it("keeps the printed word and withholds the part type it cannot support", () => {
     const kit = row(86);
     expect(kit?.descriptionSource).toMatch(/Interior protection kit/i);
-    expect(kit).toMatchObject({ partTypeSource: "NEW", partTypeCcc: "None", partTypeEms: null, partNumber: null });
+    expect(kit).toMatchObject({ partTypeSource: "NEW", partTypeCanonical: "None", partTypeEms: null, partNumber: null });
     expect(kit?.flags).toContain("part number: not printed");
     expect(kit?.notes.join(" ")).toMatch(/no part number, so there is no part to order/);
   });
@@ -186,7 +186,7 @@ describe("a stated part type with no part number is not a part to order", () => 
     // The grille is a real OEM part on the same document, printed with its
     // number; it keeps its type and its export code.
     const grille = sheet.rows.find((entry) => entry.partNumber === "53101-06650");
-    expect(grille).toMatchObject({ partTypeCcc: "OEM", partTypeEms: "PAN" });
+    expect(grille).toMatchObject({ partTypeCanonical: "OEM", partTypeEms: "PAN" });
     expect(sheet.rows.filter((entry) => entry.flags.includes("part number: not printed")).every((entry) => entry.partNumber === null)).toBe(true);
   });
 
@@ -194,7 +194,7 @@ describe("a stated part type with no part number is not a part to order", () => 
     // F-RK1b bills refrigerant as an aftermarket line with no part number.
     const frk1b = buildRekeySheet({ text: FRK1B, sourceFile: "frk1b.pdf" });
     const freon = frk1b.rows.find((entry) => /FREON/i.test(entry.descriptionSource));
-    expect(freon).toMatchObject({ partTypeSource: "AFTERMARKET NEW", partTypeCcc: "None", partTypeEms: null });
+    expect(freon).toMatchObject({ partTypeSource: "AFTERMARKET NEW", partTypeCanonical: "None", partTypeEms: null });
     expect(frk1b.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
   });
 });

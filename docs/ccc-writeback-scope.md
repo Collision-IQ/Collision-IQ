@@ -40,9 +40,9 @@ per-line elements in the reference BMS:
 | BMS element | Ledger field |
 | --- | --- |
 | `LineNum` | `sourceLine` |
-| `LineDesc` | `descriptionCcc` |
-| `LineHeaderDesc` | `sectionCcc` (the CCC group) |
-| `ManualLineInd` | `operationCcc === "Manual"`, the `manual line` flag |
+| `LineDesc` | `descriptionTarget` |
+| `LineHeaderDesc` | `sectionTarget` (the CCC group) |
+| `ManualLineInd` | `operationCanonical === "Manual"`, the `manual line` flag |
 | `LaborInfo/LaborType` | `labor[].type` — LAB, LAR, LAM, LAS |
 | `LaborInfo/LaborOperation` | `laborOpCode` — OP11, OP2, OP9, OP4, OP0 |
 | `LaborInfo/LaborHours` | `labor[].hours` |
@@ -54,7 +54,7 @@ per-line elements in the reference BMS:
 | `PartInfo/Quantity` | `qty` |
 | `PartInfo/TaxableInd` | `taxable` |
 | `PartInfo/PriceInclInd` | the `Incl.` flag |
-| `SubletInfo/*` | `misc.sublet`, `partTypeCcc === "Sublet"` |
+| `SubletInfo/*` | `misc.sublet`, `partTypeCanonical === "Sublet"` |
 | `OtherChargesInfo/OtherChargesType` + `Price` | `misc.amount` and the profile-routed cost labels |
 | `LineMemo` | `notes` |
 | `ProfileInfo/RateInfo` | the whole profile block — LAB/LAR/LAM rates, MAPA rate, the 25% sublet markup |

@@ -258,21 +258,21 @@ function flagsFor(row: RekeyLedgerRow): string[] {
   if (row.labor.some((entry) => entry.judgment) || row.misc?.judgment) flags.push("judgment");
   if (row.labor.some((entry) => entry.included)) flags.push("Incl.");
   if (row.misc?.sublet) flags.push("Subl");
-  if (row.misc === null && row.partTypeCcc === "Sublet") flags.push("sublet part");
+  if (row.misc === null && row.partTypeCanonical === "Sublet") flags.push("sublet part");
   if (row.taxable === true) flags.push("Tax");
   if (!row.sectionMapped) flags.push("group: verify");
   if (!row.operationMapped) {
     flags.push(row.operationSource === null ? "operation: not printed" : "operation: verify");
   }
-  if (row.operationCcc === "Manual") flags.push("manual line");
-  if (row.partTypeCcc === UNMAPPED && row.partNumber) flags.push("part type: verify");
+  if (row.operationCanonical === "Manual") flags.push("manual line");
+  if (row.partTypeCanonical === UNMAPPED && row.partNumber) flags.push("part type: verify");
   // A term the target platform has no evidenced word for. The warning names
   // the class; the flag names the line.
-  if (row.operationTarget === null && row.operationCcc !== UNMAPPED) flags.push("operation: not translated");
-  if (row.partTypeTarget === null && row.partTypeCcc !== "None") flags.push("part type: not translated");
+  if (row.operationTarget === null && row.operationCanonical !== UNMAPPED) flags.push("operation: not translated");
+  if (row.partTypeTarget === null && row.partTypeCanonical !== "None") flags.push("part type: not translated");
   // A stated part type the line prints no number for: the row says so on its
   // face rather than only in the note, because it changes what gets keyed.
-  if (row.partTypeCcc === "None" && row.partTypeSource && !row.partNumber && row.price !== null) {
+  if (row.partTypeCanonical === "None" && row.partTypeSource && !row.partNumber && row.price !== null) {
     flags.push("part number: not printed");
   }
   return flags;
@@ -1242,12 +1242,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       sourceLine: row.lineNumber,
       supplementTag: row.supplementTag ?? null,
       sectionSource: row.section ?? null,
-      sectionCcc: section.group,
+      sectionTarget: section.group,
       sectionMapped: section.mapped,
       descriptionSource: fromColumns?.description ?? row.description ?? "",
-      descriptionCcc: keyedDescription,
+      descriptionTarget: keyedDescription,
       operationSource: operation.sourceLabel,
-      operationCcc: operation.ccc,
+      operationCanonical: operation.ccc,
       // The target's own word for it. One CCC operation is two words on the
       // other platform, and the split is not "carries a charge": that print
       // puts its sublet scans under Additional OPERATIONS though they carry a
@@ -1262,7 +1262,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       operationMapped: operation.mapped,
       laborOpCode: operation.laborOpCode,
       partTypeSource: partType.sourceLabel,
-      partTypeCcc: numberlessPart ? "None" : partNumberSource || partType.mapped ? partType.ccc : "None",
+      partTypeCanonical: numberlessPart ? "None" : partNumberSource || partType.mapped ? partType.ccc : "None",
       // A part type withheld for want of a part number states nothing, and it
       // must not acquire one in translation: the other platform's word for
       // "None" is "Existing", which claims a part already on the vehicle — the
@@ -1416,7 +1416,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       ledgerRow.misc = null;
       ledgerRow.price = row.price;
       ledgerRow.notes.push("Do not key as a line — set the paint supplies rate in the profile block.");
-      ledgerRow.sectionCcc = MISCELLANEOUS_GROUP;
+      ledgerRow.sectionTarget = MISCELLANEOUS_GROUP;
       ledgerRow.sectionMapped = true;
     }
 
@@ -1436,22 +1436,22 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       row.labor.every((entry) => entry.type === "LAR") &&
       !row.partNumber &&
       row.misc === null &&
-      normalizeVocabularyText(row.operationCcc) === "REFN";
+      normalizeVocabularyText(row.operationCanonical) === "REFN";
     if (
       isRefinishOnly &&
       previous &&
       previous.keyable &&
       previous.sectionSource === row.sectionSource &&
-      normalizeVocabularyText(previous.operationCcc) !== "REFN" &&
+      normalizeVocabularyText(previous.operationCanonical) !== "REFN" &&
       // The two rows must describe the SAME part. "Hood Outside" folds into
       // "Hood Panel" because both name the hood; "Tow eye cap" does not fold
       // into "Bumper cover", and folding it there merged two different parts
       // into one keying row and lost the tow eye cap entirely.
-      sharesPartNoun(previous.descriptionCcc, row.descriptionCcc)
+      sharesPartNoun(previous.descriptionTarget, row.descriptionTarget)
     ) {
       previous.labor.push(...row.labor);
       previous.notes.push(
-        `Refinish folded from source line ${row.sourceLine ?? "?"}: ${row.descriptionCcc} (${row.labor
+        `Refinish folded from source line ${row.sourceLine ?? "?"}: ${row.descriptionTarget} (${row.labor
           .map((entry) => entry.hours.toFixed(1))
           .join(" + ")} h).`
       );
@@ -1472,7 +1472,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // structure is evidence; flattening it is a loss, and re-distributing a
   // single aggregate would be an invention. Both are refused: the rows are
   // carried exactly as printed.
-  const clearCoatRows = folded.filter((row) => isClearCoatAllowance(row.descriptionCcc));
+  const clearCoatRows = folded.filter((row) => isClearCoatAllowance(row.descriptionTarget));
   for (const row of clearCoatRows) {
     row.notes.push(
       clearCoatRows.length === 1
@@ -1489,16 +1489,16 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   // Group in CCC order; within a group, source line order is preserved.
   const groupMap = new Map<string, RekeyGroup>();
   for (const row of folded) {
-    const existing = groupMap.get(row.sectionCcc);
+    const existing = groupMap.get(row.sectionTarget);
     const group = existing ?? {
-      group: row.sectionCcc,
+      group: row.sectionTarget,
       mapped: row.sectionMapped,
       rows: [],
       totals: emptyGroupTotals(),
     };
     group.rows.push(row);
     if (row.keyable) accumulate(group.totals, row);
-    if (!existing) groupMap.set(row.sectionCcc, group);
+    if (!existing) groupMap.set(row.sectionTarget, group);
   }
   const groups = [...groupMap.values()].sort((a, b) => groupSortIndex(a.group) - groupSortIndex(b.group));
 
@@ -1558,7 +1558,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     deductibleFromTotals: mitchellLayout,
     subletPartsTotal: round2(
       folded
-        .filter((row) => row.keyable && row.misc === null && row.partTypeCcc === "Sublet")
+        .filter((row) => row.keyable && row.misc === null && row.partTypeCanonical === "Sublet")
         .reduce((total, row) => total + extendedPrice(row), 0)
     ),
   });
@@ -1584,7 +1584,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   }
 
   const nonOemRowsNeedingVendor = folded.filter(
-    (row) => ["A/M", "CAPA A/M", "LKQ", "Recond"].includes(row.partTypeCcc) && row.partNumber && !row.vendor
+    (row) => ["A/M", "CAPA A/M", "LKQ", "Recond"].includes(row.partTypeCanonical) && row.partNumber && !row.vendor
   );
   if (nonOemRowsNeedingVendor.length > 0) {
     warnings.push(

@@ -165,10 +165,10 @@ describe("the source's own export supplies the line values", () => {
     // reading that lifts those words out. Supplying the operation from the
     // export settled it separately and left the words behind: 73 of 84 keying
     // descriptions came out with "Remove Replace" or "Repair" on the front.
-    const before = new Map(sheet.rows.map((row) => [row.id, row.descriptionCcc]));
-    const changed = withExport.rows.filter((row) => before.get(row.id) !== row.descriptionCcc);
+    const before = new Map(sheet.rows.map((row) => [row.id, row.descriptionTarget]));
+    const changed = withExport.rows.filter((row) => before.get(row.id) !== row.descriptionTarget);
     expect(changed).toEqual([]);
-    expect(withExport.rows.some((row) => /^(?:remove replace|repair)\b/i.test(row.descriptionCcc))).toBe(false);
+    expect(withExport.rows.some((row) => /^(?:remove replace|repair)\b/i.test(row.descriptionTarget))).toBe(false);
   });
 
   it("keeps what only the print carries", () => {
@@ -182,7 +182,7 @@ describe("the source's own export supplies the line values", () => {
     // This export writes the literal word "Sublet" in ALT_PARTNO on every
     // sublet line. It is not a part number and must never reach the column an
     // estimator orders from.
-    const sublet = withExport.rows.filter((row) => row.partTypeCcc === "Sublet");
+    const sublet = withExport.rows.filter((row) => row.partTypeCanonical === "Sublet");
     expect(sublet.length).toBeGreaterThan(0);
     expect(sublet.every((row) => row.partNumber === null)).toBe(true);
   });
@@ -412,14 +412,14 @@ describe("the source's platform decides what the second upload is", () => {
     const merged = buildRekeySheet({ text: cccText, sourceFile: "c.pdf", columns: cccColumns, sourceExport: cccExport });
     const sideSupport = merged.rows.find((row) => row.sourceLine === 15);
     expect(sideSupport).toMatchObject({
-      descriptionCcc: "RT Side support",
-      operationCcc: "R&I",
+      descriptionTarget: "RT Side support",
+      operationCanonical: "R&I",
       partNumber: "5211506050",
-      partTypeCcc: "None",
+      partTypeCanonical: "None",
       partTypeEms: null,
       price: null,
     });
-    const oem = (built: ReturnType<typeof buildRekeySheet>) => built.rows.filter((row) => row.partTypeCcc === "OEM").length;
+    const oem = (built: ReturnType<typeof buildRekeySheet>) => built.rows.filter((row) => row.partTypeCanonical === "OEM").length;
     expect(oem(merged)).toBe(oem(cccMeasured));
     expect(merged.rows.filter((row) => row.partNumber).length).toBe(
       cccMeasured.rows.filter((row) => row.partNumber).length + 25

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
+import { buildRekeySheetText } from "../rekeyReportBuilder";
 import { targetGaps, targetLabel, translateOperation, translatePartType } from "../rekeyTargets";
 
 /**
@@ -102,7 +103,7 @@ describe("the sheet keyed back into the platform it came from", () => {
     const withheld = mitchell.rows.filter((row) => row.flags.includes("part number: not printed"));
     expect(withheld).toHaveLength(15);
     expect(withheld.every((row) => row.partTypeTarget === null)).toBe(true);
-    expect(withheld.every((row) => row.partTypeCcc === "None")).toBe(true);
+    expect(withheld.every((row) => row.partTypeCanonical === "None")).toBe(true);
   });
 
   it("puts the profile-routed cost under the word that platform uses for it", () => {
@@ -132,18 +133,48 @@ describe("the target this build has always produced is untouched", () => {
 
   it("carries the CCC term in both the canonical and the target field", () => {
     for (const row of byDefault.rows) {
-      expect(row.operationTarget).toBe(row.operationCcc);
+      expect(row.operationTarget).toBe(row.operationCanonical);
       // The only rows without a target part type are the ones with no part
       // type at all to state.
-      if (row.partTypeTarget !== null) expect(row.partTypeTarget).toBe(row.partTypeCcc);
+      if (row.partTypeTarget !== null) expect(row.partTypeTarget).toBe(row.partTypeCanonical);
     }
   });
 
   it("changes nothing a caller could see on the canonical fields", () => {
     const mitchell = sheetFor("mitchell");
     const canonical = (sheet: typeof byDefault) =>
-      sheet.rows.map((row) => `${row.sourceLine}|${row.operationCcc}|${row.partTypeCcc}|${row.sectionCcc}|${row.price}`);
+      sheet.rows.map((row) => `${row.sourceLine}|${row.operationCanonical}|${row.partTypeCanonical}|${row.sectionTarget}|${row.price}`);
     // Choosing a target must not move a value, only add a word for it.
     expect(canonical(mitchell)).toEqual(canonical(byDefault));
+  });
+});
+
+describe("the sheet an estimator reads carries the target's word", () => {
+  const line = (text: string, sourceLine: number) =>
+    text.split("\n").find((row) => row.trim().startsWith(`${sourceLine}  |`)) ?? "";
+
+  it("prints the target's operation and part type, not the canonical key", () => {
+    const printed = buildRekeySheetText(sheetFor("mitchell"));
+    // Line 1 on this print is a bumper cover replacement: Mitchell's own words
+    // for it are "Remove Replace" and "New".
+    expect(line(printed, 1)).toContain("Remove Replace");
+    expect(line(printed, 1)).toContain("New");
+    expect(line(printed, 1)).not.toContain("Repl  |");
+    expect(line(printed, 1)).not.toContain("OEM");
+  });
+
+  it("prints the canonical term unchanged when CCC is the target", () => {
+    const printed = buildRekeySheetText(sheetFor("ccc"));
+    expect(line(printed, 1)).toContain("Repl");
+    expect(line(printed, 1)).toContain("OEM");
+  });
+
+  it("still prints nothing for a part type deliberately withheld", () => {
+    const sheet = sheetFor("mitchell");
+    const withheld = sheet.rows.find((row) => row.flags.includes("part number: not printed"));
+    const printed = buildRekeySheetText(sheet);
+    // "Existing" claims a part already on the vehicle; a line naming no part at
+    // all must not acquire one on the way to the page.
+    expect(line(printed, withheld?.sourceLine ?? -1)).not.toContain("Existing");
   });
 });

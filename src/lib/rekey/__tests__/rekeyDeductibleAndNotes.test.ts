@@ -97,9 +97,9 @@ describe("RS-6 — a note row is never a keying row", () => {
     const attached = (line: number) => sheet.rows.find((row) => row.sourceLine === line);
     // Note 9 belongs to row 8, note 69 to row 68 — each keeps the operation
     // the print gave IT, not the note's.
-    expect(attached(8)).toMatchObject({ operationCcc: "Rpr" });
+    expect(attached(8)).toMatchObject({ operationCanonical: "Rpr" });
     expect(attached(8)?.notes.join(" ")).toContain("Pre-fit prior to refinish");
-    expect(attached(68)).toMatchObject({ operationCcc: "Rpr" });
+    expect(attached(68)).toMatchObject({ operationCanonical: "Rpr" });
     expect(attached(68)?.notes.join(" ")).toContain("D&R Electric");
   });
 

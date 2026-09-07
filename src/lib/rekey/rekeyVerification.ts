@@ -241,16 +241,16 @@ export function keyedEstimateFromDocument(params: { text: string; sourceFile: st
     .map((row) => ({
       id: `doc-${row.id}`,
       lineNumber: row.sourceLine,
-      description: row.descriptionCcc,
+      description: row.descriptionTarget,
       partNumber: row.partNumber,
-      partType: row.partTypeCcc,
+      partType: row.partTypeCanonical,
       qty: row.qty,
       price: row.price,
       labor: row.labor.map((entry) => ({ type: entry.type, hours: entry.hours, included: entry.included })),
       misc: row.misc ? { amount: row.misc.amount, sublet: row.misc.sublet, taxable: row.misc.taxable } : null,
       taxable: row.taxable,
-      group: row.sectionCcc,
-      operation: row.operationCcc,
+      group: row.sectionTarget,
+      operation: row.operationCanonical,
     }));
 
   const profileRate = (field: string) => sheet.profile.find((entry) => entry.field === field)?.value ?? null;
@@ -563,7 +563,7 @@ function operationsCompatible(row: RekeyLedgerRow, keyed: KeyedLine): boolean {
     if (!row.laborOpCode) return true;
     return row.laborOpCode.toUpperCase() === keyedOperation.toUpperCase();
   }
-  const left = normalizeVocabularyText(row.operationCcc);
+  const left = normalizeVocabularyText(row.operationCanonical);
   const right = normalizeVocabularyText(keyedOperation);
   if (!left || !right || left === UNMAPPED || right === UNMAPPED) return true;
   if (left === right) return true;
@@ -685,11 +685,11 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
   // inputs speak different halves of the same vocabulary.
   if (row.partNumber && keyed.partType) {
     const keyedType = normalizeVocabularyText(keyed.partType);
-    const expected = [row.partTypeCcc, row.partTypeEms].filter(Boolean).map(normalizeVocabularyText);
+    const expected = [row.partTypeCanonical, row.partTypeEms].filter(Boolean).map(normalizeVocabularyText);
     if (expected.length > 0 && !expected.includes(keyedType)) {
       deltas.push({
         field: "part type",
-        expected: [row.partTypeCcc, row.partTypeEms].filter(Boolean).join(" / "),
+        expected: [row.partTypeCanonical, row.partTypeEms].filter(Boolean).join(" / "),
         found: keyed.partType,
       });
     }
@@ -706,7 +706,7 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
     // the keying, and a difference that survives now reads as the operations
     // themselves ("Rpr" against "Algn") instead of "OP9" against "OP4".
     const keyedName = resolveOperationCode(keyedOperation);
-    const sourceName = row.operationMapped && row.operationCcc !== UNMAPPED ? row.operationCcc : null;
+    const sourceName = row.operationMapped && row.operationCanonical !== UNMAPPED ? row.operationCanonical : null;
     if (keyedName && sourceName) {
       if (normalizeVocabularyText(sourceName) !== normalizeVocabularyText(keyedName)) {
         deltas.push({
@@ -720,9 +720,9 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
       // there is to compare, so they are reported as codes.
       deltas.push({ field: "operation", expected: row.laborOpCode, found: keyedOperation });
     }
-  } else if (keyedOperation && row.operationMapped && row.operationCcc !== "UNMAPPED" && row.operationCcc !== "Manual") {
-    if (normalizeVocabularyText(row.operationCcc) !== normalizeVocabularyText(keyedOperation)) {
-      deltas.push({ field: "operation", expected: row.operationCcc, found: keyedOperation });
+  } else if (keyedOperation && row.operationMapped && row.operationCanonical !== "UNMAPPED" && row.operationCanonical !== "Manual") {
+    if (normalizeVocabularyText(row.operationCanonical) !== normalizeVocabularyText(keyedOperation)) {
+      deltas.push({ field: "operation", expected: row.operationCanonical, found: keyedOperation });
     }
   }
 
@@ -988,7 +988,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       if (match) matchedBy = "part number";
     }
     if (!match) {
-      const keys = descriptionKeys(row.descriptionCcc, row.sectionCcc, row.operationCcc);
+      const keys = descriptionKeys(row.descriptionTarget, row.sectionTarget, row.operationCanonical);
       match = takeFirstAvailable(byOperationDescription.get(keys.withOperation));
       if (!match) match = takeFirstAvailable(byDescription.get(keys.withoutOperation));
       if (!match) match = takeFirstAvailable(byDescriptionNoGroup.get(keys.withoutGroup));
@@ -1004,7 +1004,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       // No width is assumed. The keyed side is tried as a PREFIX of the
       // source's own description, at whatever length it happens to be, with a
       // floor long enough that a short name cannot swallow a longer one.
-      if (!match) match = takeTruncatedDescription(row.descriptionCcc, remaining);
+      if (!match) match = takeTruncatedDescription(row.descriptionTarget, remaining);
       if (match) matchedBy = "description";
     }
     // §4.3d nomenclature — the same line under the other database's name.
@@ -1013,8 +1013,8 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     // canonicalized names against every line the exact passes left over. The
     // gates below are what keep a score from becoming a guess.
     if (!match) {
-      const rowSide = detectSide(row.descriptionCcc ?? "");
-      const rowGroup = normalizeVocabularyText(row.sectionCcc);
+      const rowSide = detectSide(row.descriptionTarget ?? "");
+      const rowGroup = normalizeVocabularyText(row.sectionTarget);
       let best: { line: KeyedLine; score: number } | null = null;
       // RV-8: the two platforms group work differently BY DESIGN, so the
       // group is a tie-breaker, not a precondition. Same-group candidates are
@@ -1035,8 +1035,8 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
           // what stops two unrelated leftovers from pairing on a shared word.
           if (!operationsCompatible(row, line) && !numbersAgree(row, line)) continue;
           const score = nomenclatureOverlap(
-            canonicalizeNomenclature(row.descriptionCcc, row.sectionCcc, line.group),
-            canonicalizeNomenclature(line.description, line.group, row.sectionCcc)
+            canonicalizeNomenclature(row.descriptionTarget, row.sectionTarget, line.group),
+            canonicalizeNomenclature(line.description, line.group, row.sectionTarget)
           );
           if (score >= NOMENCLATURE_MATCH_THRESHOLD && (best === null || score > best.score)) {
             best = { line, score };
@@ -1050,7 +1050,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       }
     }
     if (!match && row.misc) {
-      const key = `${normalizeVocabularyText(row.sectionCcc)}|${row.misc.amount.toFixed(2)}`;
+      const key = `${normalizeVocabularyText(row.sectionTarget)}|${row.misc.amount.toFixed(2)}`;
       match = takeFirstAvailable(byMisc.get(key));
       if (match) matchedBy = "misc amount";
     }
@@ -1058,9 +1058,9 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
     const base = {
       sourceLine: row.sourceLine,
       supplementTag: row.supplementTag,
-      group: row.sectionCcc,
-      operation: row.operationCcc,
-      description: row.descriptionCcc,
+      group: row.sectionTarget,
+      operation: row.operationCanonical,
+      description: row.descriptionTarget,
       partNumber: row.partNumber,
     };
 
@@ -1070,7 +1070,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       // missing. (The existing MISSING-precondition rule, applied here.)
       lineFindings.push({
         ...base,
-        resolution: row.sectionCcc === "UNMAPPED" ? "unmatched" : "missing_in_keyed",
+        resolution: row.sectionTarget === "UNMAPPED" ? "unmatched" : "missing_in_keyed",
         matchedBy: null,
         deltas: [],
       });
@@ -1118,7 +1118,7 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
       .filter((row) => row.misc?.sublet)
       .reduce((total, row) => total + (row.misc?.amount ?? 0), 0) +
       keyable
-        .filter((row) => row.misc === null && row.partTypeCcc === "Sublet")
+        .filter((row) => row.misc === null && row.partTypeCanonical === "Sublet")
         .reduce((total, row) => total + (row.price ?? 0) * (row.qty ?? 1), 0)
   );
 
@@ -1279,8 +1279,8 @@ export function verifyRekey(params: { sheet: RekeySheet; keyed: KeyedEstimate })
   const subletNormalization = keyable
     .filter((row) => row.misc?.sublet)
     .map((row) => ({
-      group: row.sectionCcc,
-      description: row.descriptionCcc,
+      group: row.sectionTarget,
+      description: row.descriptionTarget,
       amount: row.misc?.amount ?? 0,
       laborType: row.labor[0]?.type ?? "LAB",
     }));

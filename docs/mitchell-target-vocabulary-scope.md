@@ -111,19 +111,26 @@ So the op-code column is per-platform, and the three entries whose
 `laborOpCode` is null today (`Refn`, `O/H`, `Aim`) are null because CCC leaves
 them null — not because the code does not exist.
 
-### 4 · What the rows are called
+### 4 · What the rows are called — DONE
 
-`sectionCcc`, `operationCcc`, `partTypeCcc`, `descriptionCcc` — 124 occurrences
-across 12 files, of which 4 are the type, 4 the report builder, 4 the panel, and
-50 the ledger and verification. The names would become wrong the moment a sheet
-targets Mitchell.
+The four `…Ccc` fields have been renamed. The straight rename collided: step 1
+had already added `operationTarget` and `partTypeTarget` holding the target
+platform's WORD, while the old `operationCcc` / `partTypeCcc` are the KEY the
+verification, the EMS codes and the writer all match on. Two different things
+cannot share one name, so the split is named:
 
-Two ways, and it is the user's call because one of them is breaking:
+| Was | Now | What it holds |
+| --- | --- | --- |
+| `sectionCcc` | `sectionTarget` | The group the line is keyed under. Still CCC's group whatever the target — the gate in §2 is exactly why, and `targetGaps` states it. |
+| `descriptionCcc` | `descriptionTarget` | The description an estimator types. Nomenclature, normalized, never translated. |
+| `operationCcc` | `operationCanonical` | CCC's term as the canonical key. The word to display is `operationTarget`. |
+| `partTypeCcc` | `partTypeCanonical` | CCC's term as the canonical key. The word to display is `partTypeTarget`. |
 
-- **Rename to `sectionTarget` … `descriptionTarget`.** Honest, and it changes
-  the downloaded ledger JSON, which is a published artifact.
-- **Keep the names, document them as "the target's term".** Nothing breaks and
-  the code lies slightly.
+The sheet, the report and the panel display the target's word and fall back to
+the canonical term where no document has shown this build that platform's word;
+the row's own flag (`operation: not translated`, `part type: not translated`)
+says which happened. This changes the downloaded ledger JSON, which is a
+published artifact — the field names move, no value does.
 
 ## What does not change
 
@@ -137,7 +144,7 @@ CIECA code.
 1. **Target on the sheet, one output name per table** — the parameterization,
    the resolvers, the nine evidenced operations and five part types, with an
    unknown left unresolved. ~2 days. Verifiable on the documents in hand.
-2. **The naming decision** (§4) — the user's, not an engineering one.
+2. ~~**The naming decision** (§4)~~ — done; the fields carry the split.
 3. **Gather Mitchell estimates** across impact areas and enumerate the section
    taxonomy from their own headings. The gate; no code until it is done.
 4. **Section routing, CCC group → Mitchell section**, description-driven, built

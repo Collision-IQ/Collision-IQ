@@ -166,7 +166,7 @@ describe("a blank operation column is reported as blank", () => {
     // Coat". CCC has no "Add" operation, and the description lost its
     // subject. Both halves are back where the print put them.
     const adds = sheet.rows.filter((entry) => [11, 12, 54, 55, 56].includes(entry.sourceLine ?? -1));
-    expect(adds.map((entry) => entry.descriptionCcc)).toEqual([
+    expect(adds.map((entry) => entry.descriptionTarget)).toEqual([
       "Add for Clear Coat",
       "Add for park sensor",
       "Add for Clear Coat",
@@ -181,12 +181,12 @@ describe("a blank operation column is reported as blank", () => {
     // are real CCC operations, so reading them off the description head is
     // right and the sheet keeps doing it.
     expect(sheet.rows.find((entry) => entry.sourceLine === 9)).toMatchObject({
-      operationCcc: "O/H",
-      descriptionCcc: "front bumper",
+      operationCanonical: "O/H",
+      descriptionTarget: "front bumper",
     });
     expect(sheet.rows.find((entry) => entry.sourceLine === 38)).toMatchObject({
-      operationCcc: "Aim",
-      descriptionCcc: "headlamps",
+      operationCanonical: "Aim",
+      descriptionTarget: "headlamps",
     });
   });
 
@@ -208,7 +208,7 @@ describe("the description is read from its column, markers and all", () => {
     // The structural marker "s" prints to the right of the description and
     // runs together with it in the reflowed text: "RT Upper arm" + "s".
     expect(TEXT).toContain("AlgnRT Upper arms0.5");
-    expect(row(44)).toMatchObject({ descriptionSource: "RT Upper arm", operationCcc: "Algn" });
+    expect(row(44)).toMatchObject({ descriptionSource: "RT Upper arm", operationCanonical: "Algn" });
     expect(row(44)?.flags).toContain("marked LAS");
   });
 
@@ -235,9 +235,9 @@ describe("the description is read from its column, markers and all", () => {
     // Reading the description off the columns takes the spaced part number
     // out of it, which is right — and left six OEM parts with no part type
     // until the measured number was known first.
-    expect(row(4)).toMatchObject({ partNumber: "112980P800", partTypeCcc: "OEM", partTypeEms: "PAN" });
-    expect(row(37)).toMatchObject({ partNumber: "8111006C91", partTypeCcc: "OEM", partTypeEms: "PAN" });
-    expect(sheet.rows.filter((entry) => entry.partNumber && entry.partTypeCcc === "None")).toEqual([]);
+    expect(row(4)).toMatchObject({ partNumber: "112980P800", partTypeCanonical: "OEM", partTypeEms: "PAN" });
+    expect(row(37)).toMatchObject({ partNumber: "8111006C91", partTypeCanonical: "OEM", partTypeEms: "PAN" });
+    expect(sheet.rows.filter((entry) => entry.partNumber && entry.partTypeCanonical === "None")).toEqual([]);
   });
 });
 

@@ -19,19 +19,19 @@ describe("rekey ledger — line translation", () => {
   });
 
   it("translates a word-spelled operation into CCC vocabulary with its EMS op code", () => {
-    expect(row(21)?.operationCcc).toBe("Repl");
+    expect(row(21)?.operationCanonical).toBe("Repl");
     expect(row(21)?.laborOpCode).toBe("OP11");
     expect(row(21)?.operationSource).toBe("Remove / Replace");
-    expect(row(30)?.operationCcc).toBe("R&I");
+    expect(row(30)?.operationCanonical).toBe("R&I");
     expect(row(30)?.laborOpCode).toBe("OP2");
-    expect(row(31)?.operationCcc).toBe("Rpr");
+    expect(row(31)?.operationCanonical).toBe("Rpr");
   });
 
   it("prefers the most specific part type when several tokens appear on one row", () => {
-    expect(row(32)?.partTypeCcc).toBe("CAPA A/M");
+    expect(row(32)?.partTypeCanonical).toBe("CAPA A/M");
     expect(row(32)?.partTypeEms).toBe("PAC");
-    expect(row(21)?.partTypeCcc).toBe("OEM");
-    expect(row(79)?.partTypeCcc).toBe("LKQ");
+    expect(row(21)?.partTypeCanonical).toBe("OEM");
+    expect(row(79)?.partTypeCanonical).toBe("LKQ");
     expect(row(79)?.partTypeEms).toBe("PAL");
   });
 
@@ -46,9 +46,9 @@ describe("rekey ledger — line translation", () => {
   });
 
   it("maps a source section onto its CCC group and routes diagnostics work separately", () => {
-    expect(row(30)?.sectionCcc).toBe("FRONT BUMPER & GRILLE");
-    expect(row(80)?.sectionCcc).toBe("VEHICLE DIAGNOSTICS");
-    expect(row(76)?.sectionCcc).toBe("MISCELLANEOUS OPERATIONS");
+    expect(row(30)?.sectionTarget).toBe("FRONT BUMPER & GRILLE");
+    expect(row(80)?.sectionTarget).toBe("VEHICLE DIAGNOSTICS");
+    expect(row(76)?.sectionTarget).toBe("MISCELLANEOUS OPERATIONS");
   });
 });
 
@@ -83,7 +83,7 @@ describe("rekey ledger — special cases", () => {
   });
 
   it("keeps a single clear-coat allowance as one row and forbids distributing it", () => {
-    const aggregate = sheet.rows.filter((candidate) => /clear coat/i.test(candidate.descriptionCcc));
+    const aggregate = sheet.rows.filter((candidate) => /clear coat/i.test(candidate.descriptionTarget));
     expect(aggregate).toHaveLength(1);
     expect(aggregate[0].labor).toEqual([{ type: "LAR", hours: 3.1, included: false, judgment: false }]);
     expect(aggregate[0].notes.join(" ")).toMatch(/do not distribute/i);
@@ -104,9 +104,9 @@ FRONT BUMPER
 `,
       sourceFile: "x.pdf",
     });
-    const clearCoat = perPanel.rows.filter((row) => /clear coat/i.test(row.descriptionCcc));
+    const clearCoat = perPanel.rows.filter((row) => /clear coat/i.test(row.descriptionTarget));
     expect(clearCoat).toHaveLength(2);
-    expect(clearCoat.map((row) => row.sectionCcc)).toEqual(["HOOD", "FRONT BUMPER & GRILLE"]);
+    expect(clearCoat.map((row) => row.sectionTarget)).toEqual(["HOOD", "FRONT BUMPER & GRILLE"]);
     expect(clearCoat[0].notes.join(" ")).toMatch(/per panel/i);
   });
 
@@ -126,7 +126,7 @@ FRONT BUMPER
   });
 
   it("drops rows read out of the estimate totals block", () => {
-    expect(sheet.rows.some((candidate) => /paint supplies/i.test(candidate.descriptionCcc))).toBe(false);
+    expect(sheet.rows.some((candidate) => /paint supplies/i.test(candidate.descriptionTarget))).toBe(false);
   });
 });
 
@@ -165,7 +165,7 @@ describe("rekey ledger — manual line entries", () => {
       sourceFile: "x.pdf",
     });
     const row = manual.rows[0];
-    expect(row.operationCcc).toBe("Manual");
+    expect(row.operationCanonical).toBe("Manual");
     expect(row.laborOpCode).toBe("OP0");
     expect(row.flags).toContain("manual line");
     expect(row.flags).not.toContain("operation: verify");
@@ -178,7 +178,7 @@ describe("rekey ledger — manual line entries", () => {
 `,
       sourceFile: "x.pdf",
     });
-    expect(manual.rows[0].operationCcc).toBe("Rpr");
+    expect(manual.rows[0].operationCanonical).toBe("Rpr");
   });
 });
 
@@ -303,7 +303,7 @@ describe("rekey ledger — fail closed", () => {
       sourceFile: "x.pdf",
     });
     const widget = unknown.rows[0];
-    expect(widget.sectionCcc).toBe("UNMAPPED");
+    expect(widget.sectionTarget).toBe("UNMAPPED");
     expect(widget.sectionSource).toBe("WIDGET ASSEMBLY");
     expect(widget.flags).toContain("group: verify");
   });

@@ -583,14 +583,16 @@ export default function RekeyPanel() {
                               {row.supplementTag ? `${row.supplementTag} ` : ""}
                               {row.sourceLine ?? "—"}
                             </td>
-                            <td className="px-2.5 py-1.5">{row.operationCcc}</td>
+                            {/* The target platform's word where one is in evidence; the
+                                canonical term otherwise, with the row's flag saying so. */}
+                            <td className="px-2.5 py-1.5">{row.operationTarget ?? row.operationCanonical}</td>
                             <td className="px-2.5 py-1.5">
                               {row.keyable ? null : (
                                 <span className="mr-1 font-mono text-[10px] uppercase text-muted-foreground">
                                   do not key
                                 </span>
                               )}
-                              {row.descriptionCcc}
+                              {row.descriptionTarget}
                               {row.notes.map((note, index) => (
                                 <span key={index} className="mt-0.5 block text-[10px] text-muted-foreground">
                                   {note}
@@ -598,7 +600,11 @@ export default function RekeyPanel() {
                               ))}
                             </td>
                             <td className="px-2.5 py-1.5 font-mono">{row.partNumber ?? "—"}</td>
-                            <td className="px-2.5 py-1.5">{row.partTypeCcc === "None" ? "—" : row.partTypeCcc}</td>
+                            <td className="px-2.5 py-1.5">
+                              {(row.partTypeTarget ?? row.partTypeCanonical) === "None"
+                                ? "—"
+                                : (row.partTypeTarget ?? row.partTypeCanonical)}
+                            </td>
                             <td className="px-2.5 py-1.5 text-[11px]">{row.vendor ?? "—"}</td>
                             <td className="px-2.5 py-1.5">{row.qty ?? "—"}</td>
                             <td className="px-2.5 py-1.5 font-mono">{money(row.price)}</td>

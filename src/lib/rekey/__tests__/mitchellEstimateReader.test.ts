@@ -170,7 +170,7 @@ describe("Mitchell estimate end to end", () => {
   });
 
   it("translates the word-spelled operations into CCC vocabulary", () => {
-    const operations = sheet.rows.map((row) => row.operationCcc);
+    const operations = sheet.rows.map((row) => row.operationCanonical);
     expect(operations).toContain("Repl");
     expect(operations).toContain("R&I");
     expect(operations).toContain("Rpr");
