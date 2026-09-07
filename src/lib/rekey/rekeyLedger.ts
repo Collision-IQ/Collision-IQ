@@ -26,7 +26,7 @@ import {
 import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
-import type { MitchellColumnReading } from "./mitchellColumnBands";
+import { looksLikeCccLayout, type MitchellColumnReading } from "./mitchellColumnBands";
 import { mergeSourceExportRows } from "./emsSourceRows";
 import type { EmsEstimate } from "./emsReader";
 import {
@@ -1566,6 +1566,14 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
 
   return {
     sourceFile: params.sourceFile,
+    // Which platform WROTE this estimate, from its own print. The column
+    // reading answers first because it measured the page; the text anchor
+    // answers where no geometry was available; neither guesses.
+    sourcePlatform: mitchellLayout
+      ? "mitchell"
+      : params.columns?.layout === "ccc" || looksLikeCccLayout(text)
+        ? "ccc"
+        : null,
     identity: {
       vin: identity.vin,
       claimNumber: identity.claimNumber,

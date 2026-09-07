@@ -340,3 +340,90 @@ describe("a keyed description may be a truncated form of the source's", () => {
     expect([...fields]).toEqual(["charge column"]);
   });
 });
+
+/**
+ * WHICH export this is, decided by the platform that wrote the source.
+ *
+ * The workfile someone keyed the sheet into and the source estimate's own
+ * export arrive through the same upload and carry the same VIN. Identity
+ * cannot separate them. The platform can: an export from the system that wrote
+ * the source estimate is that estimate's own; an export from the other system
+ * is the rekey.
+ */
+describe("the source's platform decides what the second upload is", () => {
+  const mitchellText = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk2-mitchell-text.txt"), "utf8");
+  const cccText = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8");
+  const cccBundle = readEmsBundle(
+    fs.readdirSync(path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948")).map((name) => ({
+      filename: name,
+      bytes: new Uint8Array(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948", name))),
+    }))
+  );
+  const mitchellExport = normalizeEmsEstimate(readEmsBundle(files()));
+  const cccExport = normalizeEmsEstimate(cccBundle);
+  const mitchellSheet = buildRekeySheet({ text: mitchellText, sourceFile: "m.pdf" });
+  // Text only, to prove the platform is named without page geometry.
+  const cccSheet = buildRekeySheet({ text: cccText, sourceFile: "c.pdf" });
+  // With the page's own bands, as the build reads a real CCC PDF.
+  const cccPageWords = (
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+      p: number;
+      x: number;
+      y: number;
+      w: number;
+      t: string;
+    }>
+  ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+  const cccColumns = readEstimateColumns(cccPageWords);
+  const cccMeasured = buildRekeySheet({ text: cccText, sourceFile: "c.pdf", columns: cccColumns });
+
+  it("names the platform from the print's own header", () => {
+    expect(mitchellSheet.sourcePlatform).toBe("mitchell");
+    // The CCC print's column header survives extraction as one welded run, so
+    // the platform is known even with no page geometry to measure.
+    expect(cccSheet.sourcePlatform).toBe("ccc");
+    expect(buildRekeySheet({ text: "nothing an estimate would print", sourceFile: "x.pdf" }).sourcePlatform).toBeNull();
+  });
+
+  it("reads an export from the source's own system as the source's own", () => {
+    expect(isSourceOwnExport({ sheet: mitchellSheet, estimate: mitchellExport }).yes).toBe(true);
+    // This is the change: a CCC export against a CCC-sourced sheet used to be
+    // verified as a rekey, and reported 13 findings and a failed pass against
+    // an estimate nobody had rekeyed.
+    expect(isSourceOwnExport({ sheet: cccSheet, estimate: cccExport }).yes).toBe(true);
+  });
+
+  it("reads an export from the OTHER system as the rekey, and verifies it", () => {
+    expect(isSourceOwnExport({ sheet: mitchellSheet, estimate: cccExport }).yes).toBe(false);
+    const keyed = keyedEstimateFromEms(cccBundle, "ccc.zip");
+    expect(keyed.ok).toBe(true);
+  });
+
+  it("asserts nothing when the print does not say which platform wrote it", () => {
+    const unknown = buildRekeySheet({ text: "nothing an estimate would print", sourceFile: "x.pdf" });
+    expect(isSourceOwnExport({ sheet: unknown, estimate: cccExport }).yes).toBe(false);
+  });
+
+  it("takes the part a line works on without calling it a part to buy", () => {
+    // CCC writes PART_TYPE "PAO" and the part number on an R&I line — the part
+    // the operation works on, which the line does not buy and its print does
+    // not type. Carrying the number while letting the part type fall back to
+    // OEM turned 25 R&I and align lines into parts to order.
+    const merged = buildRekeySheet({ text: cccText, sourceFile: "c.pdf", columns: cccColumns, sourceExport: cccExport });
+    const sideSupport = merged.rows.find((row) => row.sourceLine === 15);
+    expect(sideSupport).toMatchObject({
+      descriptionCcc: "RT Side support",
+      operationCcc: "R&I",
+      partNumber: "5211506050",
+      partTypeCcc: "None",
+      partTypeEms: null,
+      price: null,
+    });
+    const oem = (built: ReturnType<typeof buildRekeySheet>) => built.rows.filter((row) => row.partTypeCcc === "OEM").length;
+    expect(oem(merged)).toBe(oem(cccMeasured));
+    expect(merged.rows.filter((row) => row.partNumber).length).toBe(
+      cccMeasured.rows.filter((row) => row.partNumber).length + 25
+    );
+    expect(merged.derivedTotals?.check).toMatchObject({ delta: 0, closes: true });
+  });
+});

@@ -173,8 +173,14 @@ export interface RekeyReconciliation {
   failures: string[];
 }
 
+/** The estimating platform whose print a source estimate came off. Null where
+ *  neither layout claimed it — an unknown print is never asserted to be one. */
+export type RekeySourcePlatform = "mitchell" | "ccc";
+
 export interface RekeySheet {
   sourceFile: string;
+  /** Which platform wrote the source estimate, when its own print says so. */
+  sourcePlatform: RekeySourcePlatform | null;
   identity: {
     vin: string | null;
     claimNumber: string | null;

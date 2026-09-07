@@ -31,6 +31,13 @@ import { looksLikeMitchellLayout } from "./mitchellEstimateReader";
 import { gateEmsEstimate, normalizeEmsEstimate, type EmsBundle, type EmsEstimate } from "./emsReader";
 import type { RekeyLedgerRow, RekeySheet } from "./rekeyTypes";
 
+/** The code each platform's export writes in `.env EST_SYSTEM`. */
+const ESTIMATING_SYSTEMS = VOCABULARY.estimatingSystems as Array<{
+  platform: string;
+  ems: string;
+  label: string;
+}>;
+
 const TOTALS_CATEGORIES = VOCABULARY.totalsCategories as Array<{
   ems: string;
   label: string;
@@ -310,14 +317,37 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
  * Named here from the two facts that settle it: whose export it is, and
  * whether it is the same vehicle and claim as the sheet.
  */
+/**
+ * Is this export the SOURCE estimate's own, or the workfile keyed from it?
+ *
+ * Both carry the same VIN and the same claim number, so identity cannot tell
+ * them apart. The PLATFORM can: an export written by the system that wrote the
+ * source estimate is that estimate's own, and an export from the other system
+ * is the workfile someone keyed the sheet into.
+ *
+ * The one case this cannot separate is a rekey from a platform into ITSELF —
+ * a CCC estimate keyed into a second CCC workfile. Nothing in either file
+ * distinguishes that from the shop's own pair, so it is read as the source's
+ * own, which is the commoner pair and the less harmful mistake: a merge that
+ * improves the line values, rather than a verification reporting a failed
+ * rekey against an estimate nobody rekeyed. The notice says which way it was
+ * read.
+ *
+ * A source whose platform this build could not name is never treated as
+ * matching, so an unrecognized print keeps the behaviour it had.
+ */
 export function isSourceOwnExport(params: { sheet: RekeySheet; estimate: EmsEstimate }): {
   yes: boolean;
   matchedOn: "VIN" | "claim number" | null;
 } {
   const system = (params.estimate.estimatingSystem ?? "").trim();
-  // A CCC export IS the keyed side this build verifies against; only an export
-  // from another system can be the source's own.
-  if (!system || /^c$|ccc/i.test(system)) return { yes: false, matchedOn: null };
+  if (!system || !params.sheet.sourcePlatform) return { yes: false, matchedOn: null };
+  const wroteTheSource = ESTIMATING_SYSTEMS.find(
+    (entry) => entry.platform === params.sheet.sourcePlatform
+  );
+  if (!wroteTheSource || wroteTheSource.ems.toUpperCase() !== system.toUpperCase()) {
+    return { yes: false, matchedOn: null };
+  }
 
   const sameVin = Boolean(
     params.estimate.vin &&
@@ -336,13 +366,14 @@ export function isSourceOwnExport(params: { sheet: RekeySheet; estimate: EmsEsti
 export function explainKeyedExport(params: {
   sheet: RekeySheet;
   bundle: EmsBundle;
-  reason: string;
+  /** What the verification gate said, where it refused. */
+  reason?: string | null;
   /** Rows whose values the sheet took from this export, when it was used. */
   usedForRows?: number;
 }): string {
   const estimate = normalizeEmsEstimate(params.bundle);
   const own = isSourceOwnExport({ sheet: params.sheet, estimate });
-  if (!own.yes) return params.reason;
+  if (!own.yes) return params.reason ?? "";
 
   const lines = estimate.lines.length;
   const used =
@@ -351,9 +382,9 @@ export function explainKeyedExport(params: {
           params.usedForRows === 1 ? "" : "s"
         } now carry the figures the estimating system itself states, rather than figures read off the page.`
       : "";
-  return `That export is the SOURCE estimate's own — same ${own.matchedOn} as the sheet, written by the estimating system the source came from, ${lines} line${
+  return `That export is the SOURCE estimate's own — same ${own.matchedOn} as the sheet, and written by the same estimating system the source estimate came from, ${lines} line${
     lines === 1 ? "" : "s"
-  }.${used} It is not a rekey of anything, so there is nothing to verify against yet: verification takes the export of the workfile AFTER the sheet has been keyed into the receiving system.`;
+  }.${used} It is not a rekey of anything, so there is nothing to verify against yet: verification takes the export of the workfile AFTER the sheet has been keyed into the receiving system. If this IS that workfile — a rekey from a platform into itself — nothing in either file says so, and it was read as the source's own.`;
 }
 
 export type RekeyLineResolution = "exact" | "value_delta" | "missing_in_keyed" | "unmatched";

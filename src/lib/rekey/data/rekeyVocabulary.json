@@ -49,8 +49,8 @@
     { "ccc": "A/M", "ems": "PAA", "orderedByNumber": true, "aliases": ["AFTERMARKET NEW", "AFTERMARKET", "A M"] },
     { "ccc": "LKQ", "ems": "PAL", "orderedByNumber": true, "aliases": ["QUAL RECYCLED PART", "QUALITY RECYCLED PART", "QUAL RECYCLED", "RECYCLED", "LKQ", "RCY", "USED"] },
     { "ccc": "Recond", "ems": "PAR", "orderedByNumber": true, "aliases": ["REMANUFACTURED", "REMAN", "RECONDITIONED", "RECOND"] },
-    { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"], "emsAliases": ["PAE"],
-      "$emsAliasesComment": "A real Mitchell EMS export writes PART_TYPE \"PAE\" on the lines its print types \"Existing\" — the overhaul and R&I lines that bill labor against a part already on the vehicle." },
+    { "ccc": "None", "ems": null, "laborOnly": true, "aliases": ["EXISTING"], "emsAliases": ["PAE", "PAO"],
+      "$emsAliasesComment": "Codes a real export writes for a line that buys no part. Mitchell writes PART_TYPE \"PAE\" on the lines its print types \"Existing\" — the overhaul and R&I lines that bill labor against a part already on the vehicle. CCC writes \"PAO\" on the R&I and align lines that name the part they work on (\"RT Side support\", part 5211506050, R&I 0.1 h, no price) and on its sublet charge lines; its own print states no part type on either, and neither is a part type an estimator keys." },
     { "ccc": "Sublet", "ems": "PAS", "miscOnly": true, "aliases": ["SUBLET"] }
   ],
 
@@ -222,6 +222,12 @@
     { "ems": "OTAC", "label": "Other additional costs", "unit": "amount", "aliases": ["OTHER ADDITIONAL COSTS", "OTHER ADDITIONAL COST", "ADDITIONAL COSTS"] },
     { "ems": "OTST", "label": "Storage", "unit": "amount", "aliases": ["STORAGE"] },
     { "ems": "OTTW", "label": "Towing", "unit": "amount", "aliases": ["TOWING", "TOW"] }
+  ],
+
+  "$estimatingSystemsComment": "The code an EMS export writes in .env EST_SYSTEM, against the platform whose print this build reads. Read off real exports: both CCC exports here carry \"C\", the Mitchell export carries \"M\", and that estimate's BMS names the same vendor with VendorCode \"M\". A code this table does not know is left unresolved rather than guessed.",
+  "estimatingSystems": [
+    { "platform": "ccc", "ems": "C", "label": "CCC" },
+    { "platform": "mitchell", "ems": "M", "label": "Mitchell" }
   ],
 
   "manualEntryCodes": ["900500"],

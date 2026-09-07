@@ -119,6 +119,21 @@ const CCC_PAINT_LABEL = /^(?:paint|refinish)$/i;
 
 /** Every operation word a CCC print can put in its operation column, from the
  *  same vocabulary the sheet translates into. */
+/**
+ * The CCC print, recognized from its own column header in reflowed text.
+ *
+ * The band reader needs page geometry; this needs only the text, because the
+ * header's words survive extraction as one welded run — "LineOperDescription
+ * Part NumberQtyExtended". It is the same anchor-in-the-document test the
+ * other layout uses, and it is what lets the build say which platform WROTE a
+ * source estimate when no geometry was measured.
+ */
+export function looksLikeCccLayout(text: string): boolean {
+  if (!text) return false;
+  const squashed = text.replace(/\s+/g, "").toLowerCase();
+  return squashed.includes("lineoperdescriptionpartnumberqty");
+}
+
 const CCC_OPERATIONS = new Set(
   (VOCABULARY.operations as Array<{ ccc: string; aliases: string[] }>)
     .flatMap((entry) => [entry.ccc, ...entry.aliases])
