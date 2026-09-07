@@ -4,7 +4,7 @@ import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import JSZip from "jszip";
 import { classifyEmsSelection, normalizeEmsEstimate, readEmsBundle } from "../emsReader";
-import { explainKeyedExport, keyedEstimateFromEms } from "../rekeyVerification";
+import { explainKeyedExport, isSourceOwnExport, keyedEstimateFromEms } from "../rekeyVerification";
 
 /**
  * The SOURCE estimate's own EMS export, uploaded as the second file.
@@ -114,5 +114,85 @@ describe("an archive inside a selection is opened, not thrown away", () => {
     ]);
     expect(selection.tables).toHaveLength(2);
     expect(selection.archives).toHaveLength(1);
+  });
+});
+
+/**
+ * The export used as the sheet's LINE DATA.
+ *
+ * The sheet is read off a page; the export states the same values as data. The
+ * merge takes the values and leaves everything only the print carries — the
+ * section headings, the notes, the totals page — alone.
+ */
+describe("the source's own export supplies the line values", () => {
+  const estimate = normalizeEmsEstimate(readEmsBundle(files()));
+  const withExport = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk2-mitchell-text.txt"), "utf8"),
+    sourceFile: "Mitchell Estimate.pdf",
+    sourceExport: estimate,
+  });
+
+  it("is recognized as the source's own, on the VIN both carry", () => {
+    expect(isSourceOwnExport({ sheet, estimate })).toEqual({ yes: true, matchedOn: "VIN" });
+  });
+
+  it("keeps the sheet closing to the cent", () => {
+    // The merge must not disturb the arithmetic: the totals page is the
+    // print's, and the rows now carry the export's own figures.
+    expect(withExport.derivedTotals?.check).toMatchObject({ printedGrandTotal: 12496.54, delta: 0, closes: true });
+    expect(withExport.reconciliation.closes).toBe(true);
+    expect(withExport.warnings).toEqual([]);
+  });
+
+  it("confirms the page reading rather than correcting it, on this document", () => {
+    // Worth stating plainly: on this pair the export AGREES with the page.
+    // Every row still resolves its operation, every price is unchanged, and
+    // the sheet is the same size — which is evidence about the reading, not a
+    // reason to distrust the merge.
+    expect(withExport.rows).toHaveLength(sheet.rows.length);
+    expect(withExport.stats.unmappedOperations).toBe(0);
+    const priceOf = (rows: typeof sheet.rows, line: number) => rows.find((row) => row.sourceLine === line)?.price;
+    for (const line of [1, 5, 17, 24, 33, 35, 44, 79]) {
+      expect(priceOf(withExport.rows, line)).toBe(priceOf(sheet.rows, line));
+    }
+  });
+
+  it("keeps what only the print carries", () => {
+    // The export has no section headings, no totals page and no line notes.
+    expect(withExport.groups.map((group) => group.group)).toEqual(sheet.groups.map((group) => group.group));
+    expect(withExport.expectedTotals?.grandTotal).toBe(12496.54);
+    expect(withExport.rows.some((row) => row.notes.length > 0)).toBe(true);
+  });
+
+  it("does not carry a marker word into the part-number column", () => {
+    // This export writes the literal word "Sublet" in ALT_PARTNO on every
+    // sublet line. It is not a part number and must never reach the column an
+    // estimator orders from.
+    const sublet = withExport.rows.filter((row) => row.partTypeCcc === "Sublet");
+    expect(sublet.length).toBeGreaterThan(0);
+    expect(sublet.every((row) => row.partNumber === null)).toBe(true);
+  });
+
+  it("repairs a print this build cannot read cleanly", () => {
+    // The case the merge exists for. The CCC print welds quantity onto price,
+    // and without the page geometry that reads a thousand dollars over on
+    // every part line: $15,346.23 of parts against a printed $5,314.38. With
+    // the estimate's own export supplying the values, the same unreadable
+    // page produces $5,440.64 — the remaining $126.26 is the export's own
+    // classification of other parts, not a reading error.
+    const cccDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+    const cccExport = normalizeEmsEstimate(
+      readEmsBundle(
+        fs.readdirSync(cccDir).map((name) => ({
+          filename: name,
+          bytes: new Uint8Array(fs.readFileSync(path.join(cccDir, name))),
+        }))
+      )
+    );
+    const text = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8");
+    const parts = (built: ReturnType<typeof buildRekeySheet>) =>
+      built.derivedTotals?.categories.find((category) => /^parts$/i.test(category.category))?.cost;
+    expect(parts(buildRekeySheet({ text, sourceFile: "ccc.pdf" }))).toBeCloseTo(15346.23, 2);
+    expect(parts(buildRekeySheet({ text, sourceFile: "ccc.pdf", sourceExport: cccExport }))).toBeCloseTo(5440.64, 2);
   });
 });

@@ -9,11 +9,13 @@ import { readEstimateColumns, type MitchellColumnReading } from "@/lib/rekey/mit
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
-import { classifyEmsSelection, readEmsBundle } from "@/lib/rekey/emsReader";
+import { classifyEmsSelection, normalizeEmsEstimate, readEmsBundle, type EmsBundle } from "@/lib/rekey/emsReader";
+import type { RekeySheet } from "@/lib/rekey/rekeyTypes";
 import { isRekeyEmsWriterEnabled } from "@/lib/rekey/emsWriter";
 import {
   explainDocumentIsNotVerification,
   explainKeyedExport,
+  isSourceOwnExport,
   keyedEstimateFromEms,
   verifyRekey,
   type RekeyVerification,
@@ -286,6 +288,37 @@ async function resolveEmsFiles(params: {
   return { ok: true, files, filename: `${stem} EMS export (${files.length} files)`, skipped };
 }
 
+/**
+ * The second upload is the SOURCE estimate's own export.
+ *
+ * Then it is not a keyed side to verify against — it is better line data than
+ * the page it was printed on, so the sheet is rebuilt with it. The print keeps
+ * what only it carries: the section headings, the line notes, the totals page
+ * the sheet reconciles against. Nothing is rebuilt when the export is not the
+ * source's own, and a rebuild that produces no rows keeps the original sheet.
+ */
+function sheetFromSourceOwnExport(params: {
+  sheet: RekeySheet;
+  bundle: EmsBundle;
+  source: { text: string; filename: string; columns: MitchellColumnReading | null };
+}): { sheet: RekeySheet; usedForRows: number } {
+  const estimate = normalizeEmsEstimate(params.bundle);
+  if (!isSourceOwnExport({ sheet: params.sheet, estimate }).yes) {
+    return { sheet: params.sheet, usedForRows: 0 };
+  }
+  const rebuilt = buildRekeySheet({
+    text: params.source.text,
+    sourceFile: params.source.filename,
+    columns: params.source.columns,
+    sourceExport: estimate,
+  });
+  if (rebuilt.rows.length === 0) return { sheet: params.sheet, usedForRows: 0 };
+  const usedForRows = rebuilt.rows.filter(
+    (row) => row.sourceLine !== null && estimate.lines.some((line) => line.lineNumber === row.sourceLine)
+  ).length;
+  return { sheet: rebuilt, usedForRows };
+}
+
 async function readEmsFilesFromZip(buffer: Buffer): Promise<Array<{ filename: string; bytes: Uint8Array }>> {
   const zip = await JSZip.loadAsync(buffer);
   const files: Array<{ filename: string; bytes: Uint8Array }> = [];
@@ -330,7 +363,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const sheet = buildRekeySheet({
+    let sheet = buildRekeySheet({
       text: source.text,
       sourceFile: source.filename,
       columns: source.kind === "document" ? source.columns : null,
@@ -355,8 +388,12 @@ export async function POST(request: NextRequest) {
       keyedFilename = loose.filename;
       const bundle = readEmsBundle(loose.files);
       const result = keyedEstimateFromEms(bundle, loose.filename);
-      if (!result.ok) keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason });
-      else verification = verifyRekey({ sheet, keyed: result.estimate });
+      if (result.ok) verification = verifyRekey({ sheet, keyed: result.estimate });
+      else {
+        const rebuilt = sheetFromSourceOwnExport({ sheet, bundle, source });
+        sheet = rebuilt.sheet;
+        keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason, usedForRows: rebuilt.usedForRows });
+      }
       // Say what was read and what was passed over, so the estimator can see
       // that the estimate PDF sitting in the same folder was not the thing
       // verified against.
@@ -379,8 +416,12 @@ export async function POST(request: NextRequest) {
       if (keyed.kind === "ems") {
         const bundle = readEmsBundle(await readEmsFilesFromZip(keyed.buffer));
         const result = keyedEstimateFromEms(bundle, keyed.filename);
-        if (!result.ok) keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason });
-        else verification = verifyRekey({ sheet, keyed: result.estimate });
+        if (result.ok) verification = verifyRekey({ sheet, keyed: result.estimate });
+        else {
+          const rebuilt = sheetFromSourceOwnExport({ sheet, bundle, source });
+          sheet = rebuilt.sheet;
+          keyedNotice = explainKeyedExport({ sheet, bundle, reason: result.reason, usedForRows: rebuilt.usedForRows });
+        }
       } else if (!keyed.text.trim()) {
         keyedNotice =
           "No readable text was found in the second document, so no verification was produced. Your file was kept.";

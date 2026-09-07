@@ -310,33 +310,50 @@ export function explainDocumentIsNotVerification(params: { keyedText: string }):
  * Named here from the two facts that settle it: whose export it is, and
  * whether it is the same vehicle and claim as the sheet.
  */
+export function isSourceOwnExport(params: { sheet: RekeySheet; estimate: EmsEstimate }): {
+  yes: boolean;
+  matchedOn: "VIN" | "claim number" | null;
+} {
+  const system = (params.estimate.estimatingSystem ?? "").trim();
+  // A CCC export IS the keyed side this build verifies against; only an export
+  // from another system can be the source's own.
+  if (!system || /^c$|ccc/i.test(system)) return { yes: false, matchedOn: null };
+
+  const sameVin = Boolean(
+    params.estimate.vin &&
+      params.sheet.identity.vin &&
+      params.estimate.vin.trim().toUpperCase() === params.sheet.identity.vin.trim().toUpperCase()
+  );
+  if (sameVin) return { yes: true, matchedOn: "VIN" };
+  const sameClaim = Boolean(
+    params.estimate.claimNumber &&
+      params.sheet.identity.claimNumber &&
+      sameClaimTolerant(params.estimate.claimNumber, params.sheet.identity.claimNumber)
+  );
+  return sameClaim ? { yes: true, matchedOn: "claim number" } : { yes: false, matchedOn: null };
+}
+
 export function explainKeyedExport(params: {
   sheet: RekeySheet;
   bundle: EmsBundle;
   reason: string;
+  /** Rows whose values the sheet took from this export, when it was used. */
+  usedForRows?: number;
 }): string {
   const estimate = normalizeEmsEstimate(params.bundle);
-  const system = (estimate.estimatingSystem ?? "").trim();
-  if (!system || /^c$|ccc/i.test(system)) return params.reason;
-
-  const sameVin = Boolean(
-    estimate.vin &&
-      params.sheet.identity.vin &&
-      estimate.vin.trim().toUpperCase() === params.sheet.identity.vin.trim().toUpperCase()
-  );
-  const sameClaim = Boolean(
-    estimate.claimNumber &&
-      params.sheet.identity.claimNumber &&
-      sameClaimTolerant(estimate.claimNumber, params.sheet.identity.claimNumber)
-  );
-  if (!sameVin && !sameClaim) return params.reason;
+  const own = isSourceOwnExport({ sheet: params.sheet, estimate });
+  if (!own.yes) return params.reason;
 
   const lines = estimate.lines.length;
-  return `That export is the SOURCE estimate's own — same ${
-    sameVin ? "VIN" : "claim number"
-  } as the sheet, written by the estimating system the source came from, ${lines} line${
+  const used =
+    params.usedForRows && params.usedForRows > 0
+      ? ` Its line values were used to build the sheet above: ${params.usedForRows} row${
+          params.usedForRows === 1 ? "" : "s"
+        } now carry the figures the estimating system itself states, rather than figures read off the page.`
+      : "";
+  return `That export is the SOURCE estimate's own — same ${own.matchedOn} as the sheet, written by the estimating system the source came from, ${lines} line${
     lines === 1 ? "" : "s"
-  }. It is not a rekey of anything, so there is nothing to verify against yet: verification takes the export of the workfile AFTER the sheet has been keyed into the receiving system. The sheet above is complete and unaffected.`;
+  }.${used} It is not a rekey of anything, so there is nothing to verify against yet: verification takes the export of the workfile AFTER the sheet has been keyed into the receiving system.`;
 }
 
 export type RekeyLineResolution = "exact" | "value_delta" | "missing_in_keyed" | "unmatched";

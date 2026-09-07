@@ -27,6 +27,8 @@ import { readClaimIdentity } from "@/lib/reports/claimIdentityGate";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 import { harvestPartsVendors, vendorLineSignature } from "./partsVendors";
 import type { MitchellColumnReading } from "./mitchellColumnBands";
+import { mergeSourceExportRows } from "./emsSourceRows";
+import type { EmsEstimate } from "./emsReader";
 import {
   looksLikeMitchellLayout,
   parseMitchellEstimateTotals,
@@ -1044,6 +1046,16 @@ export interface BuildRekeySheetParams {
    *  header bands. Optional — a caller with no page geometry (a text-only
    *  source, a fixture) gets exactly the behaviour it got before. */
   columns?: MitchellColumnReading | null;
+  /**
+   * The SOURCE estimate's own EMS export, when the shop has it.
+   *
+   * The values on each line then come from the system that wrote the estimate
+   * rather than from a reading of its printed page. It is a merge: the export
+   * carries no section headings, no totals page and no line notes, so the
+   * print keeps those and the export supplies the columns. See
+   * `emsSourceRows.ts` for what is taken and what is left alone.
+   */
+  sourceExport?: EmsEstimate | null;
 }
 
 export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
@@ -1076,6 +1088,12 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       (candidate) => candidate.includes(signature) || signature.includes(candidate)
     );
       });
+  // The source's own export, where the shop supplied it, states the values the
+  // page can only be read for.
+  const fromExport = params.sourceExport
+    ? mergeSourceExportRows({ rows: parsedRows, estimate: params.sourceExport })
+    : null;
+  const rowsToTranslate = fromExport ? fromExport.rows : parsedRows;
   const expectedTotals = mitchellLayout ? toMitchellExpectedTotals(text) : toExpectedTotals(text);
   const identity = readClaimIdentity(text);
   const notesByLine = harvestRowNotes(text);
@@ -1109,7 +1127,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   let nonKeyableRows = 0;
   let foldedRefinishRows = 0;
 
-  parsedRows.forEach((row, index) => {
+  rowsToTranslate.forEach((row, index) => {
     const judgment = judgmentValues(row.rawText ?? "");
     const stripped = stripManualEntryCode(row.description ?? "");
     // RS-3: where the page's own columns are measured, they are the authority
@@ -1446,7 +1464,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
   const unstatedOperations = folded.filter((row) => !row.operationMapped && row.operationSource === null).length;
   const unmappedOperations = untranslatedOperations + unstatedOperations;
 
-  if (parsedRows.length === 0) {
+  if (rowsToTranslate.length === 0) {
     warnings.push("No line items could be read from this document. Nothing was written to the sheet.");
   }
   if (!expectedTotals) {
@@ -1549,7 +1567,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
     reconciliation,
     partsVendorsBlock: partsVendors.lines,
     stats: {
-      sourceRows: parsedRows.length,
+      sourceRows: rowsToTranslate.length,
       keyableRows: folded.filter((row) => row.keyable).length,
       nonKeyableRows,
       foldedRefinishRows,

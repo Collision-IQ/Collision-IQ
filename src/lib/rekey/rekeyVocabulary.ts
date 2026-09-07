@@ -42,6 +42,8 @@ type PartTypeEntry = {
   miscOnly?: boolean;
   /** A part you order by number: OEM, aftermarket, recycled, reconditioned. */
   orderedByNumber?: boolean;
+  /** Codes an EXPORT writes for this type beyond its own `ems` code. */
+  emsAliases?: string[];
 };
 
 type SectionGroupEntry = {
