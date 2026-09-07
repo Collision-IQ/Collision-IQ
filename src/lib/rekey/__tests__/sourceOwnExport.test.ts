@@ -158,6 +158,18 @@ describe("the source's own export supplies the line values", () => {
     }
   });
 
+  it("leaves the keying description alone", () => {
+    // The print spells the operation into the description ("Remove Replace Frt
+    // Bumper Cover"), and the reading that resolves the operation is the same
+    // reading that lifts those words out. Supplying the operation from the
+    // export settled it separately and left the words behind: 73 of 84 keying
+    // descriptions came out with "Remove Replace" or "Repair" on the front.
+    const before = new Map(sheet.rows.map((row) => [row.id, row.descriptionCcc]));
+    const changed = withExport.rows.filter((row) => before.get(row.id) !== row.descriptionCcc);
+    expect(changed).toEqual([]);
+    expect(withExport.rows.some((row) => /^(?:remove replace|repair)\b/i.test(row.descriptionCcc))).toBe(false);
+  });
+
   it("keeps what only the print carries", () => {
     // The export has no section headings, no totals page and no line notes.
     expect(withExport.groups.map((group) => group.group)).toEqual(sheet.groups.map((group) => group.group));

@@ -24,7 +24,7 @@
 import type { EstimateDeltaRow } from "@/lib/reports/estimateDeltaMatcher";
 import type { EmsEstimate, EmsLine } from "./emsReader";
 import VOCABULARY from "./data/rekeyVocabulary.json";
-import { resolveOperationCode } from "./rekeyVocabulary";
+import { resolveOperation, resolveOperationCode } from "./rekeyVocabulary";
 import { looksLikePartNumber } from "@/lib/reports/deltaEngine/estimateNormalize";
 
 /** Letter → EMS labor code, inverted: the export states the code, and a parsed
@@ -178,9 +178,20 @@ function mergeRow(row: EstimateDeltaRow, line: EmsLine): EstimateDeltaRow {
   // knows is taken: an unknown one would replace a description this build
   // reads correctly with an operation it cannot name, which is worse than the
   // page.
-  const opCode = line.labor.map((entry) => entry.opCode).find(Boolean) ?? null;
-  const operation = opCode ? resolveOperationCode(opCode) : null;
-  if (operation) merged.opCode = operation;
+  //
+  // And only where the ROW does not already state its operation. This print
+  // spells the operation into the description ("Remove Replace Frt Bumper
+  // Cover"), and the reading that resolves it is the same reading that lifts
+  // those words out; supplying the operation separately settled the operation
+  // and left the words behind, putting "Remove Replace" into the keying
+  // description of 73 of 84 rows. The export answers where the page could not,
+  // and stays out of the way where it could.
+  const alreadyStated = resolveOperation({ opCode: row.opCode, description: row.description }).mapped;
+  if (!alreadyStated) {
+    const opCode = line.labor.map((entry) => entry.opCode).find(Boolean) ?? null;
+    const operation = opCode ? resolveOperationCode(opCode) : null;
+    if (operation) merged.opCode = operation;
+  }
 
   return merged;
 }
