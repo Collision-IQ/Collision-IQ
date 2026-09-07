@@ -314,6 +314,9 @@ function readKeyedExport(params: {
       sourceFile: params.source.filename,
       columns: params.source.columns,
       sourceExport: estimate,
+      // The rebuild is the same sheet with better values, so it keys into the
+      // same system; without this it would silently fall back to the default.
+      target: params.sheet.target,
     });
     const sheet = rebuilt.rows.length > 0 ? rebuilt : params.sheet;
     const usedForRows =

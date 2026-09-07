@@ -106,6 +106,22 @@ describe("the sheet keyed back into the platform it came from", () => {
     expect(withheld.every((row) => row.partTypeCanonical === "None")).toBe(true);
   });
 
+  it("states no part type where nothing stated one", () => {
+    // "None" as a resolved answer and "None" for want of an answer are one
+    // canonical value; only the first can be translated. These 10 lines — the
+    // scans, the clear coat, the materials, cover car — print no part type at
+    // all, and "Existing" would key them as work on a part on the vehicle.
+    const unstated = mitchell.rows.filter((row) => row.partTypeSource === null && row.partTypeCanonical === "None");
+    expect(unstated.length).toBeGreaterThanOrEqual(10);
+    expect(unstated.every((row) => row.partTypeTarget === null)).toBe(true);
+    for (const line of [74, 75, 76, 78, 83, 87]) {
+      expect(mitchell.rows.find((row) => row.sourceLine === line)?.partTypeTarget).toBeNull();
+    }
+    // And the line whose print DOES state it keeps the word its print states.
+    const stated = mitchell.rows.find((row) => row.sourceLine === 8);
+    expect(stated).toMatchObject({ partTypeSource: "EXISTING", partTypeCanonical: "None", partTypeTarget: "Existing" });
+  });
+
   it("puts the profile-routed cost under the word that platform uses for it", () => {
     // Its print files the $912.00 materials line under Additional Costs and the
     // sublet scans under Additional Operations, though both carry a charge and

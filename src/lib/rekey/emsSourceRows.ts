@@ -144,9 +144,16 @@ function mergeRow(row: EstimateDeltaRow, line: EmsLine): EstimateDeltaRow {
   if (priced && line.price !== null) merged.price = line.price;
   if (priced && line.qty !== null) merged.qty = line.qty;
 
-  // The part type, as a code rather than as a word read off a column.
+  // The part type, as a code rather than as a word read off a column — but
+  // only where the page read NO word at all. The word this build derives from
+  // the code is the vocabulary's first alias, which is a string the document
+  // may never print: on the real Mitchell pair it turned the printed "NEW"
+  // into "NEW OEM" on 42 rows, in the field whose whole job is to say what
+  // the source printed. Measured on both real pairs, filling only the empty
+  // ones keeps everything the override was for — all 69 CCC rows it helped
+  // had read nothing — and changes no row's resolved part type either way.
   const partWord = partTypeWordFor(line.partType);
-  if (partWord) merged.partSource = [partWord];
+  if (partWord && (merged.partSource ?? []).length === 0) merged.partSource = [partWord];
 
   // Labor: typed hours, and the included flag stated rather than inferred from
   // an "Incl." cell.

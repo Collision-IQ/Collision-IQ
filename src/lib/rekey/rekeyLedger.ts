@@ -1267,9 +1267,17 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       // must not acquire one in translation: the other platform's word for
       // "None" is "Existing", which claims a part already on the vehicle — the
       // opposite of a manual charge line that names no part at all.
-      partTypeTarget: numberlessPart
-        ? null
-        : translatePartType(partNumberSource || partType.mapped ? partType.ccc : "None", target),
+      //
+      // The same holds where NOTHING stated a part type. "None" as a resolved
+      // answer and "None" for want of an answer are one canonical value, and
+      // only the first may be translated. Measured on the Mitchell print, the
+      // difference is 10 lines — the scans, the clear coat, the materials,
+      // cover car — that would otherwise have been keyed as work on an
+      // existing part neither the print nor the export names.
+      partTypeTarget:
+        numberlessPart || (partType.sourceLabel === null && !(partNumberSource || partType.mapped))
+          ? null
+          : translatePartType(partNumberSource || partType.mapped ? partType.ccc : "None", target),
       partTypeEms: numberlessPart ? null : partType.ems,
       partNumber: partNumberSource ? partNumberSource.replace(/\s+/g, "") : null,
       partNumberSource,

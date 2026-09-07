@@ -404,6 +404,38 @@ describe("the source's platform decides what the second upload is", () => {
     expect(isSourceOwnExport({ sheet: unknown, estimate: cccExport }).yes).toBe(false);
   });
 
+  it("never puts a part-type word on the page the page did not print", () => {
+    // The export states a CODE; the word this build derives from it is the
+    // vocabulary's first alias, which is not always a word the document uses.
+    // Overriding with it turned the printed "NEW" into "NEW OEM" on 42 rows of
+    // the Mitchell print, in the field whose only job is to report what the
+    // source printed.
+    const mitchellMerged = buildRekeySheet({ text: mitchellText, sourceFile: "m.pdf", sourceExport: mitchellExport });
+    const printed = new Map(mitchellSheet.rows.map((row) => [row.sourceLine, row.partTypeSource]));
+    const invented = mitchellMerged.rows.filter((row) => row.partTypeSource !== printed.get(row.sourceLine));
+    expect(invented).toEqual([]);
+
+    // And it still answers where the page read nothing, which is the whole
+    // reason the export is consulted: 69 CCC rows print no part-type word.
+    const cccMerged = buildRekeySheet({ text: cccText, sourceFile: "c.pdf", columns: cccColumns, sourceExport: cccExport });
+    const cccPrinted = new Map(cccMeasured.rows.map((row) => [row.sourceLine, row.partTypeSource]));
+    const filled = cccMerged.rows.filter(
+      (row) => cccPrinted.get(row.sourceLine) === null && row.partTypeSource !== null
+    );
+    expect(filled).toHaveLength(69);
+
+    // Either way the resolved part type is the same on every row — the code
+    // agreed with the page wherever the page spoke.
+    for (const sheets of [
+      [mitchellSheet, mitchellMerged],
+      [cccMeasured, cccMerged],
+    ] as const) {
+      const canonical = (sheet: (typeof sheets)[number]) =>
+        sheet.rows.map((row) => `${row.sourceLine}|${row.partTypeCanonical}`);
+      expect(canonical(sheets[1])).toEqual(canonical(sheets[0]));
+    }
+  });
+
   it("takes the part a line works on without calling it a part to buy", () => {
     // CCC writes PART_TYPE "PAO" and the part number on an R&I line — the part
     // the operation works on, which the line does not buy and its print does
