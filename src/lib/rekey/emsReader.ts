@@ -134,6 +134,26 @@ function coerce(raw: string, type: string): EmsValue {
 }
 
 /**
+ * Files that travel WITH an EMS export but are not part of it.
+ *
+ * A CCC EMS export is not one file: it is a dozen or more dBase tables written
+ * side by side into a folder (.env .veh .lin .ttl .stl .ad1 .ad2 .pf* .ven).
+ * An estimator selecting that folder also picks up whatever else is sitting in
+ * it — the estimate PDF, the workfile copy, a BMS xml. Those are companions,
+ * not tables, and reporting each as "not a readable dBase table" turns a good
+ * export into a page of faults.
+ *
+ * The test is by extension and it is a DENY list on purpose: a table's
+ * extension is the CIECA record type, and new record types must keep working
+ * without a code change.
+ */
+const EMS_COMPANION_FILE = /\.(?:pdf|zip|xml|json|txt|csv|docx?|xlsx?|html?|png|jpe?g|webp|heic|heif|bmp|tiff?)$/i;
+
+export function isEmsCompanionFile(filename: string): boolean {
+  return EMS_COMPANION_FILE.test(filename.trim());
+}
+
+/**
  * Build a bundle from the files of an EMS export. Keys are the file extension
  * (the CIECA table name); a file with no recognizable dBase header is recorded
  * as an error and skipped.

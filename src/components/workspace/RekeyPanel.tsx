@@ -72,25 +72,30 @@ function RekeyFilePicker({
   label,
   hint,
   accept,
-  file,
-  onFile,
+  files,
+  multiple,
+  onFiles,
 }: {
   label: string;
   hint: string;
   accept: string;
-  file: File | null;
-  onFile: (file: File | null) => void;
+  files: File[];
+  multiple?: boolean;
+  onFiles: (files: File[]) => void;
 }) {
+  const chosen =
+    files.length === 0 ? hint : files.length === 1 ? files[0].name : `${files.length} files — ${files[0].name}, …`;
   return (
     <label className="flex min-h-[96px] flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border p-3 text-center transition hover:border-[var(--accent)]/50">
       <Upload size={16} className="text-muted-foreground" />
       <span className="text-xs font-medium text-foreground">{label}</span>
-      <span className="max-w-full truncate text-[11px] text-muted-foreground">{file ? file.name : hint}</span>
+      <span className="max-w-full truncate text-[11px] text-muted-foreground">{chosen}</span>
       <input
         type="file"
-        accept={accept}
+        accept={accept || undefined}
+        multiple={multiple}
         className="hidden"
-        onChange={(event) => onFile(event.target.files?.[0] ?? null)}
+        onChange={(event) => onFiles(Array.from(event.target.files ?? []))}
       />
     </label>
   );
@@ -98,7 +103,17 @@ function RekeyFilePicker({
 
 export default function RekeyPanel() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [keyedFile, setKeyedFile] = useState<File | null>(null);
+  // An EMS export is a FOLDER of dBase tables, not one file — the second slot
+  // takes the whole selection.
+  const [keyedFiles, setKeyedFiles] = useState<File[]>([]);
+  // One PDF, text export or ZIP still goes up as a single upload. Anything
+  // else in the second slot is a loose EMS selection — including ONE table
+  // picked on its own, which has to reach the EMS reader to be told what is
+  // missing rather than bounce off the document filter as an unsupported type.
+  const keyedFile =
+    keyedFiles.length === 1 && /\.(?:pdf|txt|csv|zip|png|jpe?g|webp|heic|heif)$/i.test(keyedFiles[0].name)
+      ? keyedFiles[0]
+      : null;
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState<string | null>(null);
@@ -123,6 +138,14 @@ export default function RekeyPanel() {
           mimeType: keyedFile.type || "application/pdf",
           dataUrl: await fileToDataUrl(keyedFile),
         };
+      } else if (keyedFiles.length > 0) {
+        payload.keyedFiles = await Promise.all(
+          keyedFiles.map(async (file) => ({
+            filename: file.name,
+            mimeType: file.type || "application/octet-stream",
+            dataUrl: await fileToDataUrl(file),
+          }))
+        );
       }
       const response = await fetch("/api/rekey", {
         method: "POST",
@@ -173,15 +196,16 @@ export default function RekeyPanel() {
           label="1 · Estimate to be rekeyed"
           hint="PDF, image, or text export"
           accept=".pdf,.txt,.csv,image/*,application/pdf,text/plain,text/csv"
-          file={sourceFile}
-          onFile={setSourceFile}
+          files={sourceFile ? [sourceFile] : []}
+          onFiles={(files) => setSourceFile(files[0] ?? null)}
         />
         <RekeyFilePicker
           label="2 · EMS export of the rekeyed workfile (optional)"
-          hint="ZIP of the CCC EMS export — a second estimate document is routed to comparison instead"
-          accept=".pdf,.txt,.csv,.zip,image/*,application/pdf,text/plain,text/csv,application/zip"
-          file={keyedFile}
-          onFile={setKeyedFile}
+          hint="Select the export folder's files, or a ZIP of them — a second estimate document is routed to comparison instead"
+          accept=""
+          multiple
+          files={keyedFiles}
+          onFiles={setKeyedFiles}
         />
       </div>
 
@@ -193,7 +217,7 @@ export default function RekeyPanel() {
           className="ci-btn-primary inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-60"
         >
           {running ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-          {running ? "Building sheet…" : keyedFile ? "Build sheet and verify" : "Build rekey sheet"}
+          {running ? "Building sheet…" : keyedFiles.length > 0 ? "Build sheet and verify" : "Build rekey sheet"}
         </button>
         {result ? (
           <>

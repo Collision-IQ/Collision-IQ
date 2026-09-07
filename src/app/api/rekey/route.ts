@@ -9,7 +9,7 @@ import { readEstimateColumns, type MitchellColumnReading } from "@/lib/rekey/mit
 import { getUploadedAttachments, saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { assessRekeySheet, buildRekeySheet } from "@/lib/rekey/rekeyLedger";
-import { readEmsBundle } from "@/lib/rekey/emsReader";
+import { isEmsCompanionFile, readEmsBundle } from "@/lib/rekey/emsReader";
 import {
   explainDocumentIsNotVerification,
   keyedEstimateFromEms,
@@ -212,6 +212,76 @@ async function readColumnBands(params: {
   }
 }
 
+/**
+ * An EMS export selected as LOOSE FILES rather than as a ZIP.
+ *
+ * CCC writes an EMS export as a dozen-plus dBase tables side by side in a
+ * folder — there is no archive to pick. Asking for a ZIP asked the estimator
+ * to make one before they could verify anything, and the picker would not even
+ * let them select the tables together, so the verification half of this
+ * feature was unreachable from a real export. The files are accepted as they
+ * come off the export folder, companions and all.
+ *
+ * The caps are per BUNDLE, not per file: an export is small (a real one here
+ * is under 100 KB across 14 tables), and the same 20 MB ceiling the single
+ * upload uses applies to the whole selection.
+ */
+const MAX_EMS_FILES = 60;
+
+async function resolveEmsFiles(params: {
+  inputs: FileInput[];
+  userId: string;
+}): Promise<
+  | { ok: true; files: Array<{ filename: string; bytes: Uint8Array }>; filename: string; skipped: string[] }
+  | { ok: false; error: string; status: number }
+> {
+  if (params.inputs.length > MAX_EMS_FILES) {
+    return { ok: false, error: `Select at most ${MAX_EMS_FILES} files from the EMS export folder.`, status: 400 };
+  }
+  const files: Array<{ filename: string; bytes: Uint8Array }> = [];
+  const skipped: string[] = [];
+  let total = 0;
+  for (const input of params.inputs) {
+    const filename =
+      typeof input.filename === "string" && input.filename.trim() ? input.filename.trim().split(/[\\/]/).pop()! : "";
+    const dataUrl = typeof input.dataUrl === "string" ? input.dataUrl : "";
+    if (!filename || !dataUrl) continue;
+    // The estimate PDF and the workfile copy sit in the same folder as the
+    // tables. They are not part of the export, so they are left out here
+    // rather than reported as unreadable tables.
+    if (isEmsCompanionFile(filename)) {
+      skipped.push(filename);
+      continue;
+    }
+    const buffer = dataUrlToBuffer(dataUrl);
+    if (!buffer) return { ok: false, error: `${filename} could not be decoded.`, status: 400 };
+    total += buffer.byteLength;
+    if (total > MAX_FILE_BYTES) {
+      return { ok: false, error: "The EMS export must be under 20 MB in total.", status: 413 };
+    }
+    files.push({ filename, bytes: new Uint8Array(buffer) });
+    // Same promise as every other upload: the file is kept whatever the parse
+    // produces.
+    await saveUploadedAttachment({
+      ownerUserId: params.userId,
+      filename,
+      type: "application/octet-stream",
+      text: "",
+      sizeBytes: buffer.byteLength,
+      source: "direct_upload",
+    }).catch(() => null);
+  }
+  if (files.length === 0) {
+    return {
+      ok: false,
+      error: "No EMS tables were found in that selection. Select the export folder's files (.env, .lin, .ttl and the rest), or a ZIP of them.",
+      status: 400,
+    };
+  }
+  const stem = files[0].filename.replace(/\.[^.]+$/, "");
+  return { ok: true, files, filename: `${stem} EMS export (${files.length} files)`, skipped };
+}
+
 async function readEmsFilesFromZip(buffer: Buffer): Promise<Array<{ filename: string; bytes: Uint8Array }>> {
   const zip = await JSZip.loadAsync(buffer);
   const files: Array<{ filename: string; bytes: Uint8Array }> = [];
@@ -230,7 +300,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: PRO_FEATURE_REQUIRED_MESSAGE }, { status: 403 });
     }
 
-    const body = (await request.json().catch(() => null)) as { source?: FileInput; keyed?: FileInput } | null;
+    const body = (await request.json().catch(() => null)) as {
+      source?: FileInput;
+      keyed?: FileInput;
+      keyedFiles?: FileInput[];
+    } | null;
+    // One file still comes through the single-upload path — a ZIP, or the
+    // document that gets explained rather than verified.
+    const looseEmsFiles = Array.isArray(body?.keyedFiles) ? body.keyedFiles.filter(Boolean) : [];
 
     const source = await resolveFile({
       input: body?.source,
@@ -268,7 +345,23 @@ export async function POST(request: NextRequest) {
     let keyedFilename: string | null = null;
     let keyedNotice: string | null = null;
 
-    if (body?.keyed) {
+    if (looseEmsFiles.length > 0) {
+      const loose = await resolveEmsFiles({ inputs: looseEmsFiles, userId: user.id });
+      if (!loose.ok) return NextResponse.json({ error: loose.error }, { status: loose.status });
+      keyedFilename = loose.filename;
+      const result = keyedEstimateFromEms(readEmsBundle(loose.files), loose.filename);
+      if (!result.ok) keyedNotice = result.reason;
+      else verification = verifyRekey({ sheet, keyed: result.estimate });
+      // Say what was read and what was passed over, so the estimator can see
+      // that the estimate PDF sitting in the same folder was not the thing
+      // verified against.
+      if (loose.skipped.length > 0) {
+        const left = `${loose.skipped.length} file${loose.skipped.length === 1 ? "" : "s"} in that selection ${
+          loose.skipped.length === 1 ? "is" : "are"
+        } not part of the EMS export and ${loose.skipped.length === 1 ? "was" : "were"} left out: ${loose.skipped.join(", ")}.`;
+        keyedNotice = keyedNotice ? `${keyedNotice} ${left}` : left;
+      }
+    } else if (body?.keyed) {
       const keyed = await resolveFile({
         input: body.keyed,
         label: "keyed estimate",
