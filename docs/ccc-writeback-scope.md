@@ -29,6 +29,7 @@ ceiling sooner and with no commercial gate, on desktop CCC ONE only.
 | Both estimate PDFs | The printed form of each, already fixtures in this repository. |
 | `help.cccis.com` → *Importing EMS Assignments and Estimates* | CCC ONE imports EMS assignments **and EMS estimates** automatically from the configured folder; the workfile Updates status reads "EMS Estimate". Importing EMS from other estimating applications is **not yet supported on cccone.com**. |
 | `help.cccis.com` → *Setting Up File Import Directories* | The import folder is configured at **Configure → Machine Settings → File Import**, with **Import Type = CIECA/EMS Files** and a folder path. Separate from the EXPORT directories, which are configured on their own page — a machine set up only to export has no import path at all. |
+| `help.cccis.com` → *Overview - File Import and Export Settings* | **Contradicts the two pages above.** What CCC ONE can IMPORT is listed as "Part Update XML files, Workfile Copy, **EMS files (assignments)**" — assignments, parenthetically, with no mention of estimates. What it can EXPORT is listed as "**EMS version 2.01 estimate files**, EMS part price changes data to other applications, **Workfile Copy - AWF estimate files**". On this page an EMS *estimate* is an export only, and the estimate file that comes back IN is the AWF. |
 | `help.cccis.com` → *Setting up EMS* / *Adding and Removing EMS Paths* | The **CCC ONE Data Transfer application must be running on the device** where the import directories are configured; it is what processes files found there. EMS must be enabled in Machine Settings before any of it applies. |
 
 ## What the ledger already carries
@@ -129,18 +130,20 @@ EMS import folder; CCC ONE picks them up and creates the workfile.
 - **Effort:** the writer is the work — a dBase III table writer, the field map per
   table (`.env .veh .lin .ttl .stl .ad1 .ad2 .pf*`), and the round-trip harness.
   Roughly a week of focused work to a first import, most of it in the `.lin` field map.
-- **Risk, and still open:** CCC's pages document importing an EMS *estimate* and give it
-  its own workfile status, but none of them says whether an EMS estimate authored by a
-  THIRD-PARTY application — which is what this build produces — is accepted the same
-  way. Nothing found says it is refused either. Only a real import against a configured
-  CCC ONE install settles it, and until one has been run this path is documented, not
-  proven.
+- **Risk, and unsettled — CCC's own pages disagree.** Two of them say an EMS *estimate*
+  imports and give it its own Workfiles status; a third lists importable files as "EMS
+  files (assignments)" and puts EMS 2.01 estimate files on the export side, with the
+  AWF workfile copy as the estimate file that comes back in. The shop's account matches
+  the third: EMS out to IA platforms, AWF in to CCC. And no page found says either way
+  whether an EMS estimate authored by a THIRD-PARTY application — which is what this
+  build produces — is treated like one CCC wrote.
 
-  Read against practice: the shop reports EMS as an export-only route, used to hand data
-  to IA platforms, with AWF as the file shared with CCC for estimate integration. Both
-  can be true at once — AWF is CCC's own workfile copy (CCC to CCC), EMS the open
-  interchange — and the four setup conditions above are the likeliest reason an import
-  has never been seen to work on that machine.
+  So this path is **contested, not proven**, and nothing in the build may assert
+  otherwise. It has also never been tested on the machine in question: its Machine
+  Settings show import enabled with the **CIECA/EMS Files directory empty**, so no EMS
+  file has ever had a folder to land in there. One import against a configured install
+  settles it. Until then the writer claims only that it produces a valid EMS 2.01
+  export, which is true whoever reads it.
 
 ### B · Outbound BMS through Secure Share
 

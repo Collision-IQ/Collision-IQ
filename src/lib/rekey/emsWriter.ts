@@ -1,11 +1,24 @@
 /**
  * Module B writer — a CIECA EMS v2.01 export built from a rekey sheet.
  *
- * WHAT THIS IS FOR. CCC ONE imports an EMS estimate from its configured import
- * folder; nothing else this build produces can be handed to CCC at all. So the
- * sheet's own translation — the CCC group, the operation code, the labor type,
- * the part type, the price and the taxability — is written into the format the
- * receiving system already reads, instead of being retyped by hand.
+ * WHAT THIS IS FOR. An EMS export is the open interchange form of the sheet's
+ * own translation — the CCC group, the operation code, the labor type, the
+ * part type, the price and the taxability — written into a format estimating
+ * and appraisal systems already read, instead of being retyped by hand. That
+ * much is certain: the format is published, and an IA platform consuming it is
+ * a use this build serves today.
+ *
+ * WHETHER IT IMPORTS INTO CCC ONE IS NOT SETTLED, and this header used to say
+ * it was. CCC's own pages disagree with each other: "Importing EMS Assignments
+ * and Estimates" says assignments AND estimates import automatically and gives
+ * an imported estimate its own Workfiles status, while "Overview - File Import
+ * and Export Settings" lists what can be imported as "EMS files (assignments)"
+ * and puts EMS 2.01 ESTIMATE files on the export side only. The shop's own
+ * account matches the second: EMS out, AWF in. Nobody has run the test on a
+ * machine with a CIECA/EMS import directory configured, so this module claims
+ * only what it can: it writes a valid EMS 2.01 export. Where that export is
+ * accepted is `docs/ccc-writeback-scope.md`'s open question, not this file's
+ * assertion.
  *
  * WHAT IT IS NOT. It is pre-population, not a rekey. An EMS line this writer
  * produces carries no database reference and no database labor time, because
