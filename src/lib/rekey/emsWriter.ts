@@ -77,6 +77,9 @@ export type EmsWriterRecord = Record<string, EmsWriterValue>;
 export type EmsWriterFile = { filename: string; bytes: Uint8Array };
 
 const DBASE_III = 0x03;
+/** dBase with a memo file beside it — what a table declaring an M field must
+ *  say it is, and what the reference export's own `.veh` says. */
+const DBASE_WITH_MEMO = 0x8b;
 const FIELD_TERMINATOR = 0x0d;
 const FILE_TERMINATOR = 0x1a;
 const HEADER_FIELD_START = 32;
@@ -84,17 +87,27 @@ const FIELD_DESCRIPTOR_SIZE = 32;
 
 /** The estimate-version tag CCC writes on every line of a first estimate. */
 const ESTIMATE_VERSION = "E01";
-/** Transaction code: this record is an addition. */
+/** Transaction code on a LINE: this record is an addition. */
 const TRANSACTION_ADD = "1";
+/**
+ * The envelope's own transaction fields, read off the reference export rather
+ * than chosen: it writes TRANS_TYPE "E" and STATUS "F" on an estimate. This
+ * writer wrote the line-level "1" into TRANS_TYPE, which is a code from a
+ * different column — a receiving system switching on it finds a value the
+ * reference never writes.
+ */
+const ENVELOPE_TRANS_TYPE = "E";
+/** STATUS is a LOGICAL field, one byte, and the reference writes F in it. */
+const ENVELOPE_STATUS = false;
 
-function ascii(text: string, length: number): number[] {
+function ascii(text: string, length: number, pad = 32): number[] {
   const out: number[] = [];
   for (let index = 0; index < length; index += 1) {
-    const code = index < text.length ? text.charCodeAt(index) : 32;
-    // dBase III is single-byte. A character outside it is written as a space
-    // rather than as a truncated multi-byte sequence that would shift the
+    const code = index < text.length ? text.charCodeAt(index) : pad;
+    // dBase III is single-byte. A character outside it is written as the pad
+    // byte rather than as a truncated multi-byte sequence that would shift the
     // fixed-width record and corrupt every field after it.
-    out.push(code > 0 && code < 256 ? code : 32);
+    out.push(code > 0 && code < 256 ? code : pad);
   }
   return out;
 }
@@ -126,6 +139,24 @@ export function formatDbaseValue(value: EmsWriterValue, field: SchemaField): str
 }
 
 /**
+ * The memo side-file a table with an M field points into.
+ *
+ * This writer carries no memo content — the memo pointers it writes are blank,
+ * which is how dBase says "this record has none" — but a table that DECLARES a
+ * memo field and has no `.dbt` beside it is a broken set. So the file is
+ * written with its header block and nothing else: the next free block is 1,
+ * because no memo has been allocated, and the stem names the set it belongs
+ * to, exactly as the reference export's own header block does.
+ */
+export function writeMemoFile(stem: string): Uint8Array {
+  const BLOCK = 512;
+  const bytes = new Uint8Array(BLOCK);
+  new DataView(bytes.buffer).setUint32(0, 1, true);
+  bytes.set(ascii(stem.toLowerCase().slice(0, 8), 8), 8);
+  return bytes;
+}
+
+/**
  * Write one dBase III table. Fields come from the schema, so a field this
  * writer has no value for is written blank at its declared width rather than
  * omitted — a fixed-width record with a missing field is not a table.
@@ -142,7 +173,7 @@ export function writeDbaseTable(params: {
   const bytes = new Uint8Array(headerLength + records.length * recordLength + 1);
   const view = new DataView(bytes.buffer);
 
-  bytes[0] = DBASE_III;
+  bytes[0] = fields.some((field) => field[1] === "M") ? DBASE_WITH_MEMO : DBASE_III;
   bytes[1] = now.getUTCFullYear() - 1900;
   bytes[2] = now.getUTCMonth() + 1;
   bytes[3] = now.getUTCDate();
@@ -153,7 +184,14 @@ export function writeDbaseTable(params: {
   let offset = HEADER_FIELD_START;
   for (const field of fields) {
     const [name, type, length, decimals] = field;
-    const label = ascii(name.toUpperCase(), 11);
+    // A field NAME is null-terminated and null-padded, not space-padded — the
+    // one place in a dBase III file where the pad byte is 0x00. Padding it
+    // with spaces writes the name as "INS_CO_ID  ", and a reader that takes
+    // the descriptor at its word has a field whose name matches nothing. Our
+    // own reader trims, which is exactly why this survived a round trip:
+    // measured against the reference export, every descriptor differed in
+    // those trailing bytes and in nothing else.
+    const label = ascii(name.toUpperCase(), 11, 0);
     bytes.set(label, offset);
     bytes[offset + 11] = type.charCodeAt(0);
     bytes[offset + 16] = length;
@@ -342,15 +380,31 @@ export function buildEmsExport(params: {
       EST_CTRY: "USA",
       UNQFILE_ID: stem,
       RO_ID: sheet.identity.roNumber,
-      TRANS_TYPE: TRANSACTION_ADD,
+      SUPP_NO: ESTIMATE_VERSION,
+      TRANS_TYPE: ENVELOPE_TRANS_TYPE,
+      STATUS: ENVELOPE_STATUS,
       CREATE_DT: now,
-      TRANSMT_DT: now,
+      CREATE_TM: `${String(now.getUTCHours()).padStart(2, "0")}${String(now.getUTCMinutes()).padStart(2, "0")}${String(
+        now.getUTCSeconds()
+      ).padStart(2, "0")}`,
+      // The transmission stamp is left blank, as the reference leaves it: this
+      // file was written, not transmitted, and nothing here knows when or
+      // whether it will be.
+      TRANSMT_DT: null,
       INCL_ADMIN: true,
       INCL_VEH: true,
       INCL_EST: true,
       INCL_PROFL: true,
       INCL_TOTAL: true,
-      INCL_VENDR: false,
+      // The include flags say which tables are in the set, and the vendor
+      // table is now one of them.
+      INCL_VENDR: true,
+      // SW_VERSION, DB_VERSION and DB_DATE stay blank on purpose. They name
+      // the software and the parts-and-labor database that produced a file;
+      // writing the reference's values would claim this export came out of
+      // that system's release, which is a lie about provenance rather than a
+      // format detail. TOP_SECRET is that system's own workfile identifier and
+      // means nothing coming from here.
       EMS_VER: "2.01",
     },
   ];
@@ -424,6 +478,11 @@ export function buildEmsExport(params: {
       now,
     }),
   }));
+  // A set whose tables declare a memo field carries the memo file those
+  // pointers refer to, even when every pointer in it is blank.
+  if (written.some(([extension]) => TABLE_SCHEMA[extension].some((field) => field[1] === "M"))) {
+    files.push({ filename: `${stem}.dbt`, bytes: writeMemoFile(stem) });
+  }
 
   notes.push(
     "Every line in this export imports as a MANUALLY ENTERED line. It carries no database reference and no database labor time, because a translated estimate has neither: those belong to the receiving system's own parts and labor database. Re-select the database entry on any line that needs the receiving system's own times or price updates."

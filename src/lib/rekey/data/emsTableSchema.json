@@ -1,5 +1,5 @@
 {
-  "$comment": "CIECA EMS v2.01 table schemas, read from the field headers of a real CCC EMS export (tests/fixtures/ems-ccc-1259209948) rather than transcribed from a specification. Each entry is [name, dBase type, length, decimals]. Memo (M) fields are omitted: this writer carries no memo content and will not declare a memo field with no .dbt behind it. The set is the same fourteen tables that export carries. Extend by adding fields here \u2014 the writer is schema-driven and hardcodes no offset.",
+  "$comment": "CIECA EMS v2.01 table schemas, read from the field headers of a real CCC EMS export (tests/fixtures/ems-ccc-1259209948) rather than transcribed from a specification. Each entry is [name, dBase type, length, decimals]. Memo (M) fields are declared where the reference export declares them, and written as an empty pointer with an empty .dbt beside the set \u2014 the reference's own .veh carries three, and a table that omits them has a different record layout from the one that system writes. The set is the same fourteen tables that export carries. Extend by adding fields here \u2014 the writer is schema-driven and hardcodes no offset.",
   "tables": {
     "ad1": [
       [
@@ -3369,6 +3369,12 @@
         0
       ],
       [
+        "DMG_MEMO",
+        "M",
+        10,
+        0
+      ],
+      [
         "DB_V_CODE",
         "C",
         7,
@@ -3471,6 +3477,12 @@
         0
       ],
       [
+        "V_OPTIONS",
+        "M",
+        10,
+        0
+      ],
+      [
         "V_COLOR",
         "C",
         20,
@@ -3504,6 +3516,12 @@
         "PAINT_CD3",
         "C",
         15,
+        0
+      ],
+      [
+        "V_MEMO",
+        "M",
+        10,
         0
       ]
     ],

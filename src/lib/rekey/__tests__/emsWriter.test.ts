@@ -160,13 +160,29 @@ describe("the tables are shaped like a real export's", () => {
     for (const extension of ["env", "veh", "ad1", "lin", "stl", "ttl", "pfl", "pfm", "pft"]) {
       const ours = readBack(extension);
       const theirs = reference(extension);
-      // Memo fields are deliberately absent — this writer carries no memo
-      // content and will not declare a memo field with no .dbt behind it.
-      const expected = theirs.fields.filter((field) => field.type !== "M");
+      // Every field the reference declares, memo fields included. A table that
+      // drops the three memo fields its own `.veh` carries has a different
+      // record layout from the one that system writes — 342 bytes against 372.
       expect(`${extension}: ${ours.fields.map((f) => `${f.name}/${f.type}${f.length}.${f.decimals}`).join(" ")}`).toBe(
-        `${extension}: ${expected.map((f) => `${f.name}/${f.type}${f.length}.${f.decimals}`).join(" ")}`
+        `${extension}: ${theirs.fields.map((f) => `${f.name}/${f.type}${f.length}.${f.decimals}`).join(" ")}`
       );
     }
+  });
+
+  it("writes a field name the way dBase does, and a memo file to point into", () => {
+    // A field NAME is null-padded, not space-padded. Ours were space-padded,
+    // which our own reader trimmed and never noticed: measured against the
+    // reference export, every field descriptor in every table differed in
+    // those trailing bytes and in nothing else.
+    const veh = written.files.find((entry) => entry.filename.endsWith(".veh"))!;
+    expect(Array.from(veh.bytes.slice(32, 43))).toEqual([...Buffer.from("IMPACT_1"), 0, 0, 0]);
+    // A table declaring a memo field says so in its version byte and has the
+    // memo file beside it, even with every pointer in it blank.
+    expect(veh.bytes[0]).toBe(0x8b);
+    const memo = written.files.find((entry) => entry.filename.endsWith(".dbt"));
+    expect(memo).toBeDefined();
+    expect(memo!.bytes).toHaveLength(512);
+    expect(new DataView(memo!.bytes.buffer, memo!.bytes.byteOffset).getUint32(0, true)).toBe(1);
   });
 
   it("writes the group headings the way the reference export does", () => {
