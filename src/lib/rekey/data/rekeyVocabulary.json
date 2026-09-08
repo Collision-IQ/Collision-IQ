@@ -22,14 +22,15 @@
 
   "$operationsAliasesKeptInDescriptionComment": "An alias that names the operation but STAYS in the description. A word in an operation column is an operation; the same word at the head of a description may be part of the description, and one document settles which: a CCC print writes \"Rpl information labels\" with an EMPTY operation column, and that estimate's own EMS export stores all three words as LINE_DESC. Taking \"Rpl\" out left the row reading \"information labels\", which matched the export's section-heading line instead of its own and reported a labor delta that was not there. So the operation is read and the wording is left exactly as the source keeps it.",
   "$operationsLaneCommentary": "Two facts about the operation CODES an export writes on labor lanes, both measured on the exports here. refinishLane: the operation can be the operation OF a refinish lane — every LAR lane these exports code carries OP6 (refinish), OP15 (blend), OP14 (clear coat, which this table does not name) or OP0 (manual), with one exception. partOperation: the operation acts on a PART, so it cannot describe a labor lane on a line that has no part. The exception is where the two meet: one platform repeats a LINE's code on every labor lane of the line — three of its lines carry OP11 on their body lane AND on their refinish lane — and it writes that same OP11 on a prep line that has a refinish lane, no part number and no price. There the code is the code of the line the prep belongs to, and it contradicts nothing about the prep.",
+  "$operationsLaborOpCodesSeenComment": "Codes an export has been SEEN to write for this operation, as against laborOpCode, which is the one code this build writes. The two lists differ because one platform declines to code what the other codes: it writes no code at all on its own refinish, overhaul and aim lines, so those entries write nothing and read what the other platform writes. Every code here was matched line by line against the print that produced the export — OP5 on its one overhaul line (\"Frt Bumper Cover Assy\", the print says Overhaul), OP8 on its one aim line (\"Headlamps\", Check Adjust), OP6 on all seven of its refinish lanes, OP13 on the materials line the print files as an Additional Cost, and OP14 on the five it files as Additional Operations — which are the two halves of the one operation this table calls Manual. Reading a code is not writing one: nothing here changes what an export this build produces contains.",
   "operations": [
     { "ccc": "Repl", "mitchell": "Remove Replace", "laborOpCode": "OP11", "partOperation": true, "aliases": ["REMOVE REPLACE", "REMOVE AND REPLACE", "R R", "REPLACE", "REPL"], "aliasesKeptInDescription": ["RPL"] },
     { "ccc": "R&I", "mitchell": "Remove Install", "laborOpCode": "OP2", "partOperation": true, "aliases": ["REMOVE INSTALL", "REMOVE AND INSTALL", "R I", "REMOVE REINSTALL"] },
     { "ccc": "Rpr", "mitchell": "Repair", "laborOpCode": "OP9", "aliases": ["REPAIR", "RPR"] },
     { "ccc": "Blnd", "mitchell": "Blend", "laborOpCode": "OP15", "refinishLane": true, "aliases": ["BLEND", "BLND"] },
-    { "ccc": "Refn", "mitchell": "Refinish Only", "laborOpCode": null, "refinishLane": true, "refinishOnly": true, "aliases": ["REFINISH ONLY", "REFINISH", "REFN"] },
-    { "ccc": "O/H", "mitchell": "Overhaul", "laborOpCode": null, "aliases": ["OVERHAUL", "O H"] },
-    { "ccc": "Aim", "mitchell": "Check Adjust", "laborOpCode": null, "aliases": ["CHECK ADJUST", "CHECK AND ADJUST", "AIM"] },
+    { "ccc": "Refn", "mitchell": "Refinish Only", "laborOpCode": null, "refinishLane": true, "laborOpCodesSeen": ["OP6"], "refinishOnly": true, "aliases": ["REFINISH ONLY", "REFINISH", "REFN"] },
+    { "ccc": "O/H", "mitchell": "Overhaul", "laborOpCode": null, "laborOpCodesSeen": ["OP5"], "aliases": ["OVERHAUL", "O H"] },
+    { "ccc": "Aim", "mitchell": "Check Adjust", "laborOpCode": null, "laborOpCodesSeen": ["OP8"], "aliases": ["CHECK ADJUST", "CHECK AND ADJUST", "AIM"] },
     { "ccc": "Algn", "mitchell": "Align", "laborOpCode": "OP4", "aliases": ["ALIGN", "ALIGNMENT", "ALGN"] },
     { "ccc": "Subl", "mitchell": "Sublet", "laborOpCode": "OP16", "sublet": true, "aliases": ["SUBLET", "SUBL"] },
     {
@@ -37,6 +38,7 @@
       "mitchell": "Additional Operation",
       "mitchellCharge": "Additional Cost",
       "laborOpCode": "OP0",
+      "laborOpCodesSeen": ["OP13", "OP14"],
       "manualEntry": true,
       "aliases": [
         "ADDITIONAL LABOR",

@@ -6,7 +6,7 @@ import { readEmsBundle } from "../emsReader";
 import { keyedEstimateFromEms, verifyRekey } from "../rekeyVerification";
 import { readEstimateColumns, type MitchellPageWord } from "../mitchellColumnBands";
 import { buildRekeyVerificationText } from "../rekeyReportBuilder";
-import { resolveOperationCode } from "../rekeyVocabulary";
+import { resolveOperation, resolveOperationCode } from "../rekeyVocabulary";
 
 /**
  * RV-4 / RV-5 — what the verification report says when the two platforms
@@ -320,5 +320,84 @@ describe("RV-11 — a part operation cannot describe a refinish lane with no par
     );
     expect(operationDeltas).toHaveLength(33);
     expect(check.summary.exact).toBe(13);
+  });
+});
+
+/**
+ * RV-12 — a code is read in the vocabulary of whoever wrote it.
+ *
+ * The comparison falls back to raw codes when neither side's code names an
+ * operation, and an estimator reading "OP0 vs OP6" learns nothing. It fired
+ * because one platform declines to code its own refinish, overhaul and aim
+ * lines, so this build had no name for the codes the OTHER platform writes
+ * there. The codes it writes are unchanged; only what it can read grew.
+ */
+describe("RV-12 — the codes one platform writes are read, not printed raw", () => {
+  it("names every code the two exports here write", () => {
+    // Matched line by line against the print that produced the export.
+    expect(["OP5", "OP6", "OP8", "OP13", "OP14"].map(resolveOperationCode)).toEqual([
+      "O/H",
+      "Refn",
+      "Aim",
+      "Manual",
+      "Manual",
+    ]);
+    // The two halves of Mitchell's split are one operation here, which is the
+    // same fact the target vocabulary states from the other side.
+    expect(resolveOperationCode("OP13")).toBe(resolveOperationCode("OP14"));
+    // A code in evidence for nobody still names nothing.
+    expect(resolveOperationCode("OP99")).toBeNull();
+    expect(resolveOperationCode(null)).toBeNull();
+  });
+
+  it("does not change one code this build WRITES", () => {
+    // The read list is not the write list: this operation stays uncoded on an
+    // export this build produces, because the platform it writes for leaves it
+    // uncoded.
+    expect(resolveOperation({ description: "Refinish Only Frt Bumper Cover" })).toMatchObject({
+      ccc: "Refn",
+      laborOpCode: null,
+    });
+    expect(resolveOperation({ opCode: "Repl", description: "x" }).laborOpCode).toBe("OP11");
+  });
+
+  it("leaves no finding reading as a bare code, on either direction of the real pair", () => {
+    const cccWords: MitchellPageWord[] = (
+      JSON.parse(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
+        p: number;
+        x: number;
+        y: number;
+        w: number;
+        t: string;
+      }>
+    ).map((word) => ({ page: word.p, x: word.x, y: word.y, width: word.w, height: 8, text: word.t }));
+    const cccSheet = buildRekeySheet({
+      text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/ccc-1259209948-text.txt"), "utf8"),
+      sourceFile: "ccc.pdf",
+      columns: readEstimateColumns(cccWords),
+      target: "mitchell",
+    });
+    const mitchellDir = path.join(process.cwd(), "tests/fixtures/ems-mitchell-1259209948");
+    const mitchellKeyed = keyedEstimateFromEms(
+      readEmsBundle(
+        fs
+          .readdirSync(mitchellDir)
+          .map((name) => ({ filename: name, bytes: new Uint8Array(fs.readFileSync(path.join(mitchellDir, name))) }))
+      ),
+      "mitchell.zip",
+      "mitchell"
+    );
+    if (!mitchellKeyed.ok) throw new Error(mitchellKeyed.reason);
+    const mirror = verifyRekey({ sheet: cccSheet, keyed: mitchellKeyed.estimate });
+    const operations = mirror.lineFindings.flatMap((finding) =>
+      finding.deltas.filter((delta) => delta.field === "operation")
+    );
+    // Five of these read "OP11 vs OP6", "OP16 vs OP14", "OP0 vs OP6".
+    expect(operations.filter((delta) => /^OP\d+$/.test(String(delta.expected)))).toEqual([]);
+    expect(operations).toHaveLength(31);
+    const shapes = operations.map((delta) => `${delta.expected} vs ${delta.found}`);
+    expect(shapes).toContain("Repl vs Refn (OP6)");
+    expect(shapes).toContain("Manual vs Refn (OP6)");
+    expect(shapes).toContain("Subl vs Manual (OP14)");
   });
 });

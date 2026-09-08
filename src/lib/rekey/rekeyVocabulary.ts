@@ -35,6 +35,10 @@ type OperationEntry = {
   refinishOnly?: boolean;
   /** Can be the operation OF a refinish labor lane — see the vocabulary's own
    *  comment for what the exports write. */
+  /** Codes an export has been seen to WRITE for this operation, which is not
+   *  the same list as the one code this build writes — see the vocabulary's
+   *  own comment for the lines each was matched against. */
+  laborOpCodesSeen?: string[];
   refinishLane?: boolean;
   /** Acts on a PART, so it cannot describe a labor lane on a line that has none. */
   partOperation?: boolean;
@@ -462,10 +466,26 @@ export function isPartOperation(cccTerm: string | null | undefined): boolean {
   return OPERATIONS.find((candidate) => candidate.ccc === canonical)?.partOperation === true;
 }
 
+/**
+ * The operation an EMS labor-operation code names — READ side.
+ *
+ * The code this build writes is one per operation; the codes it may have to
+ * read are as many as the platforms write. A platform that leaves its own
+ * refinish, overhaul and aim lines uncoded is why the two lists differ, and
+ * why an operation with no code of its own can still be recognised from
+ * another platform's. The written code is preferred, so nothing a code means
+ * to this build changes; the seen list only answers where it had no answer.
+ */
 export function resolveOperationCode(code: string | null | undefined): string | null {
   const normalized = (code ?? "").trim().toUpperCase();
   if (!normalized) return null;
-  return OPERATIONS.find((entry) => (entry.laborOpCode ?? "").toUpperCase() === normalized)?.ccc ?? null;
+  const written = OPERATIONS.find((entry) => (entry.laborOpCode ?? "").toUpperCase() === normalized);
+  if (written) return written.ccc;
+  return (
+    OPERATIONS.find((entry) =>
+      (entry.laborOpCodesSeen ?? []).some((seen) => seen.trim().toUpperCase() === normalized)
+    )?.ccc ?? null
+  );
 }
 
 /** Scan / calibration / reset work, which CCC groups under VEHICLE DIAGNOSTICS. */
