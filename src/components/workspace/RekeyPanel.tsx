@@ -331,7 +331,7 @@ export default function RekeyPanel() {
                 type="button"
                 onClick={() => void downloadEmsExport()}
                 disabled={emsBusy}
-                title="Writes the sheet as a CIECA EMS export for import. Every line arrives as a manually entered line."
+                title="Downloads the sheet as a CIECA EMS 2.01 export — the open interchange format, as a ZIP of dBase tables. Unzip it into the receiving system's configured import folder. Every line arrives as a manually entered line."
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-[11px] font-medium hover:bg-background disabled:opacity-60"
               >
                 {emsBusy ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />} EMS export (beta)

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildRekeySheet } from "../rekeyLedger";
 import { normalizeEmsEstimate, parseDbaseTable, readEmsBundle } from "../emsReader";
-import { buildEmsExport, formatDbaseValue, writeDbaseTable } from "../emsWriter";
+import { buildEmsExport, isRekeyEmsWriterEnabled, formatDbaseValue, writeDbaseTable } from "../emsWriter";
 import { keyedEstimateFromEms, verifyRekey } from "../rekeyVerification";
 import { readEstimateColumns, type MitchellPageWord } from "../mitchellColumnBands";
 
@@ -212,5 +212,16 @@ describe("the export says what it cannot carry", () => {
     // WO-RK1 §1. Nothing here generates an AWF.
     const written = buildEmsExport({ sheet: cccSheet, stem: "rekey001", estimatingSystem: "C", now: NOW });
     expect(written.files.some((file) => /\.awf$/i.test(file.filename))).toBe(false);
+  });
+});
+
+describe("the export is produced unless a deployment turns it off", () => {
+  it("is on by default, and off only when asked", () => {
+    // It shipped opt-in, which left every download offering a PDF and a ledger
+    // and no artifact a receiving system reads — so nothing could be tested
+    // against one. What is unproven is said in the notes instead.
+    expect(isRekeyEmsWriterEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(isRekeyEmsWriterEnabled({ REKEY_EMS_WRITER_ENABLED: "true" } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(isRekeyEmsWriterEnabled({ REKEY_EMS_WRITER_ENABLED: "false" } as unknown as NodeJS.ProcessEnv)).toBe(false);
   });
 });

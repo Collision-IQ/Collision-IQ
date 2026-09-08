@@ -54,15 +54,22 @@ const ROLL_UPS = (VOCABULARY.totalsCategories as Array<{ ems: string; rollUpOf?:
   .map((entry) => ({ code: entry.ems, members: entry.rollUpOf as string[] }));
 
 /**
- * The writer is behind a flag and off by default.
+ * The writer is ON, and can be turned off.
  *
- * What it produces is handed to a live estimating system, and nothing in this
- * repository can prove what that system does with it — only that the tables
- * read back as the sheet they came from. Until a real import has been run and
- * inspected, it stays opt-in, per shop, deliberately.
+ * It shipped opt-in because what it produces is handed to a live estimating
+ * system and nothing here can prove what that system does with it. That is
+ * still true — and it argues for saying so, not for withholding the file. A
+ * build that cannot produce the export cannot be tested against any receiving
+ * system at all, which is the position it was in: every download offered a PDF
+ * to key from and a ledger, and no artifact any system reads.
+ *
+ * So the export is produced, and what is unproven is stated where it is read —
+ * in the notes returned beside the download, and in this module's header.
+ * `REKEY_EMS_WRITER_ENABLED=false` turns it off for a deployment that wants it
+ * gone.
  */
 export function isRekeyEmsWriterEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.REKEY_EMS_WRITER_ENABLED === "true";
+  return env.REKEY_EMS_WRITER_ENABLED !== "false";
 }
 
 export type EmsWriterValue = string | number | boolean | Date | null | undefined;
