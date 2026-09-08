@@ -33,6 +33,11 @@ type OperationEntry = {
    *  vocabulary's own comment for the document that settles it. */
   aliasesKeptInDescription?: string[];
   refinishOnly?: boolean;
+  /** Can be the operation OF a refinish labor lane — see the vocabulary's own
+   *  comment for what the exports write. */
+  refinishLane?: boolean;
+  /** Acts on a PART, so it cannot describe a labor lane on a line that has none. */
+  partOperation?: boolean;
   sublet?: boolean;
   manualEntry?: boolean;
 };
@@ -430,6 +435,33 @@ function routeByDescription(entry: SectionGroupEntry, description: string | null
  * operation. Resolving both to the operation itself makes a real difference
  * legible and makes a difference that is only the two vocabularies disappear.
  */
+/**
+ * Whether an operation can be the operation of a REFINISH labor lane.
+ *
+ * One platform repeats a line's operation code on every labor lane of the
+ * line, so a refinish lane can carry a code that names a replace. That code
+ * describes the line, not the lane, and a sheet's refinish row does not
+ * disagree with it. Unknown operations answer false: this is used to withhold
+ * a finding, and withholding one on a guess is worse than reporting it.
+ */
+export function isRefinishLaneOperation(cccTerm: string | null | undefined): boolean {
+  const canonical = (cccTerm ?? "").trim();
+  if (!canonical) return false;
+  const entry = OPERATIONS.find((candidate) => candidate.ccc === canonical);
+  return entry?.refinishLane === true || entry?.refinishOnly === true;
+}
+
+/**
+ * Whether an operation acts on a part — a replace, an R&I. Such an operation
+ * cannot describe a labor lane on a line that has no part, so a code naming
+ * one there came from somewhere else. Unknown operations answer false.
+ */
+export function isPartOperation(cccTerm: string | null | undefined): boolean {
+  const canonical = (cccTerm ?? "").trim();
+  if (!canonical) return false;
+  return OPERATIONS.find((candidate) => candidate.ccc === canonical)?.partOperation === true;
+}
+
 export function resolveOperationCode(code: string | null | undefined): string | null {
   const normalized = (code ?? "").trim().toUpperCase();
   if (!normalized) return null;

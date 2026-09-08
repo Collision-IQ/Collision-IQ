@@ -259,3 +259,66 @@ describe("RV-10 — a part number is compared the way it is matched", () => {
     expect(label?.deltas.some((delta) => delta.field === "part number")).toBe(false);
   });
 });
+
+/**
+ * RV-11 — a code that came from the LINE, read off a lane it cannot describe.
+ *
+ * The pair here is the frk2 Mitchell estimate against the CCC export for the
+ * same claim. One platform repeats a line's operation code on every labor
+ * lane of the line: three lines in this export carry OP11 on their body lane
+ * AND on their refinish lane. It writes that same OP11 on a prep line whose
+ * only lane is refinish, with no part number and no price — and against the
+ * sheet's refinish row that read as "the operation should be Refn, it is Repl
+ * (OP11)", sending an estimator to a line nobody keyed wrong.
+ */
+describe("RV-11 — a part operation cannot describe a refinish lane with no part", () => {
+  const frk2 = buildRekeySheet({
+    text: fs.readFileSync(path.join(process.cwd(), "tests/fixtures/frk2-mitchell-text.txt"), "utf8"),
+    sourceFile: "frk2.pdf",
+  });
+  const cccDir = path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948");
+  const cccKeyed = keyedEstimateFromEms(
+    readEmsBundle(
+      fs.readdirSync(cccDir).map((name) => ({ filename: name, bytes: new Uint8Array(fs.readFileSync(path.join(cccDir, name))) }))
+    ),
+    "ccc.zip"
+  );
+  if (!cccKeyed.ok) throw new Error(cccKeyed.reason);
+  const check = verifyRekey({ sheet: frk2, keyed: cccKeyed.estimate });
+
+  it("is the shape the export actually writes", () => {
+    // Not asserted from the rule — read off the export, which is what makes
+    // the rule true. The prep line: a refinish lane, an OP11, and no part.
+    const prep = cccKeyed.estimate.lines.find((line) => line.lineNumber === 31);
+    expect(prep).toMatchObject({ description: "Prep unprimed bumper", partNumber: null, price: 0, operationLane: "LAR" });
+    expect(prep?.operation).toBe("OP11");
+    expect(resolveOperationCode("OP11")).toBe("Repl");
+  });
+
+  it("reports no operation difference against the sheet's refinish row", () => {
+    const prep = check.lineFindings.find((finding) => finding.sourceLine === 12);
+    expect(prep?.description).toBe("Prep unprimed bumper");
+    expect(prep?.deltas).toEqual([]);
+    expect(prep?.resolution).toBe("exact");
+  });
+
+  it("stays narrow: a code that CAN describe the lane still speaks", () => {
+    // "Tint color" is coded OP0 on its refinish lane — a manual entry, which
+    // is that line's own classification and not another line's code showing
+    // through. The sheet says Refn, and the difference is reported.
+    const tint = check.lineFindings.find((finding) => finding.sourceLine === 89);
+    expect(tint?.deltas.map((delta) => `${delta.field}: ${delta.expected} vs ${delta.found}`)).toEqual([
+      "operation: Refn vs Manual (OP0)",
+    ]);
+  });
+
+  it("leaves the other real pairs where they were", () => {
+    // The lane-level codes of the other platform's export name no part
+    // operation, so nothing there is withheld.
+    const operationDeltas = check.lineFindings.flatMap((finding) =>
+      finding.deltas.filter((delta) => delta.field === "operation")
+    );
+    expect(operationDeltas).toHaveLength(33);
+    expect(check.summary.exact).toBe(13);
+  });
+});

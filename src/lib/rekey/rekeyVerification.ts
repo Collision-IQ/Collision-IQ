@@ -22,6 +22,8 @@ import {
   NOMENCLATURE_MATCH_THRESHOLD,
   UNMAPPED,
   canonicalizeNomenclature,
+  isPartOperation,
+  isRefinishLaneOperation,
   nomenclatureOverlap,
   normalizeVocabularyText,
   resolveOperationCode,
@@ -99,6 +101,11 @@ export interface KeyedLine {
   taxable: boolean | null;
   group: string | null;
   operation: string | null;
+  /** The labor lane the operation code was read off. One platform repeats a
+   *  LINE's code on every lane, so the lane is what says whether the code can
+   *  describe this row's work at all. Null for a keyed side that carries no
+   *  lanes — a document. */
+  operationLane?: string | null;
 }
 
 export interface KeyedProfile {
@@ -184,6 +191,7 @@ export function keyedEstimateFromEms(bundle: EmsBundle, sourceFile: string, targ
     taxable: line.taxable,
     group: null,
     operation: line.labor.find((entry) => entry.opCode)?.opCode ?? null,
+    operationLane: line.labor.find((entry) => entry.opCode)?.type ?? null,
   }));
 
   return {
@@ -708,8 +716,27 @@ export function compareRekeyFields(row: RekeyLedgerRow, keyed: KeyedLine): Rekey
     // themselves ("Rpr" against "Algn") instead of "OP9" against "OP4".
     const keyedName = resolveOperationCode(keyedOperation);
     const sourceName = row.operationMapped && row.operationCanonical !== UNMAPPED ? row.operationCanonical : null;
+    // RV-11: an operation that acts on a PART cannot describe a refinish lane
+    // on a line that HAS no part, so a code naming one there came from
+    // somewhere else. One platform repeats a line's operation code on every
+    // labor lane it has — measured on a real export, three lines carry OP11 on
+    // their body lane and on their refinish lane — and it writes that same
+    // OP11 on a prep line whose only lane is refinish, with no part number and
+    // no price. Against the sheet's refinish row that is not a disagreement
+    // about the keying, and reporting it as one sends an estimator to a line
+    // that was keyed correctly.
+    //
+    // Narrow on purpose. A code that CAN describe the lane still speaks: a
+    // manual or a blend on a refinish lane is that line's own classification,
+    // and a difference there is reported like any other.
+    const codeCameFromTheLine =
+      isRefinishLaneOperation(row.operationCanonical) &&
+      (keyed.operationLane ?? "").toUpperCase() === "LAR" &&
+      isPartOperation(keyedName) &&
+      !keyed.partNumber &&
+      (keyed.price ?? 0) === 0;
     if (keyedName && sourceName) {
-      if (normalizeVocabularyText(sourceName) !== normalizeVocabularyText(keyedName)) {
+      if (normalizeVocabularyText(sourceName) !== normalizeVocabularyText(keyedName) && !codeCameFromTheLine) {
         deltas.push({
           field: "operation",
           expected: sourceName,
