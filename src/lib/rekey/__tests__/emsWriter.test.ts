@@ -62,7 +62,41 @@ describe("the export reads back as the sheet it was written from", () => {
 
   it("produces tables this repository's own reader accepts", () => {
     expect(ccc.bundle.errors).toEqual([]);
-    expect(ccc.bundle.tableNames).toEqual(["ad1", "env", "lin", "pfl", "pfm", "pft", "stl", "ttl", "veh"]);
+    expect(ccc.bundle.tableNames).toEqual([
+      "ad1",
+      "ad2",
+      "env",
+      "lin",
+      "pfh",
+      "pfl",
+      "pfm",
+      "pfo",
+      "pfp",
+      "pft",
+      "stl",
+      "ttl",
+      "veh",
+      "ven",
+    ]);
+  });
+
+  it("writes the same set of tables the reference export carries", () => {
+    // An importer reading a set by extension finds nothing missing. Four of
+    // these the sheet has no values for and they are written blank; the system
+    // that produced the reference export left two of them blank itself.
+    const reference = fs
+      .readdirSync(path.join(process.cwd(), "tests/fixtures/ems-ccc-1259209948"))
+      .map((name) => name.split(".").pop()!.toLowerCase())
+      .sort();
+    expect(ccc.bundle.tableNames).toEqual(reference);
+    for (const extension of ["ad2", "pfh", "pfo", "ven"]) {
+      const table = ccc.bundle.tables.get(extension);
+      expect(table?.records).toHaveLength(1);
+      const stated = Object.values(table?.records[0] ?? {}).filter(
+        (value) => value !== null && value !== "" && value !== false
+      );
+      expect(stated).toEqual([]);
+    }
   });
 
   it("carries every keyable line, and no line the sheet holds back", () => {

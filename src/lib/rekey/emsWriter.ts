@@ -376,6 +376,24 @@ export function buildEmsExport(params: {
   const taxRate = sheet.derivedTotals?.taxRate?.rate ?? null;
   const pft: EmsWriterRecord[] = taxRate === null ? [] : [{ TAX_TYPE1: "LS", TY1_TIER1: 1, TY1_RATE1: taxRate * 100 }];
 
+  // §4.7 the four tables the sheet has no values for, written anyway.
+  //
+  // The reference export of this same claim carries fourteen tables; this
+  // writer carried ten, and an importer reading a set by extension would find
+  // four of them missing. They are written STRUCTURALLY: one record, every
+  // field at its declared width, every value blank — which is not a
+  // degradation of them, because the system that wrote the reference export
+  // left `.ad2` and `.ven` entirely blank itself.
+  //
+  // Blank rather than borrowed, deliberately. `.pfo` holds tow and storage tax
+  // settings and `.ad2` the estimator, inspection and repair-facility record;
+  // a rekey sheet states none of them, and the reference specimen's values are
+  // another shop's profile. `.pfh` holds general tax settings, and the tax
+  // this build did derive is already written once, in `.pft` — writing it
+  // twice invites the two to disagree. Everything blank here is governed by
+  // the receiving profile, which is what the notes have always said.
+  const emptyRecord: EmsWriterRecord[] = [{}];
+
   const written: Array<[string, EmsWriterRecord[]]> = [
     ["env", env],
     ["veh", veh],
@@ -387,19 +405,31 @@ export function buildEmsExport(params: {
     ["pfm", pfm],
     ["pfp", pfp],
     ["pft", pft],
+    ["ad2", emptyRecord],
+    ["pfh", emptyRecord],
+    ["pfo", emptyRecord],
+    ["ven", emptyRecord],
   ];
 
-  const files = written
-    .filter(([, records]) => records.length > 0)
-    .map(([extension, records]) => ({
-      filename: `${stem}.${extension}`,
-      bytes: writeDbaseTable({ fields: TABLE_SCHEMA[extension], records, now }),
-    }));
+  // Every table in the set is written, whatever the sheet knows. A table whose
+  // values the sheet does not state is written with one blank record rather
+  // than left out: an importer that reads a set by extension finds a short set
+  // missing, not empty, and cannot tell the difference between "this estimate
+  // states no sublet markup" and "this file is incomplete".
+  const files = written.map(([extension, records]) => ({
+    filename: `${stem}.${extension}`,
+    bytes: writeDbaseTable({
+      fields: TABLE_SCHEMA[extension],
+      records: records.length > 0 ? records : emptyRecord,
+      now,
+    }),
+  }));
 
   notes.push(
     "Every line in this export imports as a MANUALLY ENTERED line. It carries no database reference and no database labor time, because a translated estimate has neither: those belong to the receiving system's own parts and labor database. Re-select the database entry on any line that needs the receiving system's own times or price updates."
   );
   notes.push(
+    "The file set is the fourteen tables a real export of this format carries. Four of them — the estimator and repair-facility record, the general tax settings, the tow and storage tax settings, and the vendor record — are written with their fields present and blank, because a rekey sheet states none of them and borrowing another estimate's values would be inventing a profile. What is blank is governed by the receiving profile.",
     "The profile tables carry only the settings the sheet states — labor rates, the paint materials rate, the sublet markup and the tax rate. Every other profile setting stays whatever the receiving profile already holds."
   );
   if (sheet.rows.some((row) => !row.keyable)) {
