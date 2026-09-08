@@ -28,6 +28,8 @@ ceiling sooner and with no commercial gate, on desktop CCC ONE only.
 | `CCC_V_Mitchell/CCC/4b53232a.*` | The CCC EMS export of the same claim keyed in CCC — 14 dBase tables, already parsed by `src/lib/rekey/emsReader.ts` and verified against the sheet at 82 exact rows. |
 | Both estimate PDFs | The printed form of each, already fixtures in this repository. |
 | `help.cccis.com` → *Importing EMS Assignments and Estimates* | CCC ONE imports EMS assignments **and EMS estimates** automatically from the configured folder; the workfile Updates status reads "EMS Estimate". Importing EMS from other estimating applications is **not yet supported on cccone.com**. |
+| `help.cccis.com` → *Setting Up File Import Directories* | The import folder is configured at **Configure → Machine Settings → File Import**, with **Import Type = CIECA/EMS Files** and a folder path. Separate from the EXPORT directories, which are configured on their own page — a machine set up only to export has no import path at all. |
+| `help.cccis.com` → *Setting up EMS* / *Adding and Removing EMS Paths* | The **CCC ONE Data Transfer application must be running on the device** where the import directories are configured; it is what processes files found there. EMS must be enabled in Machine Settings before any of it applies. |
 
 ## What the ledger already carries
 
@@ -111,11 +113,34 @@ EMS import folder; CCC ONE picks them up and creates the workfile.
   real CCC-authored export of this very claim to diff field-by-field against.
 - **Gate:** none commercially. Desktop CCC ONE only — CCC states EMS import from other
   estimating applications is not yet supported on cccone.com.
+- **What has to be true on the shop's machine**, which is where this was mistaken for a
+  product limit rather than a setup one:
+  1. EMS enabled in **Configure → Machine Settings**.
+  2. A **File Import** directory with **Import Type = CIECA/EMS Files**. Export
+     directories are configured separately; a machine set up only to export has no
+     import path, and dropping files anywhere else does nothing.
+  3. The **CCC ONE Data Transfer application running** on that device — it is the thing
+     that watches the folder.
+  4. The tables **unzipped into the folder**. This build downloads a ZIP; CCC watches
+     for the files themselves.
+  A successful estimate import shows in Workfiles with Updates reading **"EMS Estimate"**
+  (an assignment reads "EMS Assignment" — a different thing, and the distinction matters
+  when reading whether an import worked).
 - **Effort:** the writer is the work — a dBase III table writer, the field map per
   table (`.env .veh .lin .ttl .stl .ad1 .ad2 .pf*`), and the round-trip harness.
   Roughly a week of focused work to a first import, most of it in the `.lin` field map.
-- **Risk:** CCC may accept an EMS *assignment* more completely than an EMS *estimate*;
-  unverified until we try one against a real CCC ONE install.
+- **Risk, and still open:** CCC's pages document importing an EMS *estimate* and give it
+  its own workfile status, but none of them says whether an EMS estimate authored by a
+  THIRD-PARTY application — which is what this build produces — is accepted the same
+  way. Nothing found says it is refused either. Only a real import against a configured
+  CCC ONE install settles it, and until one has been run this path is documented, not
+  proven.
+
+  Read against practice: the shop reports EMS as an export-only route, used to hand data
+  to IA platforms, with AWF as the file shared with CCC for estimate integration. Both
+  can be true at once — AWF is CCC's own workfile copy (CCC to CCC), EMS the open
+  interchange — and the four setup conditions above are the likeliest reason an import
+  has never been seen to work on that machine.
 
 ### B · Outbound BMS through Secure Share
 
