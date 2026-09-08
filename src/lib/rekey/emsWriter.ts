@@ -484,6 +484,15 @@ export function buildEmsExport(params: {
     files.push({ filename: `${stem}.dbt`, bytes: writeMemoFile(stem) });
   }
 
+  // How the file is handed over, first, because the format being right does
+  // not help an estimator who takes it to the wrong door. Measured the hard
+  // way: the receiving system here has three import dialogs and NONE of them
+  // takes this — one wants a workfile copy, one wants an archive of its own
+  // legacy system, and the third wants a part-price file. The import that
+  // takes an export like this one has no dialog at all.
+  notes.push(
+    "These tables are not uploaded through any menu. A receiving system that reads this format watches a folder: put the FILES from this ZIP — not the ZIP, and not a folder containing them — into the import directory configured on that machine, and the service that watches it picks them up. If nothing happens, the questions are whether that directory is configured, whether the service is running, and whether the files were unzipped."
+  );
   notes.push(
     "Every line in this export imports as a MANUALLY ENTERED line. It carries no database reference and no database labor time, because a translated estimate has neither: those belong to the receiving system's own parts and labor database. Re-select the database entry on any line that needs the receiving system's own times or price updates."
   );
