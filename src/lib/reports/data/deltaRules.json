@@ -50,7 +50,10 @@
       "category_absent": { "label": "CATEGORY MISSING", "direction": "one" },
       "materials_capped": { "label": "P&M CAP", "direction": "one" },
       "tax_basis_delta": { "label": "TAX BASIS", "direction": "both" },
-      "total_gap": { "label": "TOTAL GAP", "direction": "both" }
+      "total_gap": { "label": "TOTAL GAP", "direction": "both" },
+      "structural_review": { "label": "STRUCTURAL REVIEW", "direction": "one" },
+      "p_page_review": { "label": "NEEDS P-PAGE", "direction": "one" },
+      "intake": { "label": "INTAKE", "direction": "one" }
     },
     "substitutionPairs": [
       ["PRE_REPAIR_SCAN", "SERVICE_MODE"],
@@ -107,18 +110,78 @@
     "category breaks the reconciliation with no visible symptom."
   ],
   "totalsVocabulary": {
-    "rejectCategoriesMatching": "copyright|all\\s*rights?\\s*reserved|mitchell\\s*international|audatex|solera|part\\s*types?\\b|\\bmalv\\b|\\bdisclaimer\\b",
+    "rejectCategoriesMatching": "copyright|all\\s*rights?\\s*reserved|mitchell\\s*international|audatex|solera|part\\s*types?\\b|\\bmalv\\b|\\bdisclaimer\\b|\\bfinanc(?:e|ing)\\b|\\bapr\\b|pay\\s+over\\s+time|\\bqr\\s*code\\b|\\bper\\s+month\\b",
     "maxCategoryWords": 8,
     "maxCategoryHours": 400,
     "maxCategoryRate": 400
+  },
+
+  "$contentComment": [
+    "R24 (the Test 99 review's 'R25' — that number was already taken by the",
+    "changelog rule). The coverage gate (R19) correctly stopped a run that could",
+    "not read the comparison from accusing it of anything; what it could not",
+    "do was stop that run from SHIPPING. Test 99 (RO 22132) delivered a report",
+    "with dashes in both totals cells, no comparison identity, no rates, no",
+    "gap and two findings that were not differences. An empty report is not a",
+    "deliverable. R24 is armed by run_mode — a bundle that reports its mode",
+    "has enough identity to be held to this floor; the fixture bundles that",
+    "predate the field are untouched.",
+    "speculativeFindingTypes: findings a detector emits from vocabulary alone",
+    "(the structural review, the P-page review) do not count toward the floor;",
+    "a run made only of those has found nothing."
+  ],
+  "content": {
+    "minEvidenceBackedFindings": 3,
+    "speculativeFindingTypes": ["structural_review", "p_page_review", "intake"]
+  },
+
+  "$detectorsComment": [
+    "F4. A speculative detector may not fire without anchor evidence. Test 99's",
+    "'Structural frame and measurement verification' anchored to a hood test-fit",
+    "and a cavity-wax line on a front hit with no structural labor on either",
+    "document. structuralEvidence is what a document prints when structural",
+    "work exists: a labor class of S or F on a row, or a section / operation",
+    "in the structural vocabulary. Matched case-insensitively against the",
+    "documents' own text — never against a finding's prose."
+  ],
+  "detectors": {
+    "structuralEvidence": "\\b(?:frame|structural|unibody|rail|apron|section(?:ing)?|pull(?:ing)?|measur(?:e|ing|ement)|bench|set\\s*up|setup|weld(?:ing)?|sectioning|crossmember|floor\\s+pan|aperture)\\b",
+    "structuralLaborClass": "(?:^|\\s)\\d{1,2}\\.\\d\\s+[SF](?:\\s|$)"
   },
 
   "wording": {
     "counterpartOnly": "On $counterpart only",
     "missingOperation": "not written on $counterpart",
     "valueDelta": "$here vs $counterpart $there",
-    "bannedPhrases": ["MISSED on", "Only on left", "Only on right", "lower-cost estimate"],
+    "bannedPhrases": [
+      "MISSED on",
+      "Only on left",
+      "Only on right",
+      "lower-cost estimate",
+      "Existing estimate parser",
+      "Uploaded claim documents",
+      "Uploaded claim;",
+      "oem, adas, nhtsa",
+      "ESTIMATE_EVIDENCE:"
+    ],
     "nullIsNotZero": true
+  },
+
+  "$redactionComment": [
+    "F7 (open since Test 98 F5). The export redaction policy blacks out every",
+    "identifier the raster pass can find, which on RO 22132 covered the shop's",
+    "street, phone and fax, the writer's name, the insurer and the claim number",
+    "— the things a supplement is filed under — while leaving the plate in the",
+    "clear. scope = 'natural_person' redacts a natural person's identity only",
+    "(owner / insured / claimant name, contact details beside those labels,",
+    "the VIN tail). scope = 'full' is the prior behaviour: insurer, claim,",
+    "policy, every phone and address as well. One line, applies to both",
+    "deliverables of a run. NOTE: this reverses the earlier standing",
+    "instruction that insurance information is redacted on export; the",
+    "Test 98/99 reviews asked for the reversal explicitly."
+  ],
+  "redaction": {
+    "scope": "natural_person"
   },
 
   "marks": {
@@ -148,9 +211,20 @@
     "discloseTruncation": true
   },
 
+  "$authorityTableComment": [
+    "R26 (the Test 99 review's 'R26'). U7 regressed on RO 22132: the 'Retrieved",
+    "for this claim' table listed five tier-5 how-to articles two paragraphs",
+    "under 'No retrieved authority is attached to a specific finding above'.",
+    "A tier at or below tableRequiresAttachmentAboveTier (the industry-body",
+    "tier and above) may be listed on retrieval alone; anything below it is",
+    "listed ONLY when it is attached to a finding. The meta-title patterns",
+    "below reject advice ABOUT authorities at the tier classifier, so a",
+    "how-to never reaches the table at any tier."
+  ],
   "authority": {
     "neverInvent": true,
     "emitNullWhenUnretrieved": true,
+    "tableRequiresAttachmentAboveTier": 4,
     "allowedDomains": {
       "refinish_materials": ["ppage", "oem_refinish", "deg", "law"],
       "adas_calibration": ["oem_adas", "icar", "oem_procedure"],

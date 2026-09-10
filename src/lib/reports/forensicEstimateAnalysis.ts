@@ -83,6 +83,13 @@ export type ForensicReconciliation = {
   lowerGrandTotal: number | null;
   /** The headline number: lower grand total minus higher grand total. */
   grandTotalDifference: number | null;
+  /**
+   * The deductible each document STATES, when its totals block carries one
+   * (Mitchell prints it; CCC's block does not). `0` is a stated waiver;
+   * `null` means the document does not say. Never inferred.
+   */
+  higherDeductible: number | null;
+  lowerDeductible: number | null;
   /** Tax lanes one document charges and the other does not. */
   unmatchedTaxLanes: Array<{ label: string; amount: number; onlyOn: "higher" | "lower" }>;
   /**
@@ -282,6 +289,8 @@ export function buildForensicReconciliation(params: {
       higherGrandTotal !== null && lowerGrandTotal !== null
         ? fromCents((cents(lowerGrandTotal) ?? 0) - (cents(higherGrandTotal) ?? 0))
         : null,
+    higherDeductible: higherTotals?.deductible ?? null,
+    lowerDeductible: lowerTotals?.deductible ?? null,
     unmatchedTaxLanes,
     allSharedRatesAgree,
     higherCheck,

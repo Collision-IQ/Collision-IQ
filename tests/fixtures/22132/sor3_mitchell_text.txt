@@ -1,0 +1,117 @@
+SYNTHETIC FIXTURE — RO 22132, Progressive Specialty Supplement 3 (Mitchell Cloud Estimating 26.2).
+Reconstructed from the Test 99 accuracy review's ground truth, NOT from the original PDF's text layer.
+Line values, part numbers, rates and the totals block are as the review documented them; lines the
+review did not itemise (L23, L33-L37) are labelled filler so the printed line count and the totals
+block reconcile. Owner identity is a placeholder.
+Progressive Specialty Insurance Company
+Claim Number
+26-743005532-01
+Supplement 3
+Owner
+[OWNER PLACEHOLDER]
+Repair Facility
+Conestoga Collision
+961 Lancaster Ave
+Berwyn, PA 19312
+2019 Volvo XC90 T6 Momentum 4 Door Wagon 2.0L 4 Cyl Gas Turbo Supercharged 8 Speed Auto Trans AWD
+Exterior Color
+711 (Bright Silver Metallic)
+VIN
+YV4A22PK0K1477331
+Mitchell Service Code
+912102
+Line #DescriptionOperationTypeTotal UnitsTypeNumberQtyTotal PriceTax
+Front Bumper & Grille
+1201423Exhaust Emission DecalRemove / ReplaceBodyINCNew32239893 1$3.80Yes
+2201424A/C LabelRemove / ReplaceBodyINCNew31416874 1$5.48Yes
+3201425Frt Bumper Cover AssyRemove / InstallBody1.3Existing
+4201426GrilleRemove / ReplaceBody0.3New32365372 1$671.23Yes
+5900500Add W/CameraAdditional LaborBody0.3Existing
+6201427Frt CameraRemove / InstallMechanical0.3Existing
+7201428HeadlampRemove / InstallBody0.3Existing
+8201429HeadlampsCheck / AdjustBody0.4Existing
+9201430RT Frt Fender LinerRemove / InstallBody0.2Existing
+10900501LOOSEN FOR BUMPER ACCESS
+11201431LT Frt Fender LinerRemove / InstallBody0.2Existing
+Hood
+12201467Hood Panel (Alum)Remove / ReplaceBody2.2Qual Recycled Part117-25232-59259 1$1,531.25Yes
+13900500Hood PanelAdditional LaborBody3.0Existing
+14900501additional labor is for repair attempt
+15AUTOHood PanelRefinish OnlyRefinish2.8 CExisting
+16AUTOHood UndersideRefinish OnlyRefinish1.4 CExisting
+17201468RT Hood HingeAlignBody0.3Existing
+18201469LT Hood HingeAlignBody0.3Existing
+19201470Hood LatchRemove / ReplaceBody0.4Qual Recycled Part~469543537 1$61.88Yes
+20201471Safety CatchRemove / ReplaceBodyINCNew31371488 1$24.22Yes
+21201472Frt Hood SealRemove / InstallBodyINCExisting
+22201473Upr Frt Body PanelRemove / InstallBody0.2rExisting
+23201474Frt Bumper Under Cover (filler line)Remove / InstallBody0.2Existing
+Front Fender
+24AUTORT FenderBlendRefinish0.8Existing
+25AUTOLT FenderBlendRefinish0.8Existing
+26AUTOClear CoatAdditional LaborRefinish2.1Existing
+27201475RT WheelRemove / InstallBody0.3rExisting
+28201476LT WheelRemove / InstallBody0.3rExisting
+29201477RT Wheel Opng MldgRemove / InstallBody0.6Existing
+30201478LT Wheel Opng MldgRemove / InstallBody0.6Existing
+Additional Costs & Materials
+31201479BatteryRemove / InstallMechanical0.2Existing
+32900500Hazardous WasteAdditional CostSubletSublet1$4.00
+33900501PARTS PRICED PER PARTS PROFILE (filler note)
+34900501RECYCLED HOOD GRADE A PER VENDOR QUOTE (filler note)
+35900501BLEND ADJACENT PANELS PER MITCHELL GUIDELINES (filler note)
+36900501CLEAR COAT PER MITCHELL FORMULA (filler note)
+37900501PRE REPAIR SCAN PERFORMED BY MAINLINE DIAGNOSTICS (filler note)
+Special / Manual Entry
+38900500Pre Repair ScanAdditional LaborMechanical0.5SubletSublet1$150.00
+39900501Mainline Diagnostics invoice obtained
+40900500Post Repair ScanAdditional LaborBody0.5SubletSublet1$150.00
+41900501Mainline Diagnostics invoice obtained
+42900500ADAS REV REPORTAdditional LaborMechanical0.5New1$25.00Yes
+43900500CORROSION PROTECTIONAdditional LaborBody0.2SubletSublet1$15.00
+44900501CAVITY WAX APPLIED TO REPAIRED AREAS
+45900500Reset ElectronicsAdditional LaborMechanical0.3Existing
+46900500CAR COVERAdditional LaborBody0.2SubletSublet1$6.00
+47900500Calibrate park assist cameraAdditional CostNew1$331.20Yes
+48900501Per Keystone Volvo invoice
+49900500SRS Unit CheckAdditional LaborMechanical0.3New1$111.20Yes
+50900501Per Keystone Volvo invoice
+51900500Tow to dealerAdditional CostNew1$225.00Yes
+52900500Tow from dealerAdditional CostNew1$225.00Yes
+** Judgment Item
+Committed On
+9/10/2026
+Page 4 of 10
+Estimate Totals
+Body Labor12.3$61.00$21.00$150.00$921.30
+Refinish Labor7.9$61.00$481.90
+Mechanical Labor2.1$100.00$150.00$360.00
+Taxable Parts$3,215.26
+Paint Materials$335.80
+      - Rate: $42.00
+Taxable$5,314.26
+Tax 6.0000%$318.86
+Gross Total$5,633.12
+Adjustments
+Deductible- $500.00
+Net Total$5,133.12
+Less Original Net Total$336.76
+S1 Net Total$1,810.96
+S2 Net Total$1,655.56
+S3 Net Total$1,329.84
+Mitchell honors the prevailing labor market rate in your area.
+Committed On
+9/10/2026
+Page 5 of 10
+Delta Report
+Supp/ Line # Description Change
+S3 19 Hood Latch Added
+S3 47 Calibrate park assist camera Added
+S3 49 SRS Unit Check Added
+S3 51 Tow to dealer Added
+S3 52 Tow from dealer Added
+S3 40 Post Repair Scan Changed Mechanical 0.5 to Body 0.5 + $150.00
+Page 8 of 10
+Mitchell Cloud Estimating
+Copyright (C) 2026 Mitchell International, Inc. All Rights Reserved
+Page 10 of 10

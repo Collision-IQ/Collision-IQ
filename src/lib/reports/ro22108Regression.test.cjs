@@ -418,7 +418,11 @@ run("a merged note tail or wrapped '(… per panel)' tail still parses columns",
   const sandPolish = parseCccEstimateRow("195 # Finish sand & polish (0.5 Refinish 8 3.0 per panel)");
   assert.ok(sandPolish, "wrapped per-panel row parses");
   assert.equal(sandPolish.qty, 8);
-  assert.equal(sandPolish.labor, 3);
+  // Test 99 F5: the row's own note declares REFINISH hours, so the lone hour
+  // value is the paint column, not body labor.
+  assert.equal(sandPolish.paint, 3);
+  assert.equal(sandPolish.labor, null);
+  assert.equal(sandPolish.description, "Finish sand & polish (0.5 Refinish per panel)");
 });
 
 run("repeated generic rows pair by matching hours, not document order (Add for Clear Coat)", () => {

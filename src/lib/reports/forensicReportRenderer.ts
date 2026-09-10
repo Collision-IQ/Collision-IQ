@@ -15,7 +15,8 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { withWinAnsiPage } from "@/lib/pdf/winAnsiText";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
-import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import { maskVinForExport, redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import RULES from "./data/deltaRules.json";
 import {
   describeReconciliation,
   type ForensicReconciliation,
@@ -361,6 +362,21 @@ export type ForensicReportInput = {
    *  item 6 — the annotated PDF redacts the insurer while this report's prose
    *  named USAA and printed carrier-bearing filenames verbatim). Defaults on. */
   redactSensitive?: boolean;
+  /**
+   * F7: what the redaction policy removes. `natural_person` keeps the
+   * insurer, claim number and document names legible and scrubs only a
+   * natural person's identity and the VIN tail; `full` (default) is the
+   * prior behaviour. Must match the scope the annotated pages were rendered
+   * under — one policy for both deliverables of a run.
+   */
+  redactionScope?: "full" | "natural_person";
+  /**
+   * F8 / U1: the badge number each finding carries on the annotated
+   * estimate, keyed by finding id. When supplied, every finding card here
+   * prints the same number, so a badge on the estimate and a card in this
+   * report are one list. Findings absent from the map print unnumbered.
+   */
+  findingNumbers?: Map<string, number>;
 };
 
 /**
@@ -379,10 +395,16 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   // pass blacks the insurer out of the annotated PDF; this report must not
   // reintroduce it through prose or carrier-bearing filenames. Names and
   // finding prose pass through the same export policy the identity rows use.
+  // F7: under the natural_person scope the download redactor (which scrubs
+  // insurers, claim numbers and every phone/address) is the wrong tool; the
+  // identity rows were already scoped by the caller and prose keeps the
+  // insurer's name. Only the VIN tail is masked here.
   const scrub =
-    input.redactSensitive !== false
-      ? (value: string): string => redactDownloadContent(value)
-      : (value: string): string => value;
+    input.redactSensitive === false
+      ? (value: string): string => value
+      : input.redactionScope === "natural_person"
+        ? (value: string): string => maskVinForExport(value)
+        : (value: string): string => redactDownloadContent(value);
 
   // R05 (Test 99 item 3): a finding card with NO line anchor, NO dollar
   // figure, and NO hour figure is unresolved template output, not evidence —
@@ -505,6 +527,22 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   if (described.rateDisputeStatement) {
     writer.paragraph(described.rateDisputeStatement);
   }
+  // The deductible, when a document states one, changes what the shop is
+  // actually paid: RO 22132's $1,391.66 gross gap is $1,891.66 net of a
+  // $500.00 deductible the carrier did not waive. Stated only from the
+  // document's own totals block, never inferred from a policy.
+  const statedDeductible = input.reconciliation.lowerDeductible ?? input.reconciliation.higherDeductible;
+  if (statedDeductible !== null && statedDeductible !== undefined && described.gapStatement) {
+    const gross = Math.abs(input.reconciliation.grandTotalDifference ?? 0);
+    if (statedDeductible === 0) {
+      writer.paragraph("The comparison estimate states that the deductible is waived.");
+    } else {
+      writer.paragraph(
+        `The comparison estimate carries a deductible of ${money(statedDeductible)}, not waived. Net of it, the ` +
+          `difference in what the repairer is paid is ${money(gross + statedDeductible)}.`
+      );
+    }
+  }
   const missingCount = input.noCounterpartRows.length;
   if (missingCount > 0) {
     writer.paragraph(
@@ -587,6 +625,15 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   }
 
   // 5+ findings by domain
+  //
+  // F8 / U1: the card title carries the same number the badge carries on the
+  // annotated estimate, so "badge 7" and "Finding 7" are one finding. A
+  // finding that drew no badge (unanchored, appendix-only) prints without a
+  // number rather than inventing one.
+  const cardTitle = (finding: CitationDensityFinding) => {
+    const number = input.findingNumbers?.get(finding.id);
+    return number ? `Finding ${number} — ${finding.operationLabel}` : finding.operationLabel;
+  };
   const used = new Set<string>();
   for (const domain of DOMAINS) {
     const group = input.findings.filter(
@@ -596,7 +643,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     group.forEach((finding) => used.add(finding.id));
     writer.heading(domain.title);
     for (const finding of group) {
-      writer.subheading(finding.operationLabel);
+      writer.subheading(cardTitle(finding));
       if (finding.currentSupportSummary) writer.paragraph(finding.currentSupportSummary);
       if (finding.missingProofSummary) {
         writer.paragraph(`What would prove it: ${finding.missingProofSummary}`, { size: 8.8 });
@@ -618,7 +665,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   if (remaining.length > 0) {
     writer.heading("Findings — other differences");
     for (const finding of remaining) {
-      writer.subheading(finding.operationLabel);
+      writer.subheading(cardTitle(finding));
       if (finding.currentSupportSummary) writer.paragraph(finding.currentSupportSummary);
       if (finding.recommendedNextAction) {
         writer.paragraph(`Next step: ${finding.recommendedNextAction}`, { size: 8.8, color: MUTED });
@@ -683,7 +730,26 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   // Everything retrieved for the claim, ranked. Separate from the table above
   // because "retrieved" and "relied upon" are different claims, and conflating
   // them is how a report ends up appearing to cite support it never used.
-  const { accepted: tiered, rejected: refusedSources } = classifyAuthorities(input.retrievedSources);
+  const classified = classifyAuthorities(input.retrievedSources);
+  // R26 (U7): a source below the industry-body tier is listed only when a
+  // finding above actually relied on it. "Retrieved" and "relied upon" are
+  // different claims; RO 22132 listed five tier-5 how-to articles two
+  // paragraphs under "no retrieved authority is attached to a finding".
+  const attachedTitles = new Set(input.authorities.map((authority) => authority.title.trim().toLowerCase()));
+  const attachmentThreshold = RULES.authority.tableRequiresAttachmentAboveTier;
+  const tiered = classified.accepted.filter(
+    (authority) => authority.tier <= attachmentThreshold || attachedTitles.has(authority.title.trim().toLowerCase())
+  );
+  const refusedSources = [
+    ...classified.rejected,
+    ...classified.accepted
+      .filter((authority) => !tiered.includes(authority))
+      .map((authority) => ({
+        title: authority.title,
+        url: authority.url,
+        reason: `Tier ${authority.tier} source attached to no finding — retrieved, not relied upon.`,
+      })),
+  ];
   if (tiered.length > 0) {
     writer.subheading("Retrieved for this claim, by authority tier");
     writer.paragraph(

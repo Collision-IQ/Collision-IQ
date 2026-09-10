@@ -269,6 +269,51 @@ function absorbRowTokens(row: EstimateRow, tokens: Word[], cols: ColRanges): str
   return desc;
 }
 
+/**
+ * Type the tokens of a wrapped CONTINUATION line against the measured value
+ * columns, filling only cells the row has not already read. Deliberately
+ * narrower than absorbRowTokens: no part-number shape test and no
+ * labor-class heuristic, because a continuation line is prose first and the
+ * only thing that can make one of its tokens a cell is its measured column.
+ * Returns the description words — everything outside the value columns.
+ */
+function absorbContinuationTokens(row: EstimateRow, tokens: Word[], cols: ColRanges): string[] {
+  const desc: string[] = [];
+  for (const word of tokens) {
+    const mid = (word.x0 + word.x1) / 2;
+    const inCol = (range: [number, number]) => mid >= range[0] && mid <= range[1];
+    const box: CellBox = { x0: word.x0, x1: word.x1, top: word.top, bottom: word.bottom };
+    if (NUM.test(word.text)) {
+      const value = parseFloat(word.text.replace(/,/g, ""));
+      if (inCol(cols.qty) && row.qty === null) {
+        row.qty = value;
+        row.cells.qty = box;
+        continue;
+      }
+      if (inCol(cols.price) && row.price === null) {
+        row.price = value;
+        row.cells.price = box;
+        continue;
+      }
+      if (inCol(cols.labor) && row.labor === null) {
+        row.labor = value;
+        row.cells.labor = box;
+        continue;
+      }
+      if (inCol(cols.paint) && row.paint === null) {
+        row.paint = value;
+        row.cells.paint = box;
+        continue;
+      }
+    }
+    // A column suffix ("M", "T", "Incl.") is never a description word — the
+    // same rule the first printed row applies.
+    if (SUFFIX.has(word.text.toUpperCase())) continue;
+    desc.push(repairTokens(word.text));
+  }
+  return desc;
+}
+
 /** Finalize a row's identity from its accumulated description. Returns true
  * when the row is a real, emittable operation row. */
 function finalizeRow(row: EstimateRow, state: RowParseState): "row" | "section" | "empty" {
@@ -421,7 +466,15 @@ export function parsePage(
           state.prev.note = state.prev.note ? `${state.prev.note} ${joined}` : joined;
           state.lastWasNote = true;
         } else {
-          state.prev.rawDesc += " " + joined;
+          // Column-band assignment runs PER PRINTED ROW (F5, Test 99). A
+          // wrapped description's continuation is typed against the same
+          // header-derived bands as its first line: a number sitting in a
+          // value column is that column's cell, and only the words outside
+          // the value columns join the description. Appending the raw line
+          // put "3 1.5" — the qty and paint cells — into the description of
+          // "Finish sand & polish (0.5 Refinish … per panel)".
+          const moreDesc = absorbContinuationTokens(state.prev, ws, cols);
+          if (moreDesc.length > 0) state.prev.rawDesc += " " + moreDesc.join(" ");
           extendRowBox(state.prev, ws);
         }
       }
@@ -558,7 +611,10 @@ export interface TotalsRowWithBoxes {
  * reconciliation with no visible symptom.
  */
 const TOTALS_BOILERPLATE =
-  /copyright|all\s*rights?\s*reserved|mitchell\s*international|^\s*mitchell\s*estimating|audatex|solera|\bccc\s*information\b|part\s*types?\b|\bmalv\b|\bpage\b|\bversion\b|\bdisclaimer\b/i;
+  // Financing furniture printed beneath the totals table (Test 99, RO 22132:
+  // a "Pay over time" block with a QR caption and an APR line) is page
+  // furniture, not a spending category. Same rule as R22's reject list.
+  /copyright|all\s*rights?\s*reserved|mitchell\s*international|^\s*mitchell\s*estimating|audatex|solera|\bccc\s*information\b|part\s*types?\b|\bmalv\b|\bpage\b|\bversion\b|\bdisclaimer\b|\bfinanc(?:e|ing)\b|\bapr\b|pay\s+over\s+time|\bqr\s*code\b|\bper\s+month\b/i;
 
 /** No labour category runs to these; a match means the number is not hours/rate. */
 const MAX_PLAUSIBLE_CATEGORY_HOURS = 400;

@@ -1,4 +1,10 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+// The route-level cases below drive the citation-density route with synthetic
+// PDFs that print no totals block and no estimating-platform markers. The
+// production release gate (R24) refuses exactly that shape by design, so it
+// is switched off for this suite; the gate itself is exercised end to end
+// by src/lib/reports/__tests__/ro22132.contract.test.ts.
+process.env.CITATION_DENSITY_RELEASE_GATE = "off";
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");

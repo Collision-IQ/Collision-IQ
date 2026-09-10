@@ -1,0 +1,30 @@
+SYNTHETIC FIXTURE — RO 22132, Conestoga Collision Preliminary (CCC ONE), ESTIMATE TOTALS block only.
+Reconstructed from the Test 99 accuracy review's ground truth, NOT from the original PDF's text layer.
+The block is the Test 98 (RO 22194) layout minus the Mechanical row, followed by the financing
+block the review identified as a suspect for the totals parser regression.
+Conestoga Collision
+961 Lancaster Ave, Berwyn, PA 19312
+Preliminary Estimate
+CCC ONE Estimating
+Workfile ID: 0f1a2b3c
+Line Oper Description Part Number Qty Extended Price Labor Paint
+FRONT BUMPER
+7 Repl Grille 32365366 1 671.23 0.6
+HOOD
+24 Repl Hood 31477040 1 2,223.54 2.1
+61 Finish sand & polish (0.5 Refinish 3 1.5 per panel)
+SUBTOTALS 3,197.75 17.5 12.3
+ESTIMATE TOTALS
+Category Basis Rate Cost $
+Parts 3,197.75
+Body Labor 17.5 hrs @ $ 75.00 /hr 1,312.50
+Paint Labor 12.3 hrs @ $ 75.00 /hr 922.50
+Paint Supplies 12.3 hrs @ $ 60.00 /hr 738.00
+Miscellaneous 456.40
+Subtotal 6,627.15
+Sales Tax $ 6,627.15 @ 6.0000 % 397.63
+Grand Total 7,024.78
+Pay over time with Sunbit
+Scan the QR code to see your options
+0% APR financing available 6 months
+Estimate written 8/12/2026 by Conestoga Collision

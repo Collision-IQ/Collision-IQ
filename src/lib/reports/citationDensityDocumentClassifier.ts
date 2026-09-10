@@ -38,6 +38,15 @@ const ESTIMATE_SIGNAL_PATTERNS: Array<[RegExp, string, number]> = [
   [/\bwritten by\b/i, "Written By", 18],
   [/\bworkfile id\b/i, "Workfile ID", 24],
   [/\bccc one estimating\b/i, "CCC ONE Estimating", 34],
+  // Mitchell Cloud Estimating prints its own vocabulary: the footer names the
+  // platform, the totals block says "Gross Total" (never "Grand Total") and
+  // bills "Refinish Labor", and every row opens with a line number welded to
+  // a six-digit operation code. Test 99 (RO 22132) was the first text-layer
+  // Mitchell supplement; nothing above names what it prints.
+  [/\bmitchell (?:cloud )?estimating\b/i, "Mitchell Estimating", 34],
+  [/\bgross total\b/i, "Gross Total", 26],
+  [/\brefinish labor\b/i, "Refinish Labor", 20],
+  [/(?:^|\s)(?:s\d\s*)?\d{1,3}\d{6}[a-z]/i, "Mitchell line-item anchor", 30],
   [/\b(?:repl|r&i|rpr|subl|refn|add|o\/h)\b.{0,80}(?:\$?\d[\d,.]*|\d+(?:\.\d+)?\s*(?:hrs?|@))/i, "estimate operation row", 34],
 ];
 

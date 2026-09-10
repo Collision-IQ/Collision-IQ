@@ -1402,12 +1402,37 @@ function formatCitationCurrentSupport(
   return "No usable support source was isolated.";
 }
 
+/**
+ * Reader-facing names for the citation-status keys. The keys are INTERNAL
+ * enum names; de-camel-casing them shipped "Missing or unresolved support:
+ * oem, adas, nhtsa, photo or teardown proof" as customer prose on Test 99.
+ */
+const MISSING_PROOF_LABELS: Record<string, string> = {
+  oem: "OEM repair procedure",
+  oemPositionStatement: "OEM position statement",
+  adas: "ADAS calibration requirement",
+  pPages: "estimating database (P-page) support",
+  scrs: "SCRS guidance",
+  deg: "DEG inquiry",
+  nhtsa: "NHTSA documentation",
+  stateRegulation: "state regulation or DOI guidance",
+  policy: "policy language",
+  invoiceOrCompletionProof: "invoice or completion proof",
+  photoOrTeardownProof: "photo or teardown proof",
+};
+
+export function describeMissingProofTypes(missingAuthorityTypes: string[]): string[] {
+  return missingAuthorityTypes.map(
+    (item) => MISSING_PROOF_LABELS[item] ?? item.replace(/([A-Z])/g, " $1").toLowerCase()
+  );
+}
+
 function summarizeMissingProofTypes(
   missingAuthorityTypes: string[],
   bucket: EstimateScrubCitationGapBucket
 ): string {
   if (missingAuthorityTypes.length > 0) {
-    return `Missing or unresolved support: ${missingAuthorityTypes.map((item) => item.replace(/([A-Z])/g, " $1").toLowerCase()).join(", ")}.`;
+    return `Missing or unresolved support: ${describeMissingProofTypes(missingAuthorityTypes).join(", ")}.`;
   }
   if (bucket === "missing_from_carrier" || bucket === "reduced_by_carrier") {
     return "Estimate gap is visible; no additional authority type was inferred from the current text.";
@@ -1758,9 +1783,26 @@ const SCRUBBER_SOURCE_LABELS: Record<string, string> = {
   USER_CHAT_CONTEXT: "Case discussion",
 };
 
-function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string[] {
+/**
+ * The parser-fallback citations are placeholders for "no source was named",
+ * not sources: "Existing estimate parser" and "Uploaded claim documents"
+ * describe the pipeline, and Test 99 (RO 22132) printed them as a finding's
+ * evidence ("Estimate evidence: Existing estimate parser; Estimate evidence:
+ * Uploaded claim"). They never reach reader-facing prose.
+ */
+export function isPlaceholderScrubberSource(source: Pick<SourceCitation, "title" | "sourceType">): boolean {
+  return (
+    (source.sourceType === "EstimateParser" || source.sourceType === "UploadedDocument") &&
+    // The CCC workfile artifact is NOT a placeholder: it is Secure Share data
+    // that confirms a line existed in the structured estimate.
+    /^(?:existing estimate parser|uploaded claim documents?)$/i.test(source.title.trim())
+  );
+}
+
+export function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string[] {
   return finding.sources
     .map((source) => {
+      if (isPlaceholderScrubberSource(source)) return "";
       const title = cleanCustomerFacingEstimateLine(source.title);
       if (!title) return "";
       const classification = classifyScrubberSource(source.sourceType, title);

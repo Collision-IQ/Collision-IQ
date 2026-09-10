@@ -167,7 +167,13 @@ const GLUED_KEYWORD = new RegExp(
     // a split on: it cut a part number's final group ("A1") in two.
     .filter((word) => word.length >= 2)
     .sort((a, b) => b.length - a.length)
-    .join("|")})(?=\\d)`,
+    // The number may open with the platform's substituted-number tilde
+    // ("Part~469543537" on a recycled part). Without it in the lookahead the
+    // keyword stayed welded to the number, the part-type column went unread
+    // and the row lost its price (RO 22132, hood latch). Only the tilde: the
+    // judgment asterisk and the note hash have their own split rules below,
+    // and admitting them here changed which rule fired first.
+    .join("|")})(?=~?\\d)`,
   "gi"
 );
 

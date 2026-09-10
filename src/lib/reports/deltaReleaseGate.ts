@@ -49,14 +49,35 @@ export interface DeltaBundle {
   counters?: Record<string, number>;
   confidence?: { evidence?: string; pipeline_integrity?: string; reported?: string };
   legend?: { report_type?: string; entries?: string[] };
+  /**
+   * R24 — how the run classified itself. FULL: line verdicts rendered.
+   * TOTALS_ONLY: the coverage gate suppressed line verdicts, category
+   * deltas still stand. INTAKE: nothing could be compared. Reporting the
+   * mode is what ARMS R24; a bundle that says nothing about its mode is a
+   * pre-R24 fixture and is not held to the content floor.
+   */
+  run_mode?: "FULL" | "TOTALS_ONLY" | "INTAKE";
+  /** R24 — category-level differences the totals blocks support. */
+  category_deltas?: Array<{ category: string; delta: number | null }>;
+  /**
+   * R26 — every source the report would list under "Retrieved for this
+   * claim", with the tier the classifier placed it on and the finding(s) it
+   * is attached to. Presence of the array arms R26.
+   */
+  authorities?: Array<{ title: string; tier: number; attached_to?: string[] | string | null }>;
 }
 
 interface BundleDocument {
   file?: string;
-  grand_total?: number;
+  grand_total?: number | null;
   subtotal?: number;
   net?: number;
   insurer?: string;
+  /** R24 — the estimating platform the reader resolved. `null` means the
+   *  pipeline looked and could not tell; absent means it did not report. */
+  platform?: "ccc" | "mitchell" | "audatex" | null;
+  /** R24 — operation rows recovered from this document. */
+  line_count?: number | null;
   identity?: Record<string, unknown>;
   /** What was actually recovered from this document (R19). */
   extraction?: {
@@ -109,6 +130,13 @@ interface BundleFinding {
   /** R25 — which structural region of the comparison document the source line
    *  came from ("estimate_body" | "changelog" | "supplement_summary"). */
   source_section?: string;
+  /**
+   * R08 — a finding rendered WITHOUT a row anchor, in a section the reader
+   * sees labelled as such (the unanchored appendix). Disclosure is what
+   * separates a document-level finding from a fabricated one; a bundle may
+   * not mark a finding disclosed unless the artifact says so in print.
+   */
+  unanchored_disclosed?: boolean;
 }
 
 interface BundleAnnotation {
@@ -266,6 +294,7 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
     for (const finding of findings) {
       if ((finding.anchors?.length ?? 0) > 0 || finding.totals_anchor || finding.scope === "category") continue;
       if (finding.type && exempt.has(finding.type)) continue;
+      if (finding.unanchored_disclosed === true) continue;
       fail("R08", `finding ${finding.id} (${finding.type}) has no anchor rows — fabricated findings enter here`);
     }
   }
@@ -567,6 +596,73 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
         "R25",
         `finding ${finding.id}: comparison-side line resolves to a ${finding.source_section} row — changelog rows are supplement history, never current comparison data`
       );
+    }
+  }
+
+  // R24 — an empty report is not a deliverable (RO 22132). The coverage gate
+  // (R19) stops a run that could not read the comparison from accusing it of
+  // anything; this rule stops that run from shipping. Armed by run_mode: a
+  // bundle that classifies its own run has resolved enough to be held to the
+  // content floor.
+  if (bundle.run_mode) {
+    for (const side of ["target", "source"] as const) {
+      const doc = bundle[side];
+      if (!doc) {
+        fail("R24", `${side} document is absent from the bundle — a comparison needs two documents`);
+        continue;
+      }
+      if (doc.grand_total === null || doc.grand_total === undefined) {
+        fail("R24", `${side} grand_total unresolved — a run that read neither totals block cannot ship`);
+      }
+      if (!doc.file || !doc.file.trim()) {
+        fail("R24", `${side} identity unresolved (no filename) — "the comparison estimate" is not a document`);
+      }
+      if (doc.platform === null) {
+        fail("R24", `${side} estimating platform unresolved — the reader could not tell what produced ${JSON.stringify(doc.file ?? "?")}`);
+      }
+    }
+    if (bundle.run_mode === "TOTALS_ONLY" && (bundle.category_deltas ?? []).length === 0) {
+      fail("R24", "TOTALS_ONLY run produced no category deltas — nothing was compared");
+    }
+    const speculative = new Set(RULES.content.speculativeFindingTypes as string[]);
+    const evidenceBacked = findings.filter(
+      (finding) =>
+        !(finding.type && speculative.has(finding.type)) &&
+        ((finding.anchors?.length ?? 0) > 0 || finding.scope === "category" || Boolean(finding.totals_anchor))
+    );
+    const floor = RULES.content.minEvidenceBackedFindings;
+    if (evidenceBacked.length < floor) {
+      fail(
+        "R24",
+        `only ${evidenceBacked.length} evidence-backed finding(s) — below the release floor of ${floor}; the run found nothing it can show a reader`
+      );
+    }
+  }
+
+  // R26 — the authority table lists what the report relied on, not what a
+  // search returned (U7, regressed on RO 22132). A tier at or above the
+  // industry-body tier may be listed on retrieval alone; anything below it
+  // is listed only when attached to a finding. Advice ABOUT authorities is
+  // never listed at any tier.
+  if (bundle.authorities) {
+    const threshold = RULES.authority.tableRequiresAttachmentAboveTier;
+    const meta = [
+      ...(RULES.authority.rejectTitlesMatching as string[]),
+      ...(RULES.authority.rejectMetaTitlesMatching as string[]),
+    ].map((pattern) => new RegExp(pattern, "i"));
+    for (const authority of bundle.authorities) {
+      const attached = Array.isArray(authority.attached_to)
+        ? authority.attached_to.length > 0
+        : Boolean(authority.attached_to);
+      if (authority.tier > threshold && !attached) {
+        fail(
+          "R26",
+          `tier-${authority.tier} source ${JSON.stringify(authority.title)} listed but attached to no finding — retrieved is not relied upon`
+        );
+      }
+      if (meta.some((pattern) => pattern.test(authority.title))) {
+        fail("R26", `how-to/marketing title in the authority table: ${JSON.stringify(authority.title)}`);
+      }
     }
   }
 

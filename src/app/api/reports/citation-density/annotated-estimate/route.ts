@@ -458,6 +458,13 @@ export async function POST(request: Request) {
           includeSummaryPage: body.includeSummaryPage === true,
           includeUnanchoredAppendix: body.includeUnanchoredAppendix !== false,
           redactSensitive: body.redactSensitive !== false,
+          // R24 / R26: production never ships a run the release gate refuses.
+          // A blocked run surfaces as a 422 with the violations, not as a PDF
+          // with dashes in its totals table. CITATION_DENSITY_RELEASE_GATE=off
+          // is the operator kill-switch (and what the synthetic route suites
+          // set, whose fixture PDFs print no totals block); the gate itself
+          // is exercised end to end by ro22132.contract.test.
+          enforceReleaseGate: process.env.CITATION_DENSITY_RELEASE_GATE !== "off",
         },
       });
       const artifactId = result.exportId;

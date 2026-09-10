@@ -234,7 +234,11 @@ run("higher-only misc operations are flagged (tint, sand & polish, clean up)", (
   assert.ok(annotatedFor(52).length >= 1, "finish sand & polish");
   assert.ok(annotatedFor(53).length >= 1, "clean vehicle");
   const sand = annotatedFor(52)[0];
-  assert.equal(sand.higherRow.labor, 1.5, "qty 3 + 1.5 hr split, not 31.5 hr");
+  // Test 99 F5: the row's own note says the hours are REFINISH hours
+  // ("(0.5 Refinish per panel)"), so the lone hour value is paint, not body.
+  // The split itself (qty 3 + 1.5 hr, never 31.5 hr) is what this guards.
+  assert.equal(sand.higherRow.paint, 1.5, "qty 3 + 1.5 hr split, not 31.5 hr");
+  assert.equal(sand.higherRow.labor, null, "refinish-note hours are paint, not body labor");
 });
 
 run("lower-only rows surface the carrier's battery lines", () => {

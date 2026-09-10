@@ -133,12 +133,17 @@ describe("delta findings report", () => {
     expect(front).not.toMatch(/2023 Lexus IS 300 AWD Net/i);
   });
 
-  it("redacts the claim number and the last eight of the VIN in the header", async () => {
+  it("masks the last eight of the VIN and keeps the claim number the supplement is filed under", async () => {
+    // F7 (Test 98 F5 / Test 99 F7): the redaction scope is natural_person —
+    // the owner's identity and the VIN tail leave the document; the claim
+    // number, RO and insurer stay legible because they are what a supplement
+    // is filed under. deltaRules.redaction.scope = "full" restores the prior
+    // policy, and this assertion would then read the other way.
     const result = await buildDeltaReport();
     const front = (await extractPageTexts(result.findingsReportBytes!))[0];
     expect(front).toContain("JTHD81F29");
     expect(front).not.toContain("JTHD81F29P5050559");
-    expect(front).not.toContain("26-232003028-01");
+    expect(front).toContain("26-232003028-01");
   });
 
   it("leaves the OEM report on its own cover page", async () => {

@@ -526,8 +526,18 @@ const CATEGORY_CONCEPTS: Record<string, string> = {
   HAZARDOUSWASTE: "HAZARDOUSWASTE",
   HAZMAT: "HAZARDOUSWASTE",
   PARTS: "PARTS",
+  // Mitchell prints the parts total as "Taxable Parts"; the adapter already
+  // emits "Parts", but a text lane that reads the label verbatim must land on
+  // the same concept.
+  TAXABLEPARTS: "PARTS",
   MISCELLANEOUS: "MISCELLANEOUS",
   MISC: "MISCELLANEOUS",
+  // Mitchell's "Other Additional Costs" is CCC's "Miscellaneous" bucket
+  // (Test 97 F4 category map; RO 22132 is the first pair to exercise it).
+  // "COSTS" is not a noise suffix, so both the full and the stripped form
+  // are listed.
+  OTHERADDITIONALCOSTS: "MISCELLANEOUS",
+  OTHERADDITIONAL: "MISCELLANEOUS",
   NONTAXABLE: "NONTAXABLE",
 };
 

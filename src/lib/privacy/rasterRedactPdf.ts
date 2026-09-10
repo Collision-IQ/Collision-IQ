@@ -62,19 +62,75 @@ interface CharSpan {
 }
 
 /**
+ * What the export boundary removes.
+ *
+ * `full` — every identifier: personal identity, VIN tail, insurer, claim
+ * and policy numbers, every phone, address and email on the page.
+ *
+ * `natural_person` — a natural person's identity only: the owner / insured
+ * / claimant name, the contact details printed in that person's block, and
+ * the VIN tail. The insurer, the claim number, the RO, the shop's identity
+ * and the writer's name stay legible — they are what a supplement is filed
+ * under (Test 98 F5 / Test 99 F7). Contact-shaped text (phone, address,
+ * email) is attributed by MEASURED position: only items inside the block
+ * beneath an owner-type label are painted, because a phone number carries
+ * no evidence of whose it is.
+ */
+export type RasterRedactionScope = "full" | "natural_person";
+
+/** Labels whose value names a natural person. */
+const NATURAL_PERSON_LABEL = /\b(?:insured|owner|claimant|policyholder)\b/i;
+
+/** Contact-shaped text: phone, street address, city/state/ZIP, email. */
+const CONTACT_PATTERNS: RegExp[] = [
+  // US phone. The digit-run boundaries matter: without them this matches a
+  // 10-digit window INSIDE a 21-digit claim number, and would black out any
+  // long part number that happens to be numeric.
+  /(?<![\d-])(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?![\d-])/g,
+  // street address and city/state/ZIP
+  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi,
+  /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
+  // email
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+];
+
+/**
  * Which characters of `text` are identifiers.
  *
  * Operates on the item's own string, so a glued run
  * ("VIN:5YJ3E1EA6PF691987Interior") yields a span covering only the VIN's last
  * 8 characters and leaves the labels around it readable.
+ *
+ * `inNaturalPersonBlock` is measured by the caller (the item sits beneath an
+ * owner-type label); it decides whether contact-shaped text is painted under
+ * the natural_person scope.
  */
-export function identifierSpans(text: string, carriers: string[] = COMMON_INSURERS): CharSpan[] {
+export function identifierSpans(
+  text: string,
+  carriers: string[] = COMMON_INSURERS,
+  options: { scope?: RasterRedactionScope; inNaturalPersonBlock?: boolean } = {}
+): CharSpan[] {
+  const scope = options.scope ?? "full";
   const spans: CharSpan[] = [];
   const push = (start: number, end: number) => {
     if (end > start) spans.push({ start, end });
   };
+  const applyPatterns = (patterns: RegExp[]) => {
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const index = match.index ?? 0;
+        // When the pattern captured a value, cover the value; else the whole hit.
+        if (match[1]) {
+          const offset = match[0].lastIndexOf(match[1]);
+          push(index + offset, index + offset + match[1].length);
+        } else {
+          push(index, index + match[0].length);
+        }
+      }
+    }
+  };
 
-  // VIN — cover the last 8 characters only.
+  // VIN — cover the last 8 characters only. Both scopes.
   for (let i = 0; i + 17 <= text.length; i += 1) {
     if (isVin(text.slice(i, i + 17))) {
       push(i + VIN_VISIBLE_PREFIX, i + 17);
@@ -82,53 +138,45 @@ export function identifierSpans(text: string, carriers: string[] = COMMON_INSURE
     }
   }
 
-  // Whole-value identifiers and personal data.
-  const wholeValue: RegExp[] = [
-    // claim / policy / RO values, wherever the label sits
-    /(?:claim|policy)\s*(?:#|no\.?|number|id)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{4,})/gi,
-    // US phone. The digit-run boundaries matter: without them this matches a
-    // 10-digit window INSIDE a 21-digit claim number, and would black out any
-    // long part number that happens to be numeric.
-    /(?<![\d-])(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?![\d-])/g,
-    // street address and city/state/ZIP
-    /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi,
-    /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
-    // license plate
-    /\b(?:license|plate)\s*(?:#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Z0-9-]{4,10})/gi,
-    // email
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-  ];
-  for (const pattern of wholeValue) {
-    for (const match of text.matchAll(pattern)) {
-      const index = match.index ?? 0;
-      // When the pattern captured a value, cover the value; else the whole hit.
-      if (match[1]) {
-        const offset = match[0].lastIndexOf(match[1]);
-        push(index + offset, index + offset + match[1].length);
-      } else {
-        push(index, index + match[0].length);
+  if (scope === "full") {
+    applyPatterns([
+      // claim / policy / RO values, wherever the label sits
+      /(?:claim|policy)\s*(?:#|no\.?|number|id)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{4,})/gi,
+      ...CONTACT_PATTERNS,
+      // license plate
+      /\b(?:license|plate)\s*(?:#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Z0-9-]{4,10})/gi,
+    ]);
+
+    // Carrier names, wherever they appear.
+    for (const carrier of carriers) {
+      const pattern = new RegExp(
+        `\\b${carrier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+(?:Insurance|Mutual|Group|Company|Co\\.?))?\\b`,
+        "gi"
+      );
+      for (const match of text.matchAll(pattern)) {
+        push(match.index ?? 0, (match.index ?? 0) + match[0].length);
       }
     }
-  }
 
-  // Carrier names, wherever they appear.
-  for (const carrier of carriers) {
-    const pattern = new RegExp(
-      `\\b${carrier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+(?:Insurance|Mutual|Group|Company|Co\\.?))?\\b`,
-      "gi"
-    );
-    for (const match of text.matchAll(pattern)) {
-      push(match.index ?? 0, (match.index ?? 0) + match[0].length);
+    // Values following a personal-identity label, on the item's own text.
+    for (const match of text.matchAll(
+      /\b(?:insured|owner|claimant|policyholder|adjuster|appraiser|written\s+by)\s*[:#.-]{1,3}\s*(.+)$/gi
+    )) {
+      const value = match[1];
+      const offset = (match.index ?? 0) + match[0].lastIndexOf(value);
+      push(offset, offset + value.length);
     }
-  }
-
-  // Values following a personal-identity label, on the item's own text.
-  for (const match of text.matchAll(
-    /\b(?:insured|owner|claimant|policyholder|adjuster|appraiser|written\s+by)\s*[:#.-]{1,3}\s*(.+)$/gi
-  )) {
-    const value = match[1];
-    const offset = (match.index ?? 0) + match[0].lastIndexOf(value);
-    push(offset, offset + value.length);
+  } else {
+    // natural_person: the name beside an owner-type label on the item's own
+    // text, and contact details only inside a measured owner block.
+    for (const match of text.matchAll(
+      /\b(?:insured|owner|claimant|policyholder)\s*[:#.-]{1,3}\s*(.+)$/gi
+    )) {
+      const value = match[1];
+      const offset = (match.index ?? 0) + match[0].lastIndexOf(value);
+      push(offset, offset + value.length);
+    }
+    if (options.inNaturalPersonBlock) applyPatterns(CONTACT_PATTERNS);
   }
 
   return mergeSpans(spans);
@@ -178,9 +226,22 @@ export interface RasterRedactionResult {
  */
 export async function redactAndRasterizePdf(
   sourceBytes: Uint8Array,
-  options: { scale?: number; carriers?: string[] } = {}
+  options: { scale?: number; carriers?: string[]; scope?: RasterRedactionScope } = {}
 ): Promise<RasterRedactionResult> {
   const scale = options.scale ?? DEFAULT_SCALE;
+  const scope: RasterRedactionScope = options.scope ?? "full";
+  // Under the natural_person scope only these labels' values are swept; the
+  // full scope sweeps every identity label (insurer, claim, plate, …).
+  const sweepLabel = scope === "full" ? IDENTITY_LABEL : NATURAL_PERSON_LABEL;
+  /**
+   * The owner block, MEASURED: the region beneath an owner-type label where
+   * the print stacks that person's address and phone. Four text lines tall
+   * and one column wide, in the page's own points (scale 1). Contact-shaped
+   * text is attributed to the person only when it sits inside this region.
+   */
+  const OWNER_BLOCK_HEIGHT = 48;
+  const OWNER_BLOCK_WIDTH = 260;
+  const ownerBlocks = new Map<number, Array<{ x: number; y: number }>>();
   const napi = await import("@napi-rs/canvas");
   // pdfjs v5 paints glyphs through Path2D/DOMMatrix. Without the canvas
   // implementation's own classes on the global, fill() rejects the handle and
@@ -220,7 +281,12 @@ export async function redactAndRasterizePdf(
     // Reading order: same line (y within a glyph height), then left to right.
     items.sort((a, b) => (Math.abs(a.y - b.y) > 3 ? b.y - a.y : a.x - b.x));
     for (let i = 0; i < items.length - 1; i += 1) {
-      if (!IDENTITY_LABEL.test(items[i].text)) continue;
+      if (NATURAL_PERSON_LABEL.test(items[i].text)) {
+        const blocks = ownerBlocks.get(pageNumber) ?? [];
+        blocks.push({ x: items[i].x, y: items[i].y });
+        ownerBlocks.set(pageNumber, blocks);
+      }
+      if (!sweepLabel.test(items[i].text)) continue;
       const next = items[i + 1];
       // Only a value on the SAME line belongs to this label.
       if (Math.abs(next.y - items[i].y) > 3) continue;
@@ -247,9 +313,20 @@ export async function redactAndRasterizePdf(
     const items = (textContent.items as Array<Record<string, unknown>>).filter(
       (item) => typeof item.str === "string" && (item.str as string).trim().length > 0
     );
+    const blocks = ownerBlocks.get(pageNumber) ?? [];
     for (const item of items) {
       const text = item.str as string;
-      const spans = [...identifierSpans(text, options.carriers)];
+      const itemX = (item.transform as number[])[4];
+      const itemY = (item.transform as number[])[5];
+      // Beneath an owner-type label (pdf.js y grows upward), within its column.
+      const inNaturalPersonBlock = blocks.some(
+        (block) =>
+          itemY <= block.y + 3 &&
+          itemY >= block.y - OWNER_BLOCK_HEIGHT &&
+          itemX >= block.x - 10 &&
+          itemX <= block.x + OWNER_BLOCK_WIDTH
+      );
+      const spans = [...identifierSpans(text, options.carriers, { scope, inNaturalPersonBlock })];
       // Any value captured from a label ANYWHERE in the document, wherever it
       // reappears — "YU, WENBAO" is printed beside "Insured:" once and stands
       // alone under "Owner:" a few lines later.

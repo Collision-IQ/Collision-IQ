@@ -1233,6 +1233,35 @@ export function parseCccEstimateRow(
   // may carry digits only inside a parenthesized note ("(2 techs)"): a bare
   // digit or money value in the tail means those are real columns ("3 Ft 1
   // 7.08 T"), not wrapped prose, and the row must stay untouched.
+  //
+  // The value cluster is EVERY column a CCC row prints between its
+  // description and its wrapped tail: qty, extended price, labor, paint and
+  // the type letter. Test 99 (RO 22132) shipped "Mask jambs (0.3 Hours and
+  // $3.00" with its "per panel)" tail lost, because the cluster pattern knew
+  // hours and qty but not the extended price ("3 9.00 0.9") that sits between
+  // them on a priced row; the cluster failed to match and the tail was cut
+  // off with the columns.
+  //
+  // The priced form is admitted ONLY for a wrapped parenthetical note: the
+  // head must leave a "(" open and the tail must close it. Admitting a bare
+  // price into the cluster on every row let the lazy head stop early inside
+  // ordinary descriptions on a real CCC document and mis-typed its columns.
+  // The price alternative carries no currency mark either: the extended-price
+  // column prints bare ("9.00") while a note's own figure prints with one
+  // ("$3.00 per panel"), and the lazy head would otherwise pull the note's
+  // figure out of the description and into the columns.
+  // The wrapped-parenthetical form runs first: once it has moved the note's
+  // tail back inside the parenthesis, the general rule below finds no tail.
+  text = text.replace(
+    // Both head quantifiers are lazy so the cluster starts at the FIRST value
+    // column, not the last: greedy, the head swallowed "3" and left only
+    // "1.5" as the cluster.
+    /^(.*?\([^()]*?\S)((?: -?\d{1,2}\.\d(?: [MDEFGS])?| Incl\.| [1-9]\d?| -?\d{1,3}(?:,\d{3})*\.\d{2}(?: T)?)+) ([A-Za-z][A-Za-z0-9'"&/., -]*\))$/,
+    (full, head, cluster, tail) => {
+      if (/\d/.test(tail)) return full;
+      return `${head} ${tail}${cluster}`;
+    }
+  );
   text = text.replace(
     /^(.*?\S)((?: -?\d{1,2}\.\d(?: [MDEFGS])?| Incl\.| [1-9]\d?)+) ([A-Za-z][A-Za-z0-9'"&/()., -]*[A-Za-z)."'])$/,
     (full, head, cluster, tail) => {
@@ -1282,6 +1311,20 @@ export function parseCccEstimateRow(
     (columns.qty !== null && lineNumber !== null);
   if (!hasOperationData) return null;
 
+  // A single hour value with no labor-type letter lands in the LABOR column
+  // by default — the text lane cannot see which printed column it came from.
+  // When the row's own per-panel note says the hours are REFINISH hours
+  // ("Finish sand & polish (0.5 Refinish per panel)"), the document has
+  // stated the column, and the value belongs to paint. Test 99 (RO 22132)
+  // read 1.5 paint hours on that line as body labor.
+  const refinishNoteDeclaresHours = /\(\s*\d+(?:\.\d+)?\s+refinish\b/i.test(description);
+  const hoursAreRefinish =
+    refinishNoteDeclaresHours &&
+    columns.labor !== null &&
+    columns.paint === null &&
+    !columns.paintIncluded &&
+    columns.laborType === null;
+
   return {
     lineNumber,
     opCode,
@@ -1291,9 +1334,9 @@ export function parseCccEstimateRow(
     section: context?.section ?? null,
     qty: columns.qty,
     price: columns.price,
-    labor: columns.labor,
+    labor: hoursAreRefinish ? null : columns.labor,
     laborIncluded: columns.laborIncluded,
-    paint: columns.paint,
+    paint: hoursAreRefinish ? columns.labor : columns.paint,
     paintIncluded: columns.paintIncluded,
     laborType: columns.laborType,
     partSource: extractPartSource(text),
@@ -3038,6 +3081,13 @@ export interface EstimateTotalsSummary {
    * is a real difference the summed `salesTax` hides — RO 22182's GEICO
    * estimate carries a 2% County Tax of $84.56 that the shop's does not. */
   taxLanes: Array<{ label: string; amount: number }>;
+  /**
+   * The deductible the document states, when its totals block carries one
+   * (Mitchell prints it under ADJUSTMENTS; CCC's block does not carry it).
+   * `0` is a stated waiver; `null`/absent means the document does not say.
+   * Optional so every existing producer of this shape is unchanged.
+   */
+  deductible?: number | null;
 }
 
 /**

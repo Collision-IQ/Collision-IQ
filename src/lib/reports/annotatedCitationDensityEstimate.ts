@@ -2,7 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { withWinAnsiPage, toWinAnsiPdfText } from "@/lib/pdf/winAnsiText";
 import DELTA_RULES from "./data/deltaRules.json";
 import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
-import { redactAndRasterizePdf } from "@/lib/privacy/rasterRedactPdf";
+import { redactAndRasterizePdf, type RasterRedactionScope } from "@/lib/privacy/rasterRedactPdf";
+import {
+  detectEstimatePlatform,
+  parseEstimateRowsForPlatform,
+  parseEstimateTotalsForPlatform,
+} from "./estimatePlatform";
+import { buildBlockedNotice, mayRelease, runDeltaReleaseGate, type DeltaBundle } from "./deltaReleaseGate";
+import { classifyAuthorities } from "./authorityTier";
 import { canonicalOperationKey } from "./operationAliases";
 import {
   buildForensicReconciliation,
@@ -45,7 +52,7 @@ import {
   type PDFFont,
   type PDFRef,
 } from "pdf-lib";
-import { redactDownloadContent, redactInsurersForExport } from "@/lib/privacy/redactDownloadContent";
+import { maskVinForExport, redactDownloadContent, redactInsurersForExport } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationDensityAuthority, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
 import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
@@ -109,7 +116,6 @@ import {
   isSectionHeader,
   laborTypeNoun,
   matchEstimateLineItems,
-  parseCccEstimateRows,
   parseCccEstimateTotals,
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
@@ -571,6 +577,16 @@ export type AnnotatedEstimateRequest = {
   includeUnanchoredAppendix?: boolean;
   redactSensitive?: boolean;
   /**
+   * R24 / R26: run the delta release gate on the finished findings BEFORE any
+   * PDF is rendered, and refuse to produce artifacts when it fails. The
+   * production route sets this; library-level callers (tests, diagnostics)
+   * default to the prior behaviour so a synthetic pair with no totals block
+   * still renders. A blocked run throws DeltaReleaseBlockedError carrying
+   * the violations — the operator gets a diagnosis, the customer gets no
+   * PDF with dashes in its totals table.
+   */
+  enforceReleaseGate?: boolean;
+  /**
    * Opt-in: place unanchored findings as keyed notes inside measured on-page
    * whitespace (verified empty) instead of sending every one to the appendix.
    * Placement is planned and audited by annotationPlacementEngine; notes that
@@ -897,6 +913,10 @@ export type CitationDensityDebugTrace = {
   /** C-10: comparison-document extraction coverage (0..1) and intake gate. */
   comparisonExtractionCoverage?: number;
   intakeModeActive?: boolean;
+  /** R24 / R26: what the release gate said about this run (every rule, FAIL and WARN). */
+  releaseGateViolations?: Array<{ severity: "FAIL" | "WARN"; rule: string; message: string }>;
+  /** F4: structural-review findings withheld because neither document prints structural work. */
+  structuralReviewsWithheld?: number;
   detailLayoutBlocks?: Array<{
     findingNumber: number;
     pageIndex: number;
@@ -990,6 +1010,246 @@ export class CitationDensityAnnotationError extends Error {
     this.userMessage = message;
     this.debugTrace = debugTrace;
   }
+}
+
+/**
+ * The release gate refused the run (R24 minimum content, R26 authority
+ * table, or any other rule the production bundle carries). Raised BEFORE any
+ * artifact is rendered or stored, so a blocked run leaves nothing a customer
+ * could open. The route maps it to 422 like every other annotation error;
+ * `violations` is the operator's diagnosis.
+ */
+export class DeltaReleaseBlockedError extends CitationDensityAnnotationError {
+  violations: Array<{ severity: "FAIL" | "WARN"; rule: string; message: string }>;
+  notice: string;
+
+  constructor(
+    violations: Array<{ severity: "FAIL" | "WARN"; rule: string; message: string }>,
+    debugTrace: CitationDensityDebugTrace
+  ) {
+    const notice = buildBlockedNotice(violations);
+    super(notice, debugTrace);
+    this.name = "DeltaReleaseBlockedError";
+    this.violations = violations;
+    this.notice = notice;
+    this.userMessage =
+      "The comparison could not be completed to a publishable standard: " +
+      violations
+        .filter((violation) => violation.severity === "FAIL")
+        .map((violation) => `${violation.rule} ${violation.message}`)
+        .join("; ");
+  }
+}
+
+/**
+ * F4 — the structural-review precondition.
+ *
+ * A structural finding may stand only when a DOCUMENT prints structural
+ * work: a labor class of S or F on a row, or a section / operation in the
+ * structural vocabulary (both patterns are data in deltaRules.json). A
+ * finding that already carries a verified authority is never withheld — an
+ * attached OEM procedure is evidence in its own right.
+ */
+export function withholdUnsupportedStructuralReviews(
+  findings: CitationDensityFinding[],
+  documentTexts: string[]
+): { kept: CitationDensityFinding[]; dropped: CitationDensityFinding[] } {
+  const corpus = documentTexts.join("\n");
+  const structuralEvidence = new RegExp(DELTA_RULES.detectors.structuralEvidence, "i");
+  const structuralLaborClass = new RegExp(DELTA_RULES.detectors.structuralLaborClass, "m");
+  const documentsShowStructuralWork = structuralLaborClass.test(corpus) || structuralEvidence.test(corpus);
+  if (documentsShowStructuralWork) return { kept: findings, dropped: [] };
+  const dropped = findings.filter((finding) => {
+    if (finding.category !== "structural_or_fit_verification") return false;
+    if (finding.bestAvailableAuthority?.status === "verified") return false;
+    // A structured line delta is evidence-backed by construction: it exists
+    // because a printed row on one document has no match or a different
+    // value on the other. It is never a speculative detector, whatever its
+    // category, and the row it cites IS document evidence.
+    if ((finding.id ?? "").startsWith("required-detector-delta-")) return false;
+    // The row the finding itself cites is document text too — a review
+    // anchored to a frame-rail line stands even when the caller supplied no
+    // document text. Test 99's review cited a weatherstrip, cavity wax and a
+    // hood test-fit: no structural word among them.
+    const citedRows = [
+      finding.shopEvidence?.description,
+      finding.carrierEvidence?.description,
+      finding.shopAnchor?.description,
+      finding.carrierAnchor?.description,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return !(structuralLaborClass.test(citedRows) || structuralEvidence.test(citedRows));
+  });
+  if (dropped.length === 0) return { kept: findings, dropped: [] };
+  const droppedIds = new Set(dropped.map((finding) => finding.id));
+  return { kept: findings.filter((finding) => !droppedIds.has(finding.id)), dropped };
+}
+
+/**
+ * Merge the text-parsed ESTIMATE TOTALS with the word-lane categories.
+ *
+ * The word layer wins only when it parsed at least as completely (count AND
+ * rate coverage) — a synthetic or unusual totals layout can word-parse worse
+ * than it text-parses — AND, when the document's own printed subtotal is
+ * known, only when it does not break a reconciliation the text parse already
+ * satisfied.
+ *
+ * RECONCILE BEFORE REPLACE (F3, Test 99). The word lane reads every row
+ * after the ESTIMATE TOTALS heading that carries letters and a number, and
+ * page furniture below the table (a financing block, a QR caption) can
+ * satisfy that. A text parse that sums to the printed subtotal is the
+ * measured truth; a word parse that does not has read something that is
+ * not a category, and must not displace a parse that did. Test 99's Shop
+ * 22132 block — the Test 98 layout minus one row, with a financing block
+ * beneath it — came back "could not be read completely".
+ */
+export function mergeTextTotalsWithWordCategories(
+  textTotals: ReturnType<typeof parseCccEstimateTotals>,
+  wordCategories: Array<{ category: string; hours: number | null; rate: number | null; amount: number }>
+): ReturnType<typeof parseCccEstimateTotals> {
+  const textCategories = textTotals?.categories ?? [];
+  const rateCount = (rows: Array<{ rate: number | null }>) => rows.filter((row) => row.rate !== null).length;
+  if (
+    wordCategories.length < 3 ||
+    wordCategories.length < textCategories.length ||
+    rateCount(wordCategories) < rateCount(textCategories)
+  ) {
+    return textTotals;
+  }
+  const cents = (value: number | null | undefined) =>
+    value === null || value === undefined ? null : Math.round(value * 100);
+  const printedSubtotal = cents(textTotals?.subtotal);
+  if (printedSubtotal !== null) {
+    const sumCents = (rows: Array<{ cost?: number | null; amount?: number | null }>) =>
+      rows.reduce<number | null>((total, row) => {
+        const value = cents(row.cost ?? row.amount);
+        return total === null || value === null ? null : total + value;
+      }, 0);
+    const textSum = sumCents(textCategories);
+    const wordSum = sumCents(wordCategories);
+    if (textSum === printedSubtotal && wordSum !== printedSubtotal) return textTotals;
+  }
+  return {
+    categories: wordCategories.map((row) => ({
+      category: row.category.replace(/\s+/g, " ").trim(),
+      hours: row.hours,
+      rate: row.rate,
+      cost: row.amount,
+    })),
+    subtotal: textTotals?.subtotal ?? null,
+    salesTax: textTotals?.salesTax ?? null,
+    grandTotal: textTotals?.grandTotal ?? null,
+    taxLanes: textTotals?.taxLanes ?? [],
+    deductible: textTotals?.deductible ?? null,
+  };
+}
+
+/**
+ * The release-gate bundle for a production run (R24 / R26 and every rule
+ * the fields below arm). Built from what the pipeline actually resolved —
+ * never from the request — so the gate judges the run, not its inputs.
+ *
+ * Finding types are mapped onto the gate's closed enum only where the
+ * pipeline's own identifiers make the mapping certain; a finding whose kind
+ * the gate does not name carries no type (R05 skips it, R24 counts it as
+ * evidence-backed only if anchored). Findings with no anchor are flagged
+ * `unanchored_disclosed` when this run renders the unanchored appendix —
+ * the reader sees them labelled as such — and R08 fails them otherwise.
+ */
+export function buildProductionReleaseBundle(input: {
+  sourcePdfName: string;
+  sourceText: string;
+  comparison: { fileName?: string; text: string } | null;
+  findings: CitationDensityFinding[];
+  reconciliation: ForensicReconciliation | null;
+  intakeModeActive: boolean;
+  unanchoredAppendixRendered: boolean;
+  retrievedSources: Array<{ title: string; url?: string; locator?: string }>;
+}): DeltaBundle {
+  const reconciliation = input.reconciliation;
+  const comparisonText = input.comparison?.text ?? "";
+  const runMode: NonNullable<DeltaBundle["run_mode"]> = !input.comparison
+    ? "INTAKE"
+    : input.intakeModeActive
+      ? "TOTALS_ONLY"
+      : "FULL";
+  const categoryDeltas = (reconciliation?.rows ?? [])
+    .filter((row) => row.costDifference !== null && Math.abs(row.costDifference) >= 0.005)
+    .map((row) => ({ category: row.category, delta: row.costDifference }));
+
+  const typeOf = (finding: CitationDensityFinding): string | undefined => {
+    const id = finding.id ?? "";
+    if (id.startsWith("required-detector-totals-")) return "rate_delta";
+    if (id.startsWith("required-detector-delta-intake-")) return "intake";
+    if (id.includes("sand_polish_p_page_support")) return "p_page_review";
+    if (id.includes("repair_procedure_structural") || (finding.category === "structural_or_fit_verification" && finding.estimateGapType === "needs_proof")) {
+      return "structural_review";
+    }
+    if (id.startsWith("required-detector-delta-")) {
+      return finding.estimateGapType === "missing_from_carrier" ? "missing_operation" : "value_delta";
+    }
+    return undefined;
+  };
+  const anchorIdsOf = (finding: CitationDensityFinding): string[] => {
+    const lines = [
+      finding.shopAnchor?.lineNumber,
+      finding.carrierAnchor?.lineNumber,
+      finding.shopEvidence?.lineNumber,
+      finding.carrierEvidence?.lineNumber,
+    ]
+      .map((line) => (line === null || line === undefined ? "" : String(line).trim()))
+      .filter(Boolean);
+    return [...new Set(lines)].map((line) => `ln:${line}`);
+  };
+  const findings: NonNullable<DeltaBundle["findings"]> = input.findings.map((finding) => {
+    const anchors = anchorIdsOf(finding);
+    const isTotals = (finding.id ?? "").startsWith("required-detector-totals-");
+    return {
+      id: finding.id,
+      type: typeOf(finding),
+      anchors,
+      scope: isTotals ? "category" : undefined,
+      unanchored_disclosed: anchors.length === 0 && !isTotals && input.unanchoredAppendixRendered ? true : undefined,
+      text: [finding.operationLabel, finding.currentSupportSummary, finding.missingProofSummary]
+        .filter(Boolean)
+        .join(" "),
+      authority:
+        finding.bestAvailableAuthority?.status === "verified"
+          ? { title: finding.bestAvailableAuthority.title, retrieved: true }
+          : undefined,
+    };
+  });
+
+  const attachedTitles = new Map<string, string[]>();
+  for (const finding of input.findings) {
+    const authority = finding.bestAvailableAuthority;
+    if (authority?.status !== "verified" || !authority.title) continue;
+    const key = authority.title.trim().toLowerCase();
+    attachedTitles.set(key, [...(attachedTitles.get(key) ?? []), finding.id]);
+  }
+  const authorities = classifyAuthorities(input.retrievedSources).accepted.map((authority) => ({
+    title: authority.title,
+    tier: authority.tier,
+    attached_to: attachedTitles.get(authority.title.trim().toLowerCase()) ?? null,
+  }));
+
+  return {
+    run_mode: runMode,
+    target: {
+      file: input.sourcePdfName,
+      grand_total: reconciliation?.higherGrandTotal ?? null,
+      platform: detectEstimatePlatform(input.sourceText),
+    },
+    source: {
+      file: input.comparison?.fileName ?? "",
+      grand_total: reconciliation?.lowerGrandTotal ?? null,
+      platform: input.comparison ? detectEstimatePlatform(comparisonText) : null,
+    },
+    findings,
+    category_deltas: categoryDeltas,
+    authorities,
+  };
 }
 
 function appendToolUsageTrace(trace: CitationDensityDebugTrace, entry: CitationDensityToolUsageTraceEntry) {
@@ -1363,6 +1623,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
   const reportIdentity = params.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
+  // F7: one redaction scope for both deliverables of a run, from the rules
+  // file. natural_person keeps the insurer, claim number, RO and shop
+  // identity legible on the annotated pages AND in the forensic report.
+  const redactionScope: RasterRedactionScope =
+    DELTA_RULES.redaction.scope === "natural_person" ? "natural_person" : "full";
   // When the delta value layer is active it carries the visual delta story
   // (cell highlights, underlines, stamps, keyed notes), so the legacy layer
   // defaults to compact margin markers only — full-row highlights on top of
@@ -1396,7 +1661,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let redactedRegionCount = 0;
   if (params.redactSourcePages !== false) {
     try {
-      const redacted = await redactAndRasterizePdf(sourcePdfBytes);
+      const redacted = await redactAndRasterizePdf(sourcePdfBytes, { scope: redactionScope });
       annotationBaseBytes = new Uint8Array(redacted.bytes);
       sourcePagesRedacted = true;
       redactedRegionCount = redacted.redactedRegionCount;
@@ -1777,6 +2042,72 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     suppressed = sanitizedGenerated.suppressed;
     Object.assign(trace, generated.debug ?? {});
     forensicInput = generated.forensic ?? null;
+
+    // F4 (Test 99): a speculative detector may not fire without anchor
+    // evidence. A structural review on a pair where neither document prints
+    // structural labor, a structural section or a structural operation has
+    // nothing to review — RO 22132 shipped "Structural frame and measurement
+    // verification" anchored to a hood test-fit on a bumper/hood/fender hit.
+    // The precondition reads the DOCUMENTS, never the finding's own prose.
+    {
+      const withheld = withholdUnsupportedStructuralReviews(findings, [
+        params.sourceText ?? "",
+        ...(params.comparisonEstimateTexts ?? []).map((comparison) => comparison.text),
+      ]);
+      if (withheld.dropped.length > 0) {
+        findings = withheld.kept;
+        suppressed = [...suppressed, ...withheld.dropped];
+        trace.structuralReviewsWithheld = withheld.dropped.length;
+        warnings.push(
+          `${withheld.dropped.length} structural-review finding(s) withheld: neither document prints structural labor, a structural section or a structural operation, so the review has no evidence to anchor to.`
+        );
+      }
+    }
+
+    // R24 / R26: the release gate runs on the finished findings BEFORE any
+    // page is drawn or stored. A run it refuses produces a diagnosis for the
+    // operator and no artifact for the customer.
+    if (request.enforceReleaseGate) {
+      const comparison = params.comparisonEstimateTexts?.[0] ?? null;
+      const bundle = buildProductionReleaseBundle({
+        sourcePdfName,
+        sourceText: params.sourceText ?? "",
+        comparison: comparison ? { fileName: comparison.fileName, text: comparison.text } : null,
+        findings,
+        reconciliation: forensicInput?.reconciliation ?? null,
+        intakeModeActive: generated.debug?.intakeModeActive === true,
+        unanchoredAppendixRendered: request.includeUnanchoredAppendix !== false,
+        retrievedSources: [
+          ...(params.resolvedAuthorities ?? []).map((authority) => ({
+            title: authority.sourceTitle,
+            url: authority.url,
+            locator: authority.locator,
+          })),
+          ...(params.authorityTrace?.authoritySources ?? []).map((authority) => ({
+            title: authority.title,
+            url: authority.url,
+            locator: authority.locator,
+          })),
+        ],
+      });
+      const violations = runDeltaReleaseGate(bundle);
+      trace.releaseGateViolations = violations;
+      console.info("[citation-density] release gate", {
+        runMode: bundle.run_mode,
+        target: bundle.target,
+        source: bundle.source,
+        categoryDeltas: bundle.category_deltas?.length ?? 0,
+        findings: bundle.findings?.length ?? 0,
+        failures: violations.filter((violation) => violation.severity === "FAIL").map((v) => `${v.rule} ${v.message}`),
+        warnings: violations.filter((violation) => violation.severity === "WARN").map((v) => `${v.rule} ${v.message}`),
+      });
+      if (!mayRelease(violations)) {
+        throw new DeltaReleaseBlockedError(violations, trace);
+      }
+      for (const warning of violations.filter((violation) => violation.severity === "WARN")) {
+        warnings.push(`Release gate ${warning.rule}: ${warning.message}`);
+      }
+    }
     appendToolUsageTrace(trace, {
       tool: "oem_procedure_position_support",
       ran: reportIdentity.reportType === "oem-citation-density",
@@ -2021,10 +2352,17 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
   const findingDetails: FindingDetail[] = [];
   let renderedPdfAnnotationCount = 0;
+  // ONE numbering for both deliverables (F8 / U1): a finding's number is its
+  // position in the findings list, and the badge on the estimate and the
+  // card in the forensic report both print it.
+  const findingNumberById = new Map(findings.map((finding, index) => [finding.id, index + 1]));
   matches.forEach((match, index) => {
     const sourcePdfPageNumber = match.anchor.pageNumber;
     const page = withWinAnsiPage(pdfDoc.getPage(toSourcePdfPageIndex(sourcePdfPageNumber)));
-    const renderResult = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
+    // F8 / U1: the badge is the finding's number in THE findings list — the
+    // same number its card carries in the forensic report — not its position
+    // among the marks that happened to place. One list, one numbering.
+    const renderResult = drawFindingAnnotation(pdfDoc, page, match, findingNumberById.get(match.finding.id) ?? index + 1, {
       mode,
       font,
       boldFont,
@@ -2250,8 +2588,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         // stand, and the not-read gate below then suppressed the whole value
         // layer — on a pair whose comparison the text lane reads fine. Compare
         // the two lanes below the line-verdict floor and keep the better read.
-        if (competingRows.length < MIN_PARSED_ROWS_FOR_LINE_VERDICTS && comparisonText) {
-          const textLaneRows = parseCccEstimateRows(comparisonText.text)
+        // F1 (Test 99): the text lane reads with the reader the comparison's
+        // OWN platform calls for. The typed PDF-word parser is built on the
+        // CCC column grid; a Mitchell print (welded columns, wrapped
+        // operations) yields fragments there, so a Mitchell comparison takes
+        // the text lane whenever it reads MORE rows — not only below the
+        // line-verdict floor.
+        const comparisonPlatform = detectEstimatePlatform(comparisonText?.text ?? "");
+        if (
+          comparisonText &&
+          (competingRows.length < MIN_PARSED_ROWS_FOR_LINE_VERDICTS || comparisonPlatform === "mitchell")
+        ) {
+          const textLaneRows = parseEstimateRowsForPlatform(comparisonText.text).rows
             .map((row) =>
               estimateRowFromTextFields({
                 lineNumber: row.lineNumber,
@@ -2270,8 +2618,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             competingRows = textLaneRows;
             competingRowLane = "text";
           }
-          if (competingTotals.length === 0) {
-            competingTotals = (parseCccEstimateTotals(comparisonText.text)?.categories ?? []).map((category) => ({
+          // A Mitchell totals block prints no "hrs @ rate" basis, so the
+          // word-lane reader recovers nothing useful from it; the platform
+          // reader's totals win there outright.
+          if (competingTotals.length === 0 || comparisonPlatform === "mitchell") {
+            competingTotals = (parseEstimateTotalsForPlatform(comparisonText.text)?.categories ?? []).map((category) => ({
               category: category.category,
               hours: category.hours,
               rate: category.rate,
@@ -2456,7 +2807,17 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       ...matches.map(({ finding }) => getProofBucketLabel(finding)),
       ...unmatched.map((finding) => getProofBucketLabel(finding)),
     ].filter(Boolean);
-    addLegendPage(pdfDoc, { font, boldFont, reportIdentity, emittedLabels, valueLayerSuppressionNote });
+    addLegendPage(pdfDoc, {
+      font,
+      boldFont,
+      reportIdentity,
+      emittedLabels,
+      valueLayerSuppressionNote,
+      companionReportName:
+        forensicInput && reportIdentity.reportType === "citation-density"
+          ? "Forensic Estimate Analysis"
+          : "Findings Report",
+    });
   }
 
   const bytes = await pdfDoc.save();
@@ -2501,6 +2862,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // label-aware — a bare claim number is not recognisable as one.
     const claimContext = resolveForensicClaimContext(params);
     const redactIdentityRows = request.redactSensitive !== false;
+    // F7: under the natural_person scope only the owner row is scrubbed and
+    // the VIN keeps its first nine; the claim number, RO and insurer print —
+    // they are what the supplement is filed under.
+    const naturalPersonOnly = redactionScope === "natural_person";
     const identity = (
       [
         ["Owner / insured", claimContext.ownerName],
@@ -2516,17 +2881,43 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       .map(([label, value]) => {
         const prefix = `${label}: `;
         const labeled = `${prefix}${String(value).trim()}`;
-        const scrubbed = redactIdentityRows ? redactDownloadContent(labeled) : labeled;
+        const scrubbed = !redactIdentityRows
+          ? labeled
+          : naturalPersonOnly
+            ? label === "Owner / insured"
+              ? `${prefix}[REDACTED_PERSON]`
+              : maskVinForExport(labeled)
+            : redactDownloadContent(labeled);
         return {
           label,
           value: scrubbed.startsWith(prefix) ? scrubbed.slice(prefix.length) : scrubbed,
         };
       })
       .filter((row) => row.value.trim().length > 0);
+    // Only authorities that actually reached a finding. An authority that
+    // supported nothing is not "relied upon" and must not be listed as if
+    // it were.
+    const reliedUponAuthorities = Array.from(
+      new Map(
+        findings
+          .filter((finding) => finding.bestAvailableAuthority?.status === "verified")
+          .map((finding) => [
+            finding.bestAvailableAuthority!.title,
+            {
+              title: finding.bestAvailableAuthority!.title,
+              relevance: finding.operationLabel,
+              where: finding.matchedDocumentUrl ?? "Retrieved during preparation of this report",
+            },
+          ])
+      ).values()
+    );
     const forensic = await buildForensicReportPdf({
       reconciliation: forensicInput.reconciliation,
       findings,
       higherDocumentName: sourcePdfName,
+      // R24: an unnamed comparison is a run that never resolved its second
+      // document; the release gate fails that run before this point, so the
+      // fallback string is a last-resort label, not a deliverable state.
       lowerDocumentName: params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate",
       higherLineCount: forensicInput.higherLineCount,
       lowerLineCount: forensicInput.lowerLineCount,
@@ -2534,23 +2925,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       vehicleLabel: claimContext.vehicle ?? params.vehicleMake ?? null,
       identity,
       limitations: textLayerNotes,
-      // Only authorities that actually reached a finding. An authority that
-      // supported nothing is not "relied upon" and must not be listed as if
-      // it were.
-      authorities: Array.from(
-        new Map(
-          findings
-            .filter((finding) => finding.bestAvailableAuthority?.status === "verified")
-            .map((finding) => [
-              finding.bestAvailableAuthority!.title,
-              {
-                title: finding.bestAvailableAuthority!.title,
-                relevance: finding.operationLabel,
-                where: finding.matchedDocumentUrl ?? "Retrieved during preparation of this report",
-              },
-            ])
-        ).values()
-      ),
+      redactionScope,
+      findingNumbers: findingNumberById,
+      authorities: reliedUponAuthorities,
       // Everything the claim's research passes retrieved -- the RIR snapshot
       // authorities plus the OEM/jurisdictional lane. The forensic report ranks
       // and filters these itself rather than trusting the upstream sourceType,
@@ -3939,6 +4316,10 @@ type StructuredLineItemDeltaMatch = {
   totalsAnchors: EstimateRowAnchor[];
   /** Lower-estimate lines with no counterpart on the annotated (higher) estimate. */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** F1: which estimating platform the comparison text resolved to. */
+  comparisonPlatform: "ccc" | "mitchell" | "audatex" | null;
+  /** F1: comparison lines the platform booked as parts that are really sublets. */
+  subletsBookedAsParts: Array<{ line: number | null; description: string; price: number | null }>;
   /** Parsed lower ESTIMATE TOTALS block (rates for valuing lower-only labor). */
   lowerTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
   /** This estimate's own ESTIMATE TOTALS block. Its declared rates are what a
@@ -4046,7 +4427,13 @@ function matchStructuredLineItemDeltas(
     return true;
   });
 
-  let lowerRows = comparison.flatMap((item) => parseCccEstimateRows(repairTokens(item.text)));
+  // F1 (Test 99): each comparison document is read by the reader its own
+  // platform calls for. A Mitchell text layer run through the CCC reader
+  // yields nothing, and the run then compares against an empty pool.
+  const comparisonReads = comparison.map((item) => parseEstimateRowsForPlatform(repairTokens(item.text)));
+  let lowerRows = comparisonReads.flatMap((read) => read.rows);
+  const comparisonPlatform = comparisonReads.map((read) => read.platform).find((platform) => platform) ?? null;
+  const subletsBookedAsParts = comparisonReads.flatMap((read) => read.subletsBookedAsParts);
 
   // Typed-engine path: when BOTH sides can be parsed from a measured word
   // layer, replace the text-derived rows with delta-engine rows serialized
@@ -4063,7 +4450,12 @@ function matchStructuredLineItemDeltas(
     ) ?? (context.comparisonEstimateWords ?? [])[0];
   const carrierMismatchNotes: StructuredLineItemDeltaMatch["carrierMismatchNotes"] = [];
   let engineMatch: ReturnType<typeof engineResultToLineItemDeltas> | null = null;
-  if (comparisonWordSet) {
+  // The typed engine parses the CCC column grid. A Mitchell comparison prints
+  // welded columns and no SUBTOTALS row, so its word layer yields fragments
+  // the reconciliation guard cannot reject (nothing to reconcile against) —
+  // and those fragments would replace the rows the Mitchell reader just
+  // recovered. The platform reader's rows stand for a Mitchell comparison.
+  if (comparisonWordSet && comparisonPlatform !== "mitchell") {
     const subjectDiag = emptyRowParseDiagnostics();
     const competingDiag = emptyRowParseDiagnostics();
     const subjectEngineRows = parseDeltaEngineRows(subjectWordPages, subjectDiag);
@@ -4541,42 +4933,23 @@ function matchStructuredLineItemDeltas(
     wordPages: Map<number, DeltaEngineWord[]> | null
   ): ReturnType<typeof parseCccEstimateTotals> => {
     if (!wordPages) return textTotals;
-    const wordCategories = parseDeltaEngineTotals(wordPages);
-    // Only replace the text-parsed categories when the word layer parsed at
-    // least as completely (count AND rate coverage) — a synthetic or unusual
-    // totals layout can word-parse worse than it text-parses.
-    const textCategories = textTotals?.categories ?? [];
-    const rateCount = (rows: Array<{ rate: number | null }>) =>
-      rows.filter((row) => row.rate !== null).length;
-    if (
-      wordCategories.length < 3 ||
-      wordCategories.length < textCategories.length ||
-      rateCount(wordCategories) < rateCount(textCategories)
-    ) {
-      return textTotals;
-    }
-    return {
-      categories: wordCategories.map((row) => ({
-        category: row.category.replace(/\s+/g, " ").trim(),
-        hours: row.hours,
-        rate: row.rate,
-        cost: row.amount,
-      })),
-      subtotal: textTotals?.subtotal ?? null,
-      salesTax: textTotals?.salesTax ?? null,
-      grandTotal: textTotals?.grandTotal ?? null,
-      taxLanes: textTotals?.taxLanes ?? [],
-    };
+    return mergeTextTotalsWithWordCategories(textTotals, parseDeltaEngineTotals(wordPages));
   };
+  // F1: each side's totals block is read by its own platform's reader. The
+  // word-lane merge is a CCC-grid refinement and is skipped for a Mitchell
+  // document, whose block prints no "hrs @ rate" basis for it to read.
+  const subjectPlatform = detectEstimatePlatform(context.sourceText ?? "");
   const higherTotals = mergeTotalsWithWordCategories(
-    parseCccEstimateTotals(context.sourceText ?? ""),
-    subjectWordPages.size > 0 ? subjectWordPages : null
+    parseEstimateTotalsForPlatform(context.sourceText ?? ""),
+    subjectWordPages.size > 0 && subjectPlatform !== "mitchell" ? subjectWordPages : null
   );
   const lowerTotals = mergeTotalsWithWordCategories(
     comparison
-      .map((item) => parseCccEstimateTotals(item.text))
+      .map((item) => parseEstimateTotalsForPlatform(item.text))
       .find((totals) => totals !== null) ?? null,
-    comparisonWordSet ? pdfWordsToEnginePages(comparisonWordSet.words) : null
+    comparisonWordSet && comparisonPlatform !== "mitchell"
+      ? pdfWordsToEnginePages(comparisonWordSet.words)
+      : null
   );
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
   const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
@@ -4621,6 +4994,8 @@ function matchStructuredLineItemDeltas(
     totalsDeltas,
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
+    comparisonPlatform,
+    subletsBookedAsParts,
     contradictionNotes,
     lowerTotalsSummary: lowerTotals,
     higherTotalsSummary: higherTotals,
@@ -5479,9 +5854,23 @@ function buildRequiredDetectorFinding(params: {
   laborHoursImpact?: number | null;
   estimateGapType?: CitationDensityFinding["estimateGapType"];
 }): CitationDensityFinding {
+  // F5 (Test 99): a row is DESCRIBED by its parsed description, never by
+  // the raw anchor text. A wrapped CCC description reaches the anchor in
+  // reading order with its value cells inside it — "Finish sand & polish
+  // (0.5 Refinish 3 1.5 per panel)" — and that string shipped as a line
+  // description. The row parser already separates the columns; every
+  // reader-facing mention of the row uses its result.
+  const rawRowText = getAnchorSourceText(params.anchor);
+  // Only an operation row has columns to separate; a totals row or a note
+  // anchor is quoted as printed.
+  const parsedRow =
+    params.anchor.anchorType === "estimate_line" ? deltaRowFromRawText({ rawText: params.anchor.rowText }) : null;
+  const rowLabel = parsedRow?.description?.trim() || rawRowText;
+  const describeRow = (text: string) =>
+    rawRowText && rowLabel !== rawRowText ? text.split(rawRowText).join(rowLabel) : text;
   const evidence = {
     lineNumber: params.anchor.lineNumber,
-    description: getAnchorSourceText(params.anchor),
+    description: rowLabel,
     amount: params.anchor.price ?? null,
     laborHours: params.anchor.labor ?? null,
     sourceLabel: params.context.sourcePdfName,
@@ -5533,7 +5922,7 @@ function buildRequiredDetectorFinding(params: {
       note: "Required estimator detector generated this finding from a concrete estimate row; authority still needs to be attached.",
     },
     citationLabel: params.label,
-    currentSupportSummary: params.currentSupportSummary,
+    currentSupportSummary: describeRow(params.currentSupportSummary),
     missingProofSummary: params.missingProofSummary,
     recommendedNextAction: params.recommendedNextAction,
     confidence: params.anchor.confidence >= 0.9 ? "high" : "medium",
@@ -9117,6 +9506,8 @@ function addLegendPage(
      * this run, when it is. The legend must never promise keyed notes a
      * suppressed run does not contain. */
     valueLayerSuppressionNote?: string | null;
+    /** F8: the companion document the badges index into, as the reader will see it named. */
+    companionReportName?: string;
   }
 ) {
   const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
@@ -9136,9 +9527,13 @@ function addLegendPage(
     // On a suppressed run the promise of keyed notes would be untrue — the
     // suppression reason prints in its place, so the document explains its
     // own missing notes.
+    // F8: the companion this report actually ships with is the Forensic
+    // Estimate Analysis (the findings-card report is retained only for runs
+    // with no structured delta). The legend names the document the reader
+    // is holding, and the badge is the finding's number in it.
     options.valueLayerSuppressionNote
-      ? `NOTE: ${options.valueLayerSuppressionNote} The numbered badges key to the Findings Report; per-line value notes are withheld on this run.`
-      : "Key: the numbered badge in the left margin is the FINDING number in the Findings Report; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).",
+      ? `NOTE: ${options.valueLayerSuppressionNote} The numbered badges key to the companion ${options.companionReportName ?? "Findings Report"}; per-line value notes are withheld on this run.`
+      : `Key: the numbered badge in the left margin is the FINDING number in the companion ${options.companionReportName ?? "Findings Report"}; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).`,
   ], {
     x: 48,
     y: height - 84,

@@ -29,7 +29,27 @@
  *   5  Other high-quality published technical sources
  */
 
+import RULES from "./data/deltaRules.json";
+
 export type AuthorityTier = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * A title that only DISCUSSES authorities is not one. "Tips on Finding OEM
+ * Position Statements" and "How Important Are OEM Position Statements?"
+ * were retired in Test 97 and came back on RO 22132 through this classifier,
+ * which placed them on the ladder at tier 5 because their host was not
+ * social. The patterns are data (deltaRules.json) and shared with the
+ * finding-attachment lane, so both lanes refuse the same titles.
+ */
+export function isMetaAuthorityTitle(title: string | null | undefined): boolean {
+  const value = (title ?? "").trim();
+  if (!value) return false;
+  const patterns = [
+    ...(RULES.authority.rejectTitlesMatching as string[]),
+    ...(RULES.authority.rejectMetaTitlesMatching as string[]),
+  ];
+  return patterns.some((pattern) => new RegExp(pattern, "i").test(value));
+}
 
 export type TieredAuthority = {
   title: string;
@@ -151,6 +171,15 @@ export function classifyAuthority(source: {
   const host = hostOf(source.url);
 
   // Rejections first, so nothing below can rescue a social or forum result.
+  if (isMetaAuthorityTitle(title)) {
+    return {
+      rejected: {
+        title,
+        url: source.url,
+        reason: "Advice about authorities (a how-to or explainer), not an authority itself.",
+      },
+    };
+  }
   if (host && hostMatches(host, USER_GENERATED_HOSTS)) {
     return {
       rejected: {
