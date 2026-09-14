@@ -2387,9 +2387,14 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
-  const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
-    (doc) => doc.kind === "estimate"
-  ).length;
+  // Distinct estimate FILES. The evidence registry keeps one entry per
+  // attachment id and merges across every analysis run on the case, so the
+  // same print uploaded twice would otherwise count as a pair.
+  const reviewedEstimateCount = new Set(
+    buildReportUploadedDocuments(analysisResult)
+      .filter((doc) => doc.kind === "estimate")
+      .map((doc) => (doc.filename ?? doc.id ?? "").trim().toLowerCase())
+  ).size;
   // Report-mode routing (Sep 2026): one estimate on file → Forensic Estimate
   // Review only; two → the two-estimate Forensic Analysis + Citation Density.
   // Client-side candidates only exist for files uploaded this session, so the

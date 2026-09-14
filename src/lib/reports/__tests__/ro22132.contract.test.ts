@@ -445,6 +445,53 @@ describe("F6 — R26: the authority table lists what was relied upon", () => {
     expect(r26.some((message) => /Some aftermarket blog/.test(message))).toBe(true);
     expect(r26.some((message) => /how-to\/marketing title/.test(message))).toBe(true);
   });
+
+  it("the bundle mirrors the printed table: an unattached tier-5 hit is disclosed, not listed, so it cannot block", () => {
+    const anchored = (id: string, line: number): CitationDensityFinding =>
+      ({
+        id,
+        operationLabel: `Line ${line}`,
+        category: "refinish",
+        estimateGapType: "reduced_by_carrier",
+        currentSupportSummary: "written vs paid",
+        missingProofSummary: "",
+        recommendedNextAction: "",
+        shopEvidence: { lineNumber: String(line), amount: 10 },
+        impact: { dollarImpact: 10, laborHoursImpact: null, safetyImpact: "low", supplementPriority: "low" },
+        citationStatus: {} as CitationDensityFinding["citationStatus"],
+        citationDensityScore: 50,
+        verifiedAuthorityCount: 0,
+        missingAuthorityTypes: [],
+        confidence: "medium",
+        limitations: [],
+      }) as CitationDensityFinding;
+    const reconciliation = buildForensicReconciliation({
+      higherTotals: parseEstimateTotalsForPlatform(shopText),
+      lowerTotals: parseEstimateTotalsForPlatform(sorText),
+    });
+    const bundle = buildProductionReleaseBundle({
+      sourcePdfName: "Shop 22132.pdf",
+      sourceText: shopText,
+      comparison: { fileName: "SOR3 22132.pdf", text: sorText },
+      findings: [anchored("f-1", 24), anchored("f-2", 31), anchored("f-3", 13)],
+      reconciliation,
+      intakeModeActive: false,
+      unanchoredAppendixRendered: true,
+      // Three tier-5 search hits no finding relied on, plus one tier-4
+      // statement that may stand on retrieval alone.
+      retrievedSources: [
+        { title: "Driver+ Calibration Requirements and Best Practices, EDV", url: "https://example.com/driver-plus" },
+        { title: "The Use Of Aftermarket (Non-Oem) Crash Parts In Collision Repair", url: "https://example.com/am-parts" },
+        { title: "Auto Insurance FAQ: OEM Parts Dispute for Leased Vehicles", url: "https://example.com/faq" },
+        { title: "Volvo Position Statement: Scanning and Diagnostics", url: "https://rts.i-car.com/volvo-scanning" },
+      ],
+    });
+    const titles = (bundle.authorities ?? []).map((authority) => authority.title);
+    expect(titles).toEqual(["Volvo Position Statement: Scanning and Diagnostics"]);
+    const violations = runDeltaReleaseGate(bundle);
+    expect(violations.filter((violation) => violation.rule === "R26")).toHaveLength(0);
+    expect(mayRelease(violations)).toBe(true);
+  });
 });
 
 describe("F8 — one numbering across the annotated estimate and the forensic report", () => {
