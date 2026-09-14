@@ -1,0 +1,2861 @@
+From ee6a4cb236e11178e597c4fc7c4f102b129af6d7 Mon Sep 17 00:00:00 2001
+From: Vinny Menichetti <vinny@collision.academy>
+Date: Mon, 14 Sep 2026 14:11:31 +0000
+Subject: [PATCH] Review one estimate on its own terms instead of failing it as
+ a comparison
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A case with a single estimate on file hit the two-estimate delta release
+gate (R24/R26) and shipped nothing: "a run that read neither totals block
+cannot ship". There was no comparison to gate. This adds the single-estimate
+Forensic Estimate Review and routes the Reports card by estimate count.
+
+- src/lib/reports/forensicSingle/: engine (reconcile to printed totals →
+  deterministic rule catalog → verdict/exposure/checklist), report-plan
+  routing (1 estimate → FORENSIC_SINGLE, 2 → FORENSIC_DELTA + CITATION_DENSITY),
+  adapter from the platform's own readers (measured word lane via
+  deltaEngine/rowCluster, text lane via estimatePlatform) and a pdf-lib
+  renderer on the shared forensic Writer.
+- POST /api/reports/forensic-estimate: resolves the case's estimate, prefers
+  the measured word layer, answers 409 with the plan mode when the case
+  carries a pair so the client continues with the two-estimate flow.
+- Reports card renamed "Forensic Report w/ Citation Density Report"; in
+  single mode the description, download label and email kind follow the
+  plan and the Citation Density target selector is hidden.
+- /api/reports/send accepts forensic_estimate_review.
+- Writer.wrap folds text to WinAnsi before measuring width: a "→" in a
+  finding sentence threw inside widthOfTextAtSize before any page drew.
+- Tests: forensicSingle.test.ts (fixture parity with the hand-built review —
+  12 findings, $0.00 unexplained, +$261.80 to +$290.60; real CCC print closes
+  to $0.00 through the measured lane; routing; universality).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017XYvFZkUz5vhv3PkSCQmbC
+---
+ package.json                                  |   2 +-
+ .../api/reports/forensic-estimate/route.ts    | 197 +++++++
+ src/app/api/reports/send/route.ts             |  10 +
+ src/components/ChatbotPage.tsx                | 211 +++++++-
+ src/lib/crm/events.ts                         |   1 +
+ .../reports/__tests__/forensicSingle.test.ts  | 181 +++++++
+ .../annotatedCitationDensityEstimate.ts       |   2 +-
+ src/lib/reports/forensicReportRenderer.ts     |  17 +-
+ .../__tests__/fixture-single-estimate.json    |  77 +++
+ src/lib/reports/forensicSingle/engine.ts      |  94 ++++
+ .../forensicSingle/fromEstimateText.ts        | 485 ++++++++++++++++++
+ src/lib/reports/forensicSingle/index.ts       |  17 +
+ src/lib/reports/forensicSingle/reconcile.ts   | 156 ++++++
+ src/lib/reports/forensicSingle/renderer.ts    | 287 +++++++++++
+ src/lib/reports/forensicSingle/reportPlan.ts  |  64 +++
+ .../reports/forensicSingle/rules/catalog.ts   | 378 ++++++++++++++
+ .../reports/forensicSingle/rules/context.ts   |  89 ++++
+ src/lib/reports/forensicSingle/types.ts       | 198 +++++++
+ 18 files changed, 2439 insertions(+), 27 deletions(-)
+ create mode 100644 src/app/api/reports/forensic-estimate/route.ts
+ create mode 100644 src/lib/reports/__tests__/forensicSingle.test.ts
+ create mode 100644 src/lib/reports/forensicSingle/__tests__/fixture-single-estimate.json
+ create mode 100644 src/lib/reports/forensicSingle/engine.ts
+ create mode 100644 src/lib/reports/forensicSingle/fromEstimateText.ts
+ create mode 100644 src/lib/reports/forensicSingle/index.ts
+ create mode 100644 src/lib/reports/forensicSingle/reconcile.ts
+ create mode 100644 src/lib/reports/forensicSingle/renderer.ts
+ create mode 100644 src/lib/reports/forensicSingle/reportPlan.ts
+ create mode 100644 src/lib/reports/forensicSingle/rules/catalog.ts
+ create mode 100644 src/lib/reports/forensicSingle/rules/context.ts
+ create mode 100644 src/lib/reports/forensicSingle/types.ts
+
+diff --git a/package.json b/package.json
+index 7486ed7..ebbc5f9 100644
+--- a/package.json
++++ b/package.json
+@@ -16,7 +16,7 @@
+     "cap:sync:debug": "cross-env CAP_SERVER_URL=http://10.0.2.2:3000 npx cap sync android",
+     "android:debug": "npm run cap:sync:debug && cd android && gradlew.bat assembleDebug",
+     "android:bundle": "npm run cap:sync:prod && cd android && gradlew.bat bundleRelease",
+-    "test": "npm run test:universality && npm run test:pdf-lib-imports && npm run test:zip-fixtures && node scripts/run-cjs-tests.cjs && npm run test:vehicle-identity && npm run test:claim-specific-reports && vitest run \"upload.zip.test\" \"ro21896Delta.contract.test\" \"ro21896CanonicalDelta.contract.test\" \"marketPreviewOwnerZip.test\" \"deltaForensicReport.test\" \"deltaForensicFindingsReport.test\" \"crossPlatformExtractionGate.test\" \"deltaReleaseGate.test\" \"test99.contract.test\" \"rekeyLedger.test\" \"rekeyVerification.test\" \"nomenclature.test\" \"emsReader.test\" \"emsAcceptance.test\" \"rekeyRegressionRules.test\" \"rekeyRegressionRulesRkT2.test\" \"rekeyRegressionRulesFrk1b.test\" \"partsVendors.test\" \"mitchellEstimateReader.test\" \"winAnsiText.test\" \"annotationStrings.test\" \"ro22132.contract.test\" \"rasterRedactionScope.test\" \"wrappedRowContinuation.test\" \"scrubberEvidenceWording.test\" \"rasterRedactPdf.test\" \"exportRedactionPolicy.test\" \"authorityTier.test\" \"rowShape.test\"",
++    "test": "npm run test:universality && npm run test:pdf-lib-imports && npm run test:zip-fixtures && node scripts/run-cjs-tests.cjs && npm run test:vehicle-identity && npm run test:claim-specific-reports && vitest run \"upload.zip.test\" \"ro21896Delta.contract.test\" \"ro21896CanonicalDelta.contract.test\" \"marketPreviewOwnerZip.test\" \"deltaForensicReport.test\" \"deltaForensicFindingsReport.test\" \"forensicSingle.test\" \"crossPlatformExtractionGate.test\" \"deltaReleaseGate.test\" \"test99.contract.test\" \"rekeyLedger.test\" \"rekeyVerification.test\" \"nomenclature.test\" \"emsReader.test\" \"emsAcceptance.test\" \"rekeyRegressionRules.test\" \"rekeyRegressionRulesRkT2.test\" \"rekeyRegressionRulesFrk1b.test\" \"partsVendors.test\" \"mitchellEstimateReader.test\" \"winAnsiText.test\" \"annotationStrings.test\" \"ro22132.contract.test\" \"rasterRedactionScope.test\" \"wrappedRowContinuation.test\" \"scrubberEvidenceWording.test\" \"rasterRedactPdf.test\" \"exportRedactionPolicy.test\" \"authorityTier.test\" \"rowShape.test\"",
+     "test:universality": "node scripts/check-universality.cjs",
+     "test:zip-fixtures": "node tests/fixtures/zip/generate-fixtures.mjs",
+     "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs",
+diff --git a/src/app/api/reports/forensic-estimate/route.ts b/src/app/api/reports/forensic-estimate/route.ts
+new file mode 100644
+index 0000000..e7752fd
+--- /dev/null
++++ b/src/app/api/reports/forensic-estimate/route.ts
+@@ -0,0 +1,197 @@
++import { NextResponse } from "next/server";
++import { UnauthorizedError, requireCurrentUser } from "@/lib/auth/require-current-user";
++import { getAnalysisReport, getLatestActiveAnalysisReport } from "@/lib/analysisReportStore";
++import { getUploadedAttachments, type StoredAttachment } from "@/lib/uploadedAttachmentStore";
++import { dataUrlToPdfBytes } from "@/lib/reports/annotatedCitationDensityEstimate";
++import { isPdfDocument } from "@/lib/reports/citationDensitySourcePdf";
++import { classifyCitationDensityAttachment } from "@/lib/reports/citationDensityDocumentClassifier";
++import { extractPdfWords, type PdfWord } from "@/lib/reports/citationDensityRowAnchors";
++import {
++  FORENSIC_SINGLE_REPORT_FILENAME,
++  planReports,
++  renderForensicSingleReportPdf,
++  runForensicSingle,
++} from "@/lib/reports/forensicSingle";
++import { buildNormalizedEstimate } from "@/lib/reports/forensicSingle/fromEstimateText";
++
++/**
++ * Forensic Estimate Review — the single-estimate report.
++ *
++ * Product rule (Sep 2026): one estimate on file → this report; two or more →
++ * the two-estimate Forensic Estimate Analysis + Citation Density annotation
++ * (existing routes, unchanged). This route is the FORENSIC_SINGLE document of
++ * `planReports()`. It never runs the delta release gate — there is no
++ * comparison to gate — and it never produces a comparison: when the case
++ * carries more than one estimate and the caller did not name one, it says so
++ * (409) and the client falls back to the two-estimate flow.
++ */
++export const runtime = "nodejs";
++export const dynamic = "force-dynamic";
++export const maxDuration = 300;
++
++type RequestBody = {
++  caseId?: unknown;
++  sourceDocumentId?: unknown;
++  selectedSourceDocumentId?: unknown;
++  redactSensitive?: unknown;
++  audience?: unknown;
++};
++
++const NO_ACTIVE_CASE_ERROR = "No active review was found. Open the case or run analysis before requesting a Forensic Estimate Review.";
++const NO_ESTIMATE_ERROR = "No estimate document was found on this case.";
++const NO_ESTIMATE_USER_MESSAGE =
++  "Upload the estimate (CCC ONE, Mitchell or Audatex PDF) to this case and run analysis, then generate the Forensic Estimate Review.";
++
++export async function POST(request: Request) {
++  try {
++    const { user } = await requireCurrentUser();
++    const body = (await request.json().catch(() => ({}))) as RequestBody;
++    const caseId = coerceString(body.caseId);
++    const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
++    const redactSensitive = body.redactSensitive !== false;
++    const audience = body.audience === "CARRIER" || body.audience === "OWNER" ? body.audience : "INTERNAL";
++
++    const report = caseId
++      ? await getAnalysisReport(caseId, { ownerUserId: user.id })
++      : await getLatestActiveAnalysisReport({ ownerUserId: user.id });
++    if (!report) {
++      return NextResponse.json(
++        { ok: false, error: caseId ? "Case was not found." : NO_ACTIVE_CASE_ERROR, reportType: "forensic-estimate-review" },
++        { status: caseId ? 404 : 400 }
++      );
++    }
++
++    const candidateIds = uniqueStrings([...report.artifactIds, sourceDocumentId || undefined]);
++    const attachments = await getUploadedAttachments(candidateIds, { ownerUserId: user.id });
++    const estimates = attachments.filter(isEstimateDocument);
++
++    const explicit = sourceDocumentId ? estimates.find((document) => document.id === sourceDocumentId) ?? null : null;
++    if (sourceDocumentId && !explicit) {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: "The selected estimate could not be found.",
++          userMessage: estimates.length
++            ? `The selected estimate could not be found. Estimates on file: ${estimates.map((document) => document.filename).join(", ")}.`
++            : NO_ESTIMATE_USER_MESSAGE,
++          reportType: "forensic-estimate-review",
++        },
++        { status: 400 }
++      );
++    }
++
++    const plan = planReports({ estimateIds: estimates.map((document) => document.id) });
++    if (!explicit && plan.mode !== "FORENSIC_SINGLE") {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: "More than one estimate is on file; the two-estimate Forensic Estimate Analysis and Citation Density report apply.",
++          userMessage: "This case carries more than one estimate. Use the two-estimate report, or name the estimate to review.",
++          reportType: "forensic-estimate-review",
++          mode: plan.mode,
++          estimateCandidates: estimates.map((document) => ({ id: document.id, filename: document.filename })),
++        },
++        { status: 409 }
++      );
++    }
++    const source = explicit ?? estimates[0] ?? null;
++    if (!source) {
++      return NextResponse.json(
++        { ok: false, error: NO_ESTIMATE_ERROR, userMessage: NO_ESTIMATE_USER_MESSAGE, reportType: "forensic-estimate-review" },
++        { status: 422 }
++      );
++    }
++
++    // Prefer the measured word layer (column bands measured from the page's
++    // own header row). A PDF whose text layer is unreadable, or a non-PDF
++    // estimate, reads through the flattened text instead; the response says
++    // which lane produced the line grid.
++    const warnings: string[] = [];
++    let words: PdfWord[] | null = null;
++    if (isPdfDocument(source.type, source.filename) && source.imageDataUrl) {
++      try {
++        const bytes = dataUrlToPdfBytes(source.imageDataUrl);
++        if (bytes) words = await extractPdfWords(bytes);
++      } catch (error) {
++        warnings.push(
++          `The PDF word layer could not be read (${error instanceof Error ? error.message : "unknown error"}); the text layer was used instead.`
++        );
++      }
++    }
++
++    const read = buildNormalizedEstimate({ text: source.text ?? "", words, fileName: source.filename });
++    warnings.push(...read.warnings);
++    if (read.estimate.lines.length === 0) {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: "The estimate's line items could not be read.",
++          userMessage:
++            "No line items could be read from the estimate. A scanned or image-only PDF needs a text layer before it can be reviewed; re-export the estimate from the estimating system and upload it again.",
++          reportType: "forensic-estimate-review",
++          lane: read.lane,
++          warnings,
++        },
++        { status: 422 }
++      );
++    }
++
++    const forensic = runForensicSingle(read.estimate);
++    const rendered = await renderForensicSingleReportPdf(forensic, {
++      audience,
++      redactSensitive,
++      sourceFileName: source.filename,
++    });
++
++    return NextResponse.json({
++      ok: true,
++      reportType: "forensic-estimate-review",
++      mode: plan.mode,
++      filename: FORENSIC_SINGLE_REPORT_FILENAME,
++      pdfBase64: Buffer.from(rendered.bytes).toString("base64"),
++      pageCount: rendered.pageCount,
++      selectedSourceDocumentId: source.id,
++      selectedSourceLabel: source.filename,
++      lane: read.lane,
++      warnings,
++      summary: {
++        headline: forensic.verdict.headline,
++        recommendation: forensic.verdict.recommendation,
++        holdRelease: forensic.verdict.holdRelease,
++        unexplained: forensic.reconciliation.unexplained,
++        findingCount: forensic.findings.length,
++        criticalOrHighCount: forensic.findings.filter((f) => f.severity === "CRITICAL" || f.severity === "HIGH").length,
++        quantifiedLow: forensic.exposure.quantifiedLow,
++        quantifiedHigh: forensic.exposure.quantifiedHigh,
++        findings: forensic.findings.map((f) => ({ id: f.id, ruleId: f.ruleId, severity: f.severity, title: f.title, lineRefs: f.lineRefs })),
++      },
++    });
++  } catch (error) {
++    if (error instanceof UnauthorizedError) {
++      return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
++    }
++    console.error("[forensic_estimate_review_failed]", error);
++    return NextResponse.json(
++      {
++        ok: false,
++        error: error instanceof Error ? error.message : "Forensic Estimate Review failed.",
++        reportType: "forensic-estimate-review",
++      },
++      { status: 500 }
++    );
++  }
++}
++
++/** An estimate-like document with readable text — PDF or otherwise. */
++function isEstimateDocument(attachment: StoredAttachment): boolean {
++  if (!attachment.text?.trim()) return false;
++  return classifyCitationDensityAttachment(attachment).isEstimateLike;
++}
++
++function coerceString(value: unknown): string {
++  return typeof value === "string" ? value.trim() : "";
++}
++
++function uniqueStrings(values: Array<string | undefined>): string[] {
++  return [...new Set(values.filter((value): value is string => Boolean(value)))];
++}
+diff --git a/src/app/api/reports/send/route.ts b/src/app/api/reports/send/route.ts
+index 907f899..abcf5ce 100644
+--- a/src/app/api/reports/send/route.ts
++++ b/src/app/api/reports/send/route.ts
+@@ -10,6 +10,7 @@ export type ReportKind =
+   | "customer_report"
+   | "repair_intelligence"
+   | "estimate_scrubber"
++  | "forensic_estimate_review"
+   | "oem_citation_density"
+   | "policy_rights_review";
+ 
+@@ -37,6 +38,7 @@ const REPORT_TYPES: ReportKind[] = [
+   "customer_report",
+   "repair_intelligence",
+   "estimate_scrubber",
++  "forensic_estimate_review",
+   "oem_citation_density",
+   "policy_rights_review",
+ ];
+@@ -78,6 +80,12 @@ export async function POST(request: Request) {
+       { status: 400 }
+     );
+   }
++  if (reportType === "forensic_estimate_review" && !/^forensic-estimate-review\.pdf$/i.test(filename)) {
++    return NextResponse.json(
++      { error: "Forensic Estimate Review email requires the Forensic Estimate Review PDF artifact." },
++      { status: 400 }
++    );
++  }
+   if (reportType === "oem_citation_density" && !/^oem-citation-density-report\.pdf$/i.test(filename)) {
+     return NextResponse.json(
+       { error: "OEM Citation Density Report email requires the annotated OEM Citation Density Report PDF artifact." },
+@@ -238,6 +246,8 @@ function safeReportLabel(reportType: ReportKind): string {
+       return "Repair Intelligence Report";
+     case "estimate_scrubber":
+       return "Delta Citation Density Report";
++    case "forensic_estimate_review":
++      return "Forensic Estimate Review";
+     case "oem_citation_density":
+       return "OEM Citation Density Report";
+     case "policy_rights_review":
+diff --git a/src/components/ChatbotPage.tsx b/src/components/ChatbotPage.tsx
+index a756b48..8f1b573 100644
+--- a/src/components/ChatbotPage.tsx
++++ b/src/components/ChatbotPage.tsx
+@@ -77,6 +77,7 @@ import {
+   buildReviewCompletenessMessage,
+ } from "@/lib/reviewCompleteness";
+ import { buildReportApplicability } from "@/lib/reports/applicability";
++import { planReports } from "@/lib/reports/forensicSingle/reportPlan";
+ import { selectAcademyServiceCta, type AcademyServiceCta } from "@/lib/academy/serviceCta";
+ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
+ import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+@@ -143,6 +144,7 @@ export type ReportKind =
+   | "customer_report"
+   | "repair_intelligence"
+   | "estimate_scrubber"
++  | "forensic_estimate_review"
+   | "estimator_change_request_list"
+   | "policy_rights_review"
+   | "oem_citation_density"
+@@ -2388,6 +2390,20 @@ function RailContent({
+   const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
+     (doc) => doc.kind === "estimate"
+   ).length;
++  // Report-mode routing (Sep 2026): one estimate on file → Forensic Estimate
++  // Review only; two → the two-estimate Forensic Analysis + Citation Density.
++  // Client-side candidates only exist for files uploaded this session, so the
++  // analysis's own reviewed-estimate count stands in on a restored case. The
++  // server re-derives the plan from the stored attachments and answers 409
++  // when the client guessed single but the case carries a pair.
++  const reportPlan = useMemo(() => {
++    const ids =
++      citationDensityEstimateCandidates.length >= reviewedEstimateCount
++        ? citationDensityEstimateCandidates.map((candidate) => candidate.documentId)
++        : Array.from({ length: reviewedEstimateCount }, (_, index) => `reviewed-estimate-${index + 1}`);
++    return planReports({ estimateIds: ids });
++  }, [citationDensityEstimateCandidates, reviewedEstimateCount]);
++  const forensicSingleMode = reportPlan.mode === "FORENSIC_SINGLE";
+   const serviceIntentText = [
+     caseIntent,
+     primaryAnalysisContent,
+@@ -2547,11 +2563,11 @@ function RailContent({
+       setSnapshotStatus("Snapshot could not be generated from the current report.");
+       return;
+     }
+-    if ((reportType === "estimate_scrubber" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
++    if ((reportType === "estimate_scrubber" || reportType === "forensic_estimate_review" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
+       setReportSendStatus(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
+       return;
+     }
+-    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "oem_citation_density" && !canRenderExports) {
++    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "forensic_estimate_review" && reportType !== "oem_citation_density" && !canRenderExports) {
+       setReportSendStatus("Report is not ready to send yet.");
+       return;
+     }
+@@ -2682,8 +2698,16 @@ function RailContent({
+   }
+ 
+   async function downloadReportDocument(reportType: ReportKind) {
+-    if (reportType === "estimate_scrubber") {
++    if (reportType === "estimate_scrubber" || reportType === "forensic_estimate_review") {
+       try {
++        if (forensicSingleMode) {
++          const forensicResult = await generateForensicEstimateReview();
++          if (forensicResult) {
++            downloadBlob(forensicResult.blob, forensicResult.filename);
++            setReportSendStatus(buildForensicEstimateReviewStatus(forensicResult));
++            return;
++          }
++        }
+         const exportResult = await generateAnnotatedCitationDensityEstimate();
+         downloadBlob(exportResult.blob, exportResult.filename);
+         await downloadCitationDensityFindingsReport(exportResult);
+@@ -2773,6 +2797,69 @@ function RailContent({
+     });
+   }
+ 
++  type ForensicEstimateReviewResult = {
++    blob: Blob;
++    filename: string;
++    pageCount: number;
++    headline: string;
++    recommendation: string;
++    holdRelease: boolean;
++    findingCount: number;
++    warnings: string[];
++  };
++
++  /**
++   * Single-estimate Forensic Estimate Review. Returns null when the server
++   * finds a second estimate on the case (409) — the caller then continues
++   * with the two-estimate Citation Density flow, which is the right report
++   * for a pair.
++   */
++  async function generateForensicEstimateReview(): Promise<ForensicEstimateReviewResult | null> {
++    if (!analysisReportId) {
++      throw new Error("The Forensic Estimate Review needs an active case.");
++    }
++    setReportSendStatus("Generating Forensic Estimate Review...");
++    const response = await fetch("/api/reports/forensic-estimate", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      credentials: "same-origin",
++      body: JSON.stringify({
++        caseId: analysisReportId,
++        selectedSourceDocumentId: citationDensitySelectedSourceDocumentId || undefined,
++        redactSensitive: true,
++      }),
++    });
++    const data = (await response.json().catch(() => null)) as {
++      ok?: boolean;
++      mode?: string;
++      pdfBase64?: unknown;
++      filename?: unknown;
++      pageCount?: unknown;
++      warnings?: unknown;
++      summary?: { headline?: unknown; recommendation?: unknown; holdRelease?: unknown; findingCount?: unknown };
++      error?: string;
++      userMessage?: string;
++    } | null;
++    if (response.status === 409 && data?.mode === "FORENSIC_WITH_CITATION_DENSITY") {
++      return null;
++    }
++    if (!response.ok || typeof data?.pdfBase64 !== "string") {
++      throw new Error(formatAnnotatedExportError(data, "Forensic Estimate Review failed."));
++    }
++    return {
++      blob: pdfBase64ToBlob(data.pdfBase64),
++      filename: typeof data.filename === "string" ? data.filename : getDefaultReportFilename("forensic_estimate_review"),
++      pageCount: typeof data.pageCount === "number" ? data.pageCount : 0,
++      headline: typeof data.summary?.headline === "string" ? data.summary.headline : "",
++      recommendation: typeof data.summary?.recommendation === "string" ? data.summary.recommendation : "",
++      holdRelease: data.summary?.holdRelease === true,
++      findingCount: typeof data.summary?.findingCount === "number" ? data.summary.findingCount : 0,
++      warnings: Array.isArray(data.warnings)
++        ? data.warnings.filter((warning): warning is string => typeof warning === "string")
++        : [],
++    };
++  }
++
+   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
+     if (!analysisReportId) {
+       throw new Error("Citation Density annotated export needs an active case.");
+@@ -3054,8 +3141,58 @@ function RailContent({
+     setCustomerReportError(null);
+ 
+     try {
+-      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "oem_citation_density") {
+-        const reportTypeForRegenerate = activeReportToSend;
++      if (activeReportToSend === "forensic_estimate_review") {
++        const forensicResult = await generateForensicEstimateReview();
++        if (forensicResult) {
++          const pdfBase64 = await blobToBase64(forensicResult.blob);
++          const response = await fetch("/api/reports/send", {
++            method: "POST",
++            headers: { "Content-Type": "application/json" },
++            credentials: "same-origin",
++            body: JSON.stringify({
++              reportType: "forensic_estimate_review",
++              destinationType: reportSendTarget,
++              recipientEmail: reportRecipientEmail,
++              subject: reportSubject,
++              message: reportMessage,
++              pdfBase64,
++              filename: forensicResult.filename,
++              metadata: {
++                caseId: analysisReportId ?? undefined,
++                vehicle: vehicleIdentity ?? undefined,
++                vin: vehicleVin ?? undefined,
++                customerEmail: undefined,
++              },
++            }),
++          });
++          const result = (await response.json().catch(() => null)) as {
++            deliveryMode?: "email" | "manual";
++            message?: string;
++            error?: string;
++          } | null;
++          if (!response.ok) {
++            throw new Error(result?.error || "Forensic Estimate Review email failed.");
++          }
++          if (result?.deliveryMode === "manual") {
++            setReportSendStatus(result.message || "Email provider is not configured. Download the PDF and send manually.");
++          } else {
++            setReportSent(true);
++            setReportSendStatus(buildForensicEstimateReviewStatus(forensicResult, "Sent successfully."));
++          }
++          emitSafeCrmEventFromClient({
++            event: "report_sent",
++            plan,
++            exportType: "forensic_estimate_review",
++            destinationType: reportSendTarget,
++          });
++          if (analysisReportId) {
++            void fetchReportSendHistory();
++          }
++          return;
++        }
++      }
++      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "forensic_estimate_review" || activeReportToSend === "oem_citation_density") {
++        const reportTypeForRegenerate: ReportKind = activeReportToSend === "forensic_estimate_review" ? "estimate_scrubber" : activeReportToSend;
+         const exportResult = activeReportToSend === "oem_citation_density"
+           ? await generateOemCitationDensityReport()
+           : await generateAnnotatedCitationDensityEstimate();
+@@ -3072,7 +3209,7 @@ function RailContent({
+           headers: { "Content-Type": "application/json" },
+           credentials: "same-origin",
+           body: JSON.stringify({
+-            reportType: activeReportToSend,
++            reportType: reportTypeForRegenerate,
+             destinationType: reportSendTarget,
+             recipientEmail: reportRecipientEmail,
+             subject: reportSubject,
+@@ -3881,7 +4018,7 @@ function RailContent({
+               send={getLastSendFor("snapshot")}
+               loading={reportSendHistoryLoading}
+             />
+-            {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
++            {(canUseEstimateScrubberExport || canUsePolicyRightsReviewExport) && !forensicSingleMode ? (
+               <CitationDensityTargetSelector
+                 value={citationDensityTargetEstimate}
+                 onChange={onCitationDensityTargetEstimateChange}
+@@ -3895,10 +4032,12 @@ function RailContent({
+                 <div>
+                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
+-                    Citation Density Report
++                    {reportPlan.card.title}
+                   </div>
+                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+-                    Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations.
++                    {forensicSingleMode
++                      ? reportPlan.card.description
++                      : "Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations."}
+                   </div>
+                 </div>
+                 <div className="grid gap-2 sm:grid-cols-2">
+@@ -3909,26 +4048,26 @@ function RailContent({
+                       emitSafeCrmEventFromClient({
+                         event: "report_generated",
+                         plan,
+-                        exportType: "estimate_scrubber",
++                        exportType: forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber",
+                       });
+                     }}
+                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                     data-tour="download-button"
+                   >
+-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Citation Density Report</span>
++                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {forensicSingleMode ? reportPlan.card.downloadLabel : "Download Citation Density Report"}</span>
+                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                   </button>
+                   <button
+                     type="button"
+-                    onClick={() => openReportSend("estimate_scrubber", "carrier")}
++                    onClick={() => openReportSend(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber", "carrier")}
+                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
+                   >
+-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Citation Density Report</span>
++                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> {forensicSingleMode ? "Email Forensic Report" : "Email Citation Density Report"}</span>
+                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                   </button>
+                 </div>
+                 <ReportSendStatusLine
+-                  send={getLastSendFor("estimate_scrubber")}
++                  send={getLastSendFor(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber")}
+                   loading={reportSendHistoryLoading}
+                 />
+               </div>
+@@ -4055,7 +4194,7 @@ function RailContent({
+ 
+       {variant === "reports-tab" && (canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
+         <div className="flex flex-col gap-3">
+-          {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
++          {(canUseEstimateScrubberExport || canUsePolicyRightsReviewExport) && !forensicSingleMode ? (
+             <div className="rounded-2xl border border-border bg-card p-4">
+               <CitationDensityTargetSelector
+                 value={citationDensityTargetEstimate}
+@@ -4089,8 +4228,8 @@ function RailContent({
+               id="report-card-delta"
+               icon={FileDiff}
+               tone="violet"
+-              title="Citation Density Report"
+-              description="Two documents. The estimate PDF annotated in place, every mark anchored to the line it came from; and the Forensic Estimate Analysis — a line-level reconciliation that balances to each document’s own totals, quantifies the gap category by category, and separates fact from open verification item."
++              title={reportPlan.card.title}
++              description={reportPlan.card.description}
+               locked={!canUseEstimateScrubberExport}
+               onUnlock={onCustomerReportLocked}
+               actions={
+@@ -4099,20 +4238,31 @@ function RailContent({
+                     type="button"
+                     onClick={() => {
+                       void downloadReportDocument("estimate_scrubber");
+-                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "estimate_scrubber" });
++                      emitSafeCrmEventFromClient({
++                        event: "report_generated",
++                        plan,
++                        exportType: forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber",
++                      });
+                     }}
+                     className={REPORT_TAB_DOWNLOAD_BTN}
+                     data-tour="download-button"
+                   >
+-                    <Download size={14} aria-hidden /> Download PDF
++                    <Download size={14} aria-hidden /> {reportPlan.card.downloadLabel}
+                   </button>
+-                  <button type="button" onClick={() => openReportSend("estimate_scrubber", "carrier")} className={REPORT_TAB_EMAIL_BTN}>
++                  <button
++                    type="button"
++                    onClick={() => openReportSend(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber", "carrier")}
++                    className={REPORT_TAB_EMAIL_BTN}
++                  >
+                     <Mail size={14} aria-hidden /> Email report
+                   </button>
+                 </div>
+               }
+               status={
+-                <ReportSendStatusLine send={getLastSendFor("estimate_scrubber")} loading={reportSendHistoryLoading} />
++                <ReportSendStatusLine
++                  send={getLastSendFor(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber")}
++                  loading={reportSendHistoryLoading}
++                />
+               }
+             />
+             <ReportTabCard
+@@ -4782,6 +4932,8 @@ function getDefaultReportSubject(reportType: ReportKind): string {
+       return "[Collision IQ] Repair Intelligence Report";
+     case "estimate_scrubber":
+       return "[Collision IQ] Delta Citation Density Report";
++    case "forensic_estimate_review":
++      return "[Collision IQ] Forensic Estimate Review";
+     case "estimator_change_request_list":
+       return "[Collision IQ] Estimate Delta / Change Requests";
+     case "oem_citation_density":
+@@ -4803,6 +4955,8 @@ function getDefaultReportFilename(reportType: ReportKind): string {
+       return "repair-intelligence-report.pdf";
+     case "estimate_scrubber":
+       return "delta-citation-density-report.pdf";
++    case "forensic_estimate_review":
++      return "forensic-estimate-review.pdf";
+     case "estimator_change_request_list":
+       return "estimate-delta-change-requests.pdf";
+     case "oem_citation_density":
+@@ -4837,6 +4991,8 @@ function getReportWorkspaceTitle(reportType: ReportKind, document: CarrierReport
+       return "Policy & Rights Review";
+     case "estimate_scrubber":
+       return "Delta Citation Density Report";
++    case "forensic_estimate_review":
++      return "Forensic Estimate Review";
+     case "oem_citation_density":
+       return "OEM Citation Density Report";
+   }
+@@ -5802,6 +5958,19 @@ function formatDebugCounts(value: unknown) {
+   return fields.length ? `Diagnostics: ${fields.join(", ")}.` : "";
+ }
+ 
++function buildForensicEstimateReviewStatus(
++  result: { headline: string; recommendation: string; findingCount: number; pageCount: number; warnings: string[] },
++  prefix?: string
++): string {
++  const parts = [
++    prefix,
++    `Forensic Estimate Review ready (${result.pageCount} page${result.pageCount === 1 ? "" : "s"}, ${result.findingCount} finding${result.findingCount === 1 ? "" : "s"}).`,
++    result.headline,
++    result.warnings.length ? `Note: ${result.warnings.join(" ")}` : undefined,
++  ].filter(Boolean);
++  return parts.join(" ");
++}
++
+ function buildAnnotatedCitationDensityStatus(
+   result: Pick<AnnotatedEstimateExportResult, "annotatedFindingCount" | "unresolvedAnchorCount" | "warnings">,
+   prefix = "Annotated estimate PDF is ready."
+diff --git a/src/lib/crm/events.ts b/src/lib/crm/events.ts
+index 33f05f0..755425e 100644
+--- a/src/lib/crm/events.ts
++++ b/src/lib/crm/events.ts
+@@ -27,6 +27,7 @@ export type SafeCrmEventPayload = {
+     | "customer_report"
+     | "repair_intelligence"
+     | "estimate_scrubber"
++    | "forensic_estimate_review"
+     | "oem_citation_density"
+     | "estimator_change_request_list"
+     | "policy_rights_review"
+diff --git a/src/lib/reports/__tests__/forensicSingle.test.ts b/src/lib/reports/__tests__/forensicSingle.test.ts
+new file mode 100644
+index 0000000..8886718
+--- /dev/null
++++ b/src/lib/reports/__tests__/forensicSingle.test.ts
+@@ -0,0 +1,181 @@
++import { describe, expect, it } from "vitest";
++import { readFileSync } from "node:fs";
++import path from "node:path";
++import { runForensicSingle } from "@/lib/reports/forensicSingle/engine";
++import { planReports } from "@/lib/reports/forensicSingle/reportPlan";
++import { buildNormalizedEstimate, buildNormalizedEstimateFromText } from "@/lib/reports/forensicSingle/fromEstimateText";
++import { renderForensicSingleReportPdf } from "@/lib/reports/forensicSingle/renderer";
++import type { NormalizedEstimate } from "@/lib/reports/forensicSingle/types";
++import type { PdfWord } from "@/lib/reports/citationDensityRowAnchors";
++
++const fixturePath = (...parts: string[]) => path.join(process.cwd(), ...parts);
++
++/** The hand-normalized single-estimate fixture the engine was proven against. */
++const loadFixture = (): NormalizedEstimate =>
++  JSON.parse(
++    readFileSync(fixturePath("src/lib/reports/forensicSingle/__tests__/fixture-single-estimate.json"), "utf8")
++  ) as NormalizedEstimate;
++
++/** A real CCC ONE print: flattened text plus its measured word layer. */
++const loadCccSample = () => {
++  const text = readFileSync(fixturePath("tests/fixtures/ccc-1259209948-text.txt"), "utf8");
++  const raw = JSON.parse(readFileSync(fixturePath("tests/fixtures/ccc-1259209948-words.json"), "utf8")) as Array<{
++    p: number;
++    x: number;
++    y: number;
++    w: number;
++    t: string;
++  }>;
++  const words: PdfWord[] = raw.map((word) => ({
++    pageNumber: word.p,
++    text: word.t,
++    normalizedText: word.t,
++    x: word.x,
++    y: word.y,
++    width: word.w,
++    height: 8,
++    pageWidth: 612,
++    pageHeight: 792,
++  }));
++  return { text, words };
++};
++
++describe("forensic-single engine (hand-normalized fixture)", () => {
++  it("reconciles to $0.00 unexplained and books the ambiguous misc line as body labor", () => {
++    const report = runForensicSingle(loadFixture());
++    expect(report.reconciliation.unexplained).toBe(0);
++    expect(report.reconciliation.notes.some((note) => /Denib/.test(note))).toBe(true);
++    expect(report.reconciliation.clearCoatCheck?.every((line) => line.includes("correct"))).toBe(true);
++  });
++
++  it("fires the rule set of the hand-built review and nothing else", () => {
++    const report = runForensicSingle(loadFixture());
++    const ids = report.findings.map((finding) => finding.ruleId).sort();
++    expect(ids).toEqual(
++      ["DB-001", "GR-001", "HD-001", "HY-001", "MC-001", "NI-001", "RF-001", "RR-001", "RS-001", "ST-001", "TX-001", "UF-001"].sort()
++    );
++  });
++
++  it("ranks the repair-vs-replace finding first and holds release", () => {
++    const report = runForensicSingle(loadFixture());
++    expect(report.findings[0].ruleId).toBe("RR-001");
++    expect(report.findings[0].severity).toBe("CRITICAL");
++    expect(report.verdict.holdRelease).toBe(true);
++  });
++
++  it("quantifies exposure exactly as the hand-built review did", () => {
++    const report = runForensicSingle(loadFixture());
++    const by = Object.fromEntries(report.findings.map((finding) => [finding.ruleId, finding.exposure.quantified]));
++    expect(by["RS-001"]).toBe(33.0);
++    expect(by["ST-001"]).toBe(99.0);
++    expect(by["GR-001"]).toBe(110.0);
++    expect(by["NI-001"]).toBe(142.5);
++    expect(by["TX-001"]).toBe(-122.7);
++    expect(report.exposure.quantifiedLow).toBe(261.8);
++    expect(report.exposure.quantifiedHigh).toBe(290.6);
++  });
++
++  it("tax rule: goods-only basis for a private owner in a labor-exempt state, silent elsewhere", () => {
++    const privatePa = loadFixture();
++    privatePa.header.owner = { name: "John Smith", state: "PA" };
++    const tx = runForensicSingle(privatePa).findings.find((finding) => finding.ruleId === "TX-001");
++    expect(tx?.exposure.quantified).toBe(-93.9);
++
++    const privateNj = loadFixture();
++    privateNj.header.owner = { name: "John Smith", state: "NJ" };
++    expect(runForensicSingle(privateNj).findings.some((finding) => finding.ruleId === "TX-001")).toBe(false);
++  });
++
++  it("puts a reconciliation failure first when printed totals do not rebuild", () => {
++    const broken = loadFixture();
++    broken.totals.grandTotal = 2200.0;
++    const report = runForensicSingle(broken);
++    expect(report.findings[0].ruleId).toBe("RC-001");
++    expect(report.verdict.holdRelease).toBe(true);
++  });
++});
++
++describe("forensic-single adapter (real CCC print)", () => {
++  it("measured-word lane closes the printed totals to $0.00 and reads header fields", () => {
++    const { text, words } = loadCccSample();
++    const read = buildNormalizedEstimate({ text, words, fileName: "estimate.pdf" });
++    expect(read.lane).toBe("pdf");
++    const est = read.estimate;
++    expect(est.header.system).toBe("CCC");
++    expect(est.header.documentTitle).toBe("Preliminary Estimate");
++    expect(est.header.workfileId).toBe("4b53232a");
++    expect(est.header.vehicle.year).toBe(2021);
++    expect(est.header.vehicle.make).toBe("Lexus");
++    expect(est.header.owner?.state).toBe("PA");
++    expect(est.totals.labor.find((l) => l.category === "BODY")?.hours).toBe(26.8);
++    expect(est.totals.labor.find((l) => l.category === "REFINISH")?.hours).toBe(17.3);
++    expect(est.totals.salesTax).toEqual({ basis: 11451.09, ratePct: 6, amount: 687.07 });
++    expect(est.totals.grandTotal).toBe(12138.16);
++    // Taxed-charge markers come from the word to the right of the price cell,
++    // including the glued "T m" form.
++    expect(est.lines.find((l) => l.lineNo === 98)?.taxed).toBe(true);
++    expect(est.lines.find((l) => l.lineNo === 32)?.taxed).toBe(true);
++    expect(est.lines.find((l) => l.lineNo === 10)?.taxed).toBe(false);
++    // Paint-column hours stay in the paint column.
++    expect(est.lines.find((l) => l.lineNo === 11)?.paintHrs).toBe(1.2);
++    expect(est.lines.find((l) => l.lineNo === 11)?.laborHrs).toBeNull();
++
++    const report = runForensicSingle(est);
++    expect(report.reconciliation.unexplained).toBe(0);
++    expect(report.findings.some((finding) => finding.ruleId === "RC-001")).toBe(false);
++  });
++
++  it("text lane still reads header and totals when no word layer exists", () => {
++    const { text } = loadCccSample();
++    const est = buildNormalizedEstimateFromText(text, { fileName: "estimate.pdf" });
++    expect(est.header.system).toBe("CCC");
++    expect(est.totals.grandTotal).toBe(12138.16);
++    expect(est.lines.length).toBeGreaterThan(50);
++    expect(est.lines.find((l) => l.lineNo === 108)?.taxed).toBe(true);
++  });
++
++  it("falls back to the text lane when the word layer yields no rows", () => {
++    const { text } = loadCccSample();
++    const read = buildNormalizedEstimate({ text, words: [{ pageNumber: 1, text: "x", normalizedText: "x", x: 0, y: 0, width: 1, height: 8, pageWidth: 612, pageHeight: 792 }] });
++    expect(read.lane).toBe("text");
++    expect(read.warnings.length).toBeGreaterThan(0);
++  });
++});
++
++describe("forensic-single renderer", () => {
++  it("renders a multi-page PDF from the fixture report", async () => {
++    const report = runForensicSingle(loadFixture());
++    const pdf = await renderForensicSingleReportPdf(report, { sourceFileName: "estimate.pdf" });
++    expect(pdf.pageCount).toBeGreaterThanOrEqual(2);
++    expect(pdf.bytes.length).toBeGreaterThan(5000);
++    expect(String.fromCharCode(...pdf.bytes.slice(0, 5))).toBe("%PDF-");
++  });
++});
++
++describe("report plan routing", () => {
++  it("one estimate → forensic single; two → forensic delta + citation density; none → disabled single", () => {
++    const one = planReports({ estimateIds: ["a"] });
++    expect(one.mode).toBe("FORENSIC_SINGLE");
++    expect(one.documents.map((d) => d.kind)).toEqual(["FORENSIC_SINGLE"]);
++    expect(one.card.downloadLabel).toBe("Download Forensic Report");
++
++    const two = planReports({ estimateIds: ["a", "b"] });
++    expect(two.mode).toBe("FORENSIC_WITH_CITATION_DENSITY");
++    expect(two.documents.map((d) => d.kind)).toEqual(["FORENSIC_DELTA", "CITATION_DENSITY"]);
++    expect(two.card.title).toBe("Forensic Report w/ Citation Density Report");
++
++    const none = planReports({ estimateIds: [] });
++    expect(none.mode).toBe("FORENSIC_SINGLE");
++    expect(none.documents).toEqual([]);
++    expect(none.card.disabledReason).toBeTruthy();
++  });
++});
++
++describe("universality", () => {
++  it("rule catalog carries no carrier, shop or claim literals", () => {
++    const source = readFileSync(fixturePath("src/lib/reports/forensicSingle/rules/catalog.ts"), "utf8");
++    for (const literal of ["Sedgwick", "Bensalem", "USAA", "Allstate", "GEICO", "Conestoga", "4A260939"]) {
++      expect(source.includes(literal)).toBe(false);
++    }
++  });
++});
+diff --git a/src/lib/reports/annotatedCitationDensityEstimate.ts b/src/lib/reports/annotatedCitationDensityEstimate.ts
+index 695b2bd..77af9c3 100644
+--- a/src/lib/reports/annotatedCitationDensityEstimate.ts
++++ b/src/lib/reports/annotatedCitationDensityEstimate.ts
+@@ -550,7 +550,7 @@ function engineResultToLineItemDeltas(params: {
+  *  double every glyph in the WORD layer too ("$$77,,117744..8811"), and no
+  *  money or label pattern in the engine matches the doubled form. Identity on
+  *  plain text. */
+-function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
++export function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
+   const byPage = new Map<number, DeltaEngineWord[]>();
+   for (const word of words) {
+     const list = byPage.get(word.pageNumber) ?? [];
+diff --git a/src/lib/reports/forensicReportRenderer.ts b/src/lib/reports/forensicReportRenderer.ts
+index 458a9b3..592cda2 100644
+--- a/src/lib/reports/forensicReportRenderer.ts
++++ b/src/lib/reports/forensicReportRenderer.ts
+@@ -13,7 +13,7 @@
+  * layout and wording, never arithmetic.
+  */
+ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+-import { withWinAnsiPage } from "@/lib/pdf/winAnsiText";
++import { toWinAnsiPdfText, withWinAnsiPage } from "@/lib/pdf/winAnsiText";
+ import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
+ import { maskVinForExport, redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+ import RULES from "./data/deltaRules.json";
+@@ -49,7 +49,12 @@ const hours = (value: number | null | undefined): string =>
+ 
+ type Cursor = { page: PDFPage; y: number; pageNumber: number };
+ 
+-class Writer {
++/**
++ * Shared page writer. Exported so sibling report renderers (the single-
++ * estimate Forensic Estimate Review) lay out on the same frame, fonts and
++ * footer without duplicating the pagination logic.
++ */
++export class Writer {
+   private readonly doc: PDFDocument;
+   readonly font: PDFFont;
+   readonly bold: PDFFont;
+@@ -96,9 +101,13 @@ class Writer {
+     return PAGE_WIDTH - MARGIN * 2;
+   }
+ 
+-  /** Greedy wrap on word boundaries; never splits a word mid-token. */
++  /** Greedy wrap on word boundaries; never splits a word mid-token.
++   * Text is folded to WinAnsi BEFORE measuring: the page guard only wraps
++   * drawText, and a standard font throws on width measurement of a glyph it
++   * cannot encode ("→", "≥") — a finding sentence carrying one would abort
++   * the whole render before a page was drawn. */
+   wrap(text: string, size: number, font: PDFFont, maxWidth: number): string[] {
+-    const words = text.split(/\s+/).filter(Boolean);
++    const words = toWinAnsiPdfText(text).split(/\s+/).filter(Boolean);
+     const lines: string[] = [];
+     let line = "";
+     for (const word of words) {
+diff --git a/src/lib/reports/forensicSingle/__tests__/fixture-single-estimate.json b/src/lib/reports/forensicSingle/__tests__/fixture-single-estimate.json
+new file mode 100644
+index 0000000..508838c
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/__tests__/fixture-single-estimate.json
+@@ -0,0 +1,77 @@
++{
++  "header": {
++    "system": "CCC",
++    "documentTitle": "Estimate of Record",
++    "claimNo": "4A260939TL80001",
++    "workfileId": "c142d4eb",
++    "policyNo": "",
++    "typeOfLoss": "",
++    "dateOfLoss": "2026-08-31",
++    "printedAt": "2026-09-11T04:43:03",
++    "daysToRepair": 0,
++    "pointOfImpact": { "code": "03", "label": "Right T-Bone (Right Side)" },
++    "writer": { "name": "Vincent Menichetti", "license": "739698", "company": "Sedgwick Appraisals" },
++    "adjuster": { "name": "Freeman, Chelsey", "phone": "(888) 863-0001" },
++    "owner": { "name": "Bensalem Township", "address": "2400 Byberry Rd, Bensalem, PA 19020", "state": "PA" },
++    "repairFacility": null,
++    "vehicle": {
++      "year": 2025, "make": "Ford", "model": "Police Interceptor Utility", "trim": "AWD (Fleet) 4D UTV 6-3.3L Flex Fuel",
++      "vin": "1FM5K8AB2SGB21858", "odometer": 23388, "exteriorColor": "Black", "paintCode": null, "interiorColor": null,
++      "productionDate": "2025-01", "isFleet": true, "isPolice": true,
++      "options": ["Blind Spot Detection", "Drivers Side Air Bag", "Passenger Air Bag", "Front Side Impact Air Bags", "Head/Curtain Air Bags", "Backup Camera", "Parking Sensors", "Xenon or L.E.D. Headlamps"]
++    },
++    "priorDamageNote": "N/A",
++    "certificationText": "I, Vincent Menichetti, PA license # 739698 ... hereby certify under penalty of perjury that this estimate was personally prepared by me in accordance with the provisions set forth by the Commonwealth of Pennsylvania State Insurance Commission."
++  },
++  "lines": [
++    { "lineNo": 2,  "section": "ELECTRICAL",           "oper": "MANUAL", "desc": "Disconnect/disable power", "qty": 1, "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 4,  "section": "FRONT DOOR",           "oper": "RPR",    "desc": "RT Door shell", "price": null, "laborHrs": 8.0, "laborType": "BODY", "paintHrs": 2.4, "side": "RT" },
++    { "lineNo": 5,  "section": "FRONT DOOR",           "oper": "NOTE",   "desc": "Add for Clear Coat", "price": null, "laborHrs": null, "laborType": "REFINISH", "paintHrs": 1.0 },
++    { "lineNo": 6,  "section": "FRONT DOOR",           "oper": "MANUAL", "desc": "Add to wedl tabs & pull metal", "qty": 1, "price": null, "laborHrs": 2.0, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 7,  "section": "FRONT DOOR",           "oper": "MANUAL", "desc": "Add to remove decals", "qty": 1, "price": null, "laborHrs": 1.0, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 8,  "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Belt molding", "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 9,  "section": "FRONT DOOR",           "oper": "REPL",   "desc": "RT Lower molding black BASE, INTERCEPTOR", "partNo": "LB5Z7820878AC", "qty": 1, "price": 198.05, "laborHrs": 0.4, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 10, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Mirror outside Interceptor, w/o strobe lamps", "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 11, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Door glass FORD w/laminated", "price": null, "laborHrs": null, "laborType": "BODY", "paintHrs": null, "included": true, "side": "RT" },
++    { "lineNo": 12, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Run channel", "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 13, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Regulator module", "price": null, "laborHrs": 1.1, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 14, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Handle, outside w/INTERCEPTOR", "price": null, "laborHrs": 0.4, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 15, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT R&I trim panel", "price": null, "laborHrs": 0.5, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 16, "section": "FRONT DOOR",           "oper": "R&I",    "desc": "RT Window molding", "price": null, "laborHrs": 0.2, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 18, "section": "REAR DOOR",            "oper": "RPR",    "desc": "RT Door assy", "price": null, "laborHrs": 1.0, "laborType": "BODY", "paintHrs": 2.5, "side": "RT" },
++    { "lineNo": 19, "section": "REAR DOOR",            "oper": "NOTE",   "desc": "Overlap Major Adj. Panel", "price": null, "laborHrs": null, "laborType": "REFINISH", "paintHrs": -0.4 },
++    { "lineNo": 20, "section": "REAR DOOR",            "oper": "NOTE",   "desc": "Add for Clear Coat", "price": null, "laborHrs": null, "laborType": "REFINISH", "paintHrs": 0.4 },
++    { "lineNo": 21, "section": "REAR DOOR",            "oper": "MANUAL", "desc": "Add to remove decals", "qty": 1, "price": null, "laborHrs": 1.0, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 22, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT Belt molding", "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 23, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT Lower molding black INTERCEPTOR, BASE", "price": null, "laborHrs": 0.4, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 24, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT Wheel opng mldg", "price": null, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 25, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT Handle, outside W/INTERCEPTOR", "price": null, "laborHrs": 0.4, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 26, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT R&I trim panel", "price": null, "laborHrs": 0.4, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 27, "section": "REAR DOOR",            "oper": "R&I",    "desc": "RT Window molding w/o sunshade", "price": null, "laborHrs": 0.2, "laborType": "BODY", "paintHrs": null, "side": "RT" },
++    { "lineNo": 29, "section": "VEHICLE DIAGNOSTICS",  "oper": "RPR",    "desc": "Pre-repair scan", "price": null, "laborHrs": 0.5, "laborType": "MECH", "paintHrs": null, "notes": ["Sublet cost open to invoice"] },
++    { "lineNo": 30, "section": "VEHICLE DIAGNOSTICS",  "oper": "RPR",    "desc": "Post-repair scan", "price": null, "laborHrs": 0.5, "laborType": "MECH", "paintHrs": null, "notes": ["Sublet cost open to invoice"] },
++    { "lineNo": 32, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Car cover", "qty": 1, "price": 5.00, "laborHrs": 0.3, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 33, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Mask jambs", "qty": 1, "price": 5.00, "laborHrs": 0.5, "laborType": "BODY", "paintHrs": null, "manual": true, "taxed": true },
++    { "lineNo": 34, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Mask for primer", "qty": 1, "price": 4.00, "laborHrs": 0.2, "laborType": "BODY", "paintHrs": null, "manual": true, "taxed": true },
++    { "lineNo": 35, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Color Tint", "qty": 1, "price": null, "laborHrs": null, "laborType": "REFINISH", "paintHrs": 0.5, "manual": true },
++    { "lineNo": 36, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Corrosion protection", "qty": 1, "price": 12.00, "laborHrs": 0.2, "laborType": "BODY", "paintHrs": null, "manual": true },
++    { "lineNo": 37, "section": "MISCELLANEOUS OPERATIONS", "oper": "MANUAL", "desc": "Denib and polish", "qty": 1, "price": null, "laborHrs": null, "laborType": "REFINISH", "paintHrs": 1.0, "manual": true },
++    { "lineNo": 39, "section": "OTHER CHARGES",        "oper": "MANUAL", "desc": "E.P.C.", "qty": 1, "price": 3.00, "laborHrs": null, "laborType": "UNKNOWN", "paintHrs": null, "manual": true }
++  ],
++  "totals": {
++    "parts": 215.05,
++    "labor": [
++      { "category": "BODY", "hours": 22.0, "rate": 55.00, "cost": 1210.00 },
++      { "category": "REFINISH", "hours": 6.4, "rate": 55.00, "cost": 352.00 }
++    ],
++    "paintSupplies": { "hours": 6.4, "rate": 40.00, "cost": 256.00 },
++    "misc": 9.00,
++    "other": 3.00,
++    "subtotal": 2045.05,
++    "salesTax": { "basis": 2045.05, "ratePct": 6.0, "amount": 122.70 },
++    "grandTotal": 2167.75,
++    "deductible": 2500.00,
++    "netCost": -332.25
++  },
++  "boilerplate": "Estimate based on MOTOR CRASH ESTIMATING GUIDE ... Guide DR2MF20, CCC Data Date 09/09/2026"
++}
+diff --git a/src/lib/reports/forensicSingle/engine.ts b/src/lib/reports/forensicSingle/engine.ts
+new file mode 100644
+index 0000000..a83e175
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/engine.ts
+@@ -0,0 +1,94 @@
++import type { Finding, ForensicReport, NormalizedEstimate, Severity } from "./types";
++import { reconcile } from "./reconcile";
++import { buildContext } from "./rules/context";
++import { RULES } from "./rules/catalog";
++
++const SEV_ORDER: Record<Severity, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
++
++export interface EngineOptions {
++  /** Disable rules by id (tenant / profile config). */
++  disabledRules?: string[];
++}
++
++/**
++ * Deterministic pass. Produces a complete ForensicReport with templated
++ * prose; `narrative.ts` optionally enriches findings afterward.
++ */
++export function runForensicSingle(est: NormalizedEstimate, opts: EngineOptions = {}): ForensicReport {
++  const recon = reconcile(est);           // may normalize ambiguous column bands in place
++  const ctx = buildContext(est);
++  const disabled = new Set(opts.disabledRules ?? []);
++
++  const raw: Omit<Finding, "id">[] = [];
++  if (recon.unexplained > 0) {
++    raw.push({
++      ruleId: "RC-001", cls: "RECONCILIATION", severity: "CRITICAL",
++      title: "Printed totals do not rebuild from the line items",
++      lineRefs: [], authorities: [],
++      facts: recon.rows.filter(r => r.variance !== 0).map(r => `${r.category}: rebuilt ${r.rebuilt} vs printed ${r.printed} (variance ${r.variance}).`),
++      action: "Resolve the extraction or the estimate before relying on any finding below; a report that does not close to $0.00 is not releasable.",
++      exposure: { quantified: 0, direction: "MIXED" },
++    });
++  }
++  for (const rule of RULES) {
++    if (disabled.has(rule.id)) continue;
++    const r = rule.run(ctx);
++    if (r) raw.push(r);
++  }
++  raw.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
++  const findings: Finding[] = raw.map((r, i) => ({ id: `F-${String(i + 1).padStart(2, "0")}`, ...r }));
++
++  // Each finding contributes [min, max] of its quantified alternatives; the report range is the sum.
++  const lo = findings.reduce((s, f) => s + Math.min(f.exposure.quantified, f.exposure.quantifiedAlt ?? f.exposure.quantified), 0);
++  const hi = findings.reduce((s, f) => s + Math.max(f.exposure.quantified, f.exposure.quantifiedAlt ?? f.exposure.quantified), 0);
++  const quantifiedLow = r2(lo), quantifiedHigh = r2(hi);
++
++  const top = findings[0];
++  const holdRelease = findings.some(f => f.severity === "CRITICAL" || f.severity === "HIGH");
++  const verdict = {
++    headline: recon.unexplained === 0
++      ? `Arithmetically clean; ${findings.length} finding(s), ${findings.filter(f => f.severity === "CRITICAL" || f.severity === "HIGH").length} critical/high.`
++      : `Printed totals do not reconcile (${recon.unexplained.toFixed(2)} unexplained).`,
++    recommendation: holdRelease
++      ? `Hold release. Resolve ${top.id} (${top.title}) and work the revision checklist before the estimate leaves the file.`
++      : "Release with the low-severity corrections applied.",
++    holdRelease,
++  };
++
++  return {
++    mode: "SINGLE",
++    generatedAt: new Date().toISOString(),
++    header: est.header,
++    printedTotals: est.totals,
++    reconciliation: recon,
++    verdict,
++    findings,
++    correctlyWritten: correctlyWritten(est),
++    exposure: {
++      quantifiedLow: Math.min(quantifiedLow, quantifiedHigh),
++      quantifiedHigh: Math.max(quantifiedLow, quantifiedHigh),
++      openItems: findings.filter(f => f.exposure.open).map(f => `${f.id}: ${f.exposure.open}`),
++    },
++    checklist: findings.map((f, i) => ({ n: i + 1, action: f.action, ref: f.id })),
++    references: uniq(findings.flatMap(f => f.authorities.map(a => a.citation ? `${a.label} (${a.citation})` : a.label))),
++  };
++}
++
++/** Positive QA: operations that are present and properly formed. */
++function correctlyWritten(est: NormalizedEstimate): string[] {
++  const has = (re: RegExp) => est.lines.some(l => re.test(l.desc));
++  const out: string[] = [];
++  if (has(/disconnect|disable power/i)) out.push("Disconnect/disable power written");
++  if (has(/pre[- ]?repair scan/i) && has(/post[- ]?repair scan/i)) out.push("Pre- and post-repair scans present");
++  if (has(/corrosion/i)) out.push("Corrosion protection with material");
++  if (has(/laminated/i)) out.push("Laminated glass identified");
++  if (has(/overlap/i)) out.push("Overlap deduction applied to adjacent panel");
++  if (has(/clear coat/i)) out.push("Clear coat computed per panel");
++  if (has(/car cover|mask jambs|mask for primer|denib/i)) out.push("Customary refinish prep and finish operations present");
++  if (est.header.priorDamageNote) out.push("Prior damage noted");
++  if (est.header.writer?.license) out.push("Appraiser license on the document");
++  return out;
++}
++
++const uniq = <T,>(a: T[]) => Array.from(new Set(a));
++const r2 = (n: number) => Math.round(n * 100) / 100;
+diff --git a/src/lib/reports/forensicSingle/fromEstimateText.ts b/src/lib/reports/forensicSingle/fromEstimateText.ts
+new file mode 100644
+index 0000000..7d432d4
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/fromEstimateText.ts
+@@ -0,0 +1,485 @@
++/**
++ * Adapter: an estimate's extracted text -> NormalizedEstimate.
++ *
++ * The platform has no whole-estimate normalizer; what it has are the
++ * per-platform row and totals readers the delta pipeline already trusts
++ * (`parseEstimateRowsForPlatform`, `parseEstimateTotalsForPlatform`) and
++ * the identity reader the claim gate uses. This module composes those and
++ * adds only what the single-estimate rules need and nothing else reads:
++ * the CCC taxed-charge marker, the manual-entry marker, per-line notes,
++ * the sales-tax basis, and the header fields (point of impact, owner
++ * state, writer, days to repair, certification text).
++ *
++ * Nothing here keys on a carrier, a shop, or an RO — every pattern is a
++ * label the estimating platform itself prints.
++ */
++import { readClaimIdentity } from "../claimIdentityGate";
++import {
++  detectEstimatePlatform,
++  parseEstimateRowsForPlatform,
++  parseEstimateTotalsForPlatform,
++} from "../estimatePlatform";
++import type { EstimateDeltaRow } from "../estimateDeltaMatcher";
++import {
++  emptyRowParseDiagnostics,
++  parseEstimateRows,
++  parseTotalsFromWords,
++  type EstimateRow,
++  type Word as DeltaEngineWord,
++} from "../deltaEngine/rowCluster";
++import { pdfWordsToEnginePages } from "../annotatedCitationDensityEstimate";
++import type { PdfWord } from "../citationDensityRowAnchors";
++import { extractMarketPreviewState, selectOwnerOrInsuredZip } from "@/lib/ai/marketPreviewOwnerZip";
++import type {
++  EstimateHeader,
++  EstimateLine,
++  EstimatingSystem,
++  LaborCategoryTotal,
++  LaborType,
++  NormalizedEstimate,
++  Operation,
++  PrintedTotals,
++} from "./types";
++
++const OPER: Record<string, Operation> = {
++  repl: "REPL", replace: "REPL", rpr: "RPR", repair: "RPR", "r&i": "R&I", "r&r": "R&R",
++  refn: "REFN", refinish: "REFN", blnd: "BLND", blend: "BLND", subl: "SUBL", sublet: "SUBL",
++  algn: "ALGN", align: "ALGN", sect: "SECT", "o/h": "OH", add: "ADD",
++};
++const LABOR: Record<string, LaborType> = { b: "BODY", p: "REFINISH", m: "MECH", s: "STRUCT", f: "FRAME", e: "ELEC", g: "GLASS", d: "DIAG" };
++
++/** CCC prints "T" (taxed) / "X" (non-taxed) directly after a miscellaneous charge amount. */
++const TAXED_MARKER = /\d\.\d{2}\s*T(?![A-Za-z0-9])/;
++/** Manual entry marker prints between the line number and the operation ("101#Pre wash"). */
++const MANUAL_MARKER = /^\s*\d{1,3}\s*#/;
++const GOV = /township|borough|county|city of|commonwealth|state of|police|sheriff|school district|authority|municipal|dept\.? of|department of/i;
++
++export interface FromEstimateTextOptions {
++  fileName?: string | null;
++}
++
++export type NormalizeLane = "pdf" | "text";
++
++export interface NormalizedEstimateRead {
++  estimate: NormalizedEstimate;
++  /** Which reader produced the line grid. */
++  lane: NormalizeLane;
++  warnings: string[];
++}
++
++/**
++ * Text lane: the flattened text layer only. Column identity is inferred
++ * from token shape, so a paint-column figure on a glued producer can land
++ * in the labor column. Used when no measured word layer is available.
++ */
++export function buildNormalizedEstimateFromText(
++  rawText: string,
++  options: FromEstimateTextOptions = {}
++): NormalizedEstimate {
++  const text = (rawText ?? "").replace(/\r\n?/g, "\n");
++  const platform = detectEstimatePlatform(text);
++  const read = parseEstimateRowsForPlatform(text);
++  const notesByLine = collectNotesByLine(text, read.notes);
++  const lines = read.rows.map((row) => toEstimateLine(row, notesByLine));
++  const totals = buildPrintedTotals(text);
++  const header = buildHeader(text, platform, options.fileName ?? null);
++  return { header, lines, totals, boilerplate: collectBoilerplate(text) };
++}
++
++/**
++ * Measured-word lane: the delta engine's row parser, which types every value
++ * cell by the column bands measured from THIS page's header row (the same
++ * reader the two-estimate Forensic Estimate Analysis trusts). Falls back to
++ * the text lane when the word layer yields no rows or is a Mitchell print
++ * (welded columns, no SUBTOTALS row — the platform reader stands there).
++ */
++export function buildNormalizedEstimate(input: {
++  text: string;
++  words?: PdfWord[] | null;
++  fileName?: string | null;
++}): NormalizedEstimateRead {
++  const text = (input.text ?? "").replace(/\r\n?/g, "\n");
++  const platform = detectEstimatePlatform(text);
++  const warnings: string[] = [];
++  const fromText = () => ({
++    estimate: buildNormalizedEstimateFromText(text, { fileName: input.fileName }),
++    lane: "text" as const,
++    warnings,
++  });
++  if (!input.words?.length || platform === "mitchell") return fromText();
++
++  const byPage = pdfWordsToEnginePages(input.words);
++  const diag = emptyRowParseDiagnostics();
++  const rows = parseEstimateRows(byPage, diag);
++  if (rows.length === 0) {
++    warnings.push("The measured word layer yielded no line-item rows; the text layer was read instead.");
++    return fromText();
++  }
++  if (diag.rejectedStubRows.length) {
++    warnings.push(`${diag.rejectedStubRows.length} row(s) had a line number and operation but no recoverable description and were not read.`);
++  }
++  const notesByLine = collectNotesByLine(text, new Map());
++  const lines = rows.map((row) => engineRowToEstimateLine(row, byPage, notesByLine));
++  const measuredTotals = parseTotalsFromWords(byPage).map((row) => ({
++    category: row.category,
++    hours: row.hours,
++    rate: row.rate,
++    cost: row.amount,
++  }));
++  const totals = buildPrintedTotals(text, measuredTotals.length ? measuredTotals : undefined);
++  const header = buildHeader(text, platform, input.fileName ?? null);
++  return { estimate: { header, lines, totals, boilerplate: collectBoilerplate(text) }, lane: "pdf", warnings };
++}
++
++const OP_PREFIX = /^\s*(?:[#*]\s*)*(Repl|Rpr|R&I|R&R|Refn|Blnd|Subl|Algn|Sect|O\/H|Add|Rpl)\b\.?\s*/i;
++const LABOR_CLASS: Record<string, LaborType> = { M: "MECH", S: "STRUCT", F: "FRAME", E: "ELEC", G: "GLASS", D: "DIAG", P: "REFINISH" };
++
++function engineRowToEstimateLine(
++  row: EstimateRow,
++  byPage: Map<number, DeltaEngineWord[]>,
++  notesByLine: Map<number, string[]>
++): EstimateLine {
++  const raw = (row.rawDesc ?? "").replace(/\s+/g, " ").trim();
++  const manual = /^\s*(?:\*\s*)?#/.test(raw);
++  const opMatch = OP_PREFIX.exec(raw);
++  const opToken = opMatch ? opMatch[1].toLowerCase().replace(/\s+/g, "") : "";
++  const desc = raw.replace(OP_PREFIX, "").replace(/^[#*\s]+/, "").trim();
++  let oper: Operation;
++  if (opToken === "add") oper = "ADD";
++  else if (opToken && OPER[opToken]) oper = OPER[opToken];
++  else if (manual) oper = "MANUAL";
++  else if (row.price === null && row.labor === null && row.paint === null) oper = "NOTE";
++  else oper = "UNKNOWN";
++  const laborType: LaborType = LABOR_CLASS[(row.laborClass ?? "").toUpperCase()] ?? (row.labor === null && row.paint !== null ? "REFINISH" : "BODY");
++  const rowNotes = [
++    ...(row.note ? [row.note.replace(/^note\s*:?\s*/i, "").trim()] : []),
++    ...(notesByLine.get(row.line) ?? []),
++  ].filter((note, index, list) => note && list.indexOf(note) === index);
++  return {
++    lineNo: row.line,
++    section: (row.sectionLabel ?? row.section ?? "").toUpperCase(),
++    oper,
++    desc,
++    partNo: row.part ?? undefined,
++    qty: row.qty ?? undefined,
++    price: row.price,
++    laborHrs: row.labor,
++    laborType,
++    paintHrs: row.paint,
++    included: /\bincl\.?\b/i.test(raw),
++    manual,
++    notes: rowNotes.length ? rowNotes : undefined,
++    taxed: hasTaxedMarker(row, byPage),
++    side: sideFromRow(String(row.side ?? ""), desc),
++  };
++}
++
++function sideFromRow(side: string, desc: string): EstimateLine["side"] {
++  const upper = side.toUpperCase();
++  if (upper === "L" || upper === "LT" || upper === "LEFT") return "LT";
++  if (upper === "R" || upper === "RT" || upper === "RIGHT") return "RT";
++  return /\bRT\b/i.test(desc) ? "RT" : /\bLT\b/i.test(desc) ? "LT" : null;
++}
++
++/**
++ * CCC prints the taxed-charge marker ("T") as its own word directly to the
++ * right of the extended price, on the same baseline. Measured, not assumed:
++ * the marker must sit within a few points of the price cell's right edge.
++ */
++function hasTaxedMarker(row: EstimateRow, byPage: Map<number, DeltaEngineWord[]>): boolean {
++  const price = row.cells.price;
++  if (!price) return false;
++  const words = byPage.get(row.page) ?? [];
++  const mid = (price.top + price.bottom) / 2;
++  return words.some(
++    (word) =>
++      // "T" alone, or "T" glued to the MOTOR component symbol that follows
++      // it ("T m", "T s") when the extractor merged the two runs.
++      /^T(?:\s+[ms])?$/.test(word.text.trim()) &&
++      word.x0 >= price.x1 - 1 &&
++      word.x0 <= price.x1 + 14 &&
++      word.top <= mid &&
++      word.bottom >= mid
++  );
++}
++
++/* ------------------------------------------------------------------ */
++/* Lines                                                               */
++/* ------------------------------------------------------------------ */
++
++function toEstimateLine(row: EstimateDeltaRow, notesByLine: Map<number, string[]>): EstimateLine {
++  const raw = row.rawText ?? "";
++  const oper = resolveOperation(row, raw);
++  const desc = (row.description ?? "").replace(/\s+/g, " ").trim();
++  const laborType = LABOR[String(row.laborType ?? "b").toLowerCase()] ?? "BODY";
++  const notes = row.lineNumber !== null ? notesByLine.get(row.lineNumber) : undefined;
++  return {
++    lineNo: row.lineNumber,
++    section: (row.section ?? "").toUpperCase(),
++    oper,
++    desc,
++    partNo: row.partNumber ?? undefined,
++    qty: row.qty ?? undefined,
++    price: row.price,
++    laborHrs: row.laborIncluded ? null : row.labor,
++    laborType,
++    paintHrs: row.paintIncluded ? null : row.paint,
++    included: row.laborIncluded || row.paintIncluded,
++    manual: MANUAL_MARKER.test(raw) || oper === "MANUAL",
++    notes: notes && notes.length ? notes : undefined,
++    taxed: TAXED_MARKER.test(raw),
++    side: /\bRT\b/i.test(desc) ? "RT" : /\bLT\b/i.test(desc) ? "LT" : null,
++  };
++}
++
++function resolveOperation(row: EstimateDeltaRow, raw: string): Operation {
++  const code = (row.opCode ?? "").toLowerCase().replace(/\s+/g, "");
++  if (code && OPER[code]) return OPER[code];
++  if (MANUAL_MARKER.test(raw)) return "MANUAL";
++  if (!code && row.description && row.price === null && row.labor === null && row.paint === null) return "NOTE";
++  return code ? "UNKNOWN" : "MANUAL";
++}
++
++/**
++ * CCC prints "Note: …" prose on the line(s) directly below the row it
++ * belongs to; the row reader drops those on purpose (a note is never a
++ * row). Harvest them here keyed by the preceding line number. Mitchell
++ * notes arrive already keyed from the platform reader.
++ */
++function collectNotesByLine(text: string, platformNotes: Map<number, string[]>): Map<number, string[]> {
++  const out = new Map<number, string[]>();
++  for (const [line, notes] of platformNotes) out.set(line, [...notes]);
++  const lines = text.split("\n").map((line) => line.replace(/\s+/g, " ").trim());
++  let current: number | null = null;
++  let openNote: number | null = null;
++  for (const line of lines) {
++    if (!line) continue;
++    const rowStart = /^(\d{1,3})\s*[#*]?\s*(?:[A-Za-z&/]{2,}|\*\*)/.exec(line);
++    if (rowStart && !/^note\b/i.test(line)) {
++      current = Number(rowStart[1]);
++      openNote = null;
++      continue;
++    }
++    if (/^note\s*:?/i.test(line) && current !== null) {
++      const body = line.replace(/^note\s*:?\s*/i, "").trim();
++      if (!out.has(current)) out.set(current, []);
++      out.get(current)!.push(body);
++      openNote = current;
++      continue;
++    }
++    // A wrapped note continuation: prose with no digits-as-values shape,
++    // directly after a Note line.
++    if (openNote !== null && /^[a-z(]/i.test(line) && !/\d\.\d/.test(line) && !/^[A-Z ]{6,}$/.test(line)) {
++      const list = out.get(openNote)!;
++      list[list.length - 1] = `${list[list.length - 1]} ${line}`;
++      continue;
++    }
++    openNote = null;
++  }
++  return out;
++}
++
++/* ------------------------------------------------------------------ */
++/* Totals                                                              */
++/* ------------------------------------------------------------------ */
++
++const CATEGORY: Array<[RegExp, LaborCategoryTotal["category"]]> = [
++  [/^body/i, "BODY"],
++  [/^(paint|refinish)\s*labor/i, "REFINISH"],
++  [/^mech/i, "MECH"],
++  [/^struct/i, "STRUCT"],
++  [/^frame/i, "FRAME"],
++  [/^elec/i, "ELEC"],
++  [/^glass/i, "GLASS"],
++  [/^diag/i, "DIAG"],
++];
++
++function buildPrintedTotals(
++  text: string,
++  measuredCategories?: Array<{ category: string; hours: number | null; rate: number | null; cost: number | null }>
++): PrintedTotals {
++  const parsed = parseEstimateTotalsForPlatform(text);
++  const summary = parsed
++    ? measuredCategories
++      ? { ...parsed, categories: measuredCategories }
++      : parsed
++    : measuredCategories
++      ? { categories: measuredCategories, subtotal: null, salesTax: null, grandTotal: null, taxLanes: [], deductible: null }
++      : null;
++  const labor: LaborCategoryTotal[] = [];
++  let parts = 0;
++  let misc = 0;
++  let other = 0;
++  let paintSupplies: PrintedTotals["paintSupplies"];
++  for (const category of summary?.categories ?? []) {
++    const label = category.category.trim();
++    const cost = category.cost ?? 0;
++    if (/paint\s*supplies|paint\s*materials/i.test(label)) {
++      paintSupplies = { hours: category.hours ?? 0, rate: category.rate ?? 0, cost };
++      continue;
++    }
++    if (/^parts/i.test(label)) { parts += cost; continue; }
++    if (/^misc/i.test(label)) { misc += cost; continue; }
++    if (/^other/i.test(label)) { other += cost; continue; }
++    const mapped = CATEGORY.find(([re]) => re.test(label))?.[1];
++    if (mapped) {
++      labor.push({ category: mapped, hours: category.hours ?? 0, rate: category.rate ?? 0, cost });
++      continue;
++    }
++    if (category.hours !== null && category.rate !== null) {
++      labor.push({ category: "OTHER", hours: category.hours, rate: category.rate, cost });
++    } else {
++      other += cost;
++    }
++  }
++
++  const taxLine = /Sales\s*Tax\s*\$?\s*([\d,]+\.\d{2})\s*@\s*([\d.]+)\s*%\s*\$?\s*([\d,]+\.\d{2})/i.exec(text);
++  const salesTaxAmount = summary?.salesTax ?? (taxLine ? money(taxLine[3]) : null);
++  const subtotal = summary?.subtotal ?? 0;
++  const salesTax =
++    salesTaxAmount !== null && salesTaxAmount !== 0
++      ? {
++          basis: taxLine ? money(taxLine[1]) : subtotal,
++          ratePct: taxLine ? Number(taxLine[2]) : subtotal > 0 ? round2((salesTaxAmount / subtotal) * 100) : 0,
++          amount: salesTaxAmount,
++        }
++      : null;
++
++  const deductibleLine = /Deductible\s*-?\s*\$?\s*(-?[\d,]+\.\d{2})/i.exec(text);
++  const netLine = /Net\s*Cost\s*(?:of\s*Repairs?)?\s*:?\s*(-?)\s*\$?\s*(-?[\d,]+\.\d{2})/i.exec(text);
++  const deductible = summary?.deductible ?? (deductibleLine ? money(deductibleLine[1]) : null);
++  const netCost = netLine ? money(netLine[2]) * (netLine[1] === "-" ? -1 : 1) : null;
++
++  return {
++    parts: round2(parts),
++    labor,
++    paintSupplies,
++    misc: round2(misc),
++    other: round2(other),
++    subtotal: round2(subtotal),
++    salesTax,
++    grandTotal: round2(summary?.grandTotal ?? 0),
++    deductible,
++    netCost,
++  };
++}
++
++/* ------------------------------------------------------------------ */
++/* Header                                                              */
++/* ------------------------------------------------------------------ */
++
++function buildHeader(text: string, platform: ReturnType<typeof detectEstimatePlatform>, fileName: string | null): EstimateHeader {
++  const identity = readClaimIdentity(text);
++  const system: EstimatingSystem =
++    platform === "ccc" ? "CCC" : platform === "mitchell" ? "MITCHELL" : platform === "audatex" ? "AUDATEX" : "UNKNOWN";
++
++  const documentTitle =
++    /\b(Estimate of Record|Preliminary Estimate|Supplement of Record(?:\s+\d+)?|Supplement\s+\d+|Final Bill|Appraisal Report)\b/i.exec(text)?.[1] ??
++    undefined;
++  const workfileId = /Workfile\s*ID\s*:?[\s\S]{0,80}?\b([0-9a-f]{8})\b/i.exec(text)?.[1];
++  const policyNo = /Policy\s*#\s*:?\s*(?!Claim)([A-Z0-9][A-Z0-9-]{3,})/i.exec(text)?.[1];
++  const typeOfLoss = /Type\s*of\s*Loss\s*:?\s*([A-Za-z][A-Za-z /-]{2,30}?)(?=\s*(?:Date\s*of\s*Loss|Days|\n))/i.exec(text)?.[1]?.trim();
++  const daysToRepairMatch = /Days\s*to\s*Repair\s*:?\s*(\d{1,3})\b/i.exec(text);
++  const daysToRepair = daysToRepairMatch ? Number(daysToRepairMatch[1]) : null;
++  const poi = /Point\s*of\s*Impact\s*:?\s*(\d{2})\s*([A-Za-z][^\n]{0,48})/i.exec(text);
++  const pointOfImpact = poi ? { code: poi[1], label: poi[2].trim().replace(/\s+/g, " ") } : null;
++  const writerMatch = /Written\s*By\s*:?\s*([A-Z][A-Za-z'.\- ]{2,60}?)(?:,\s*([A-Z0-9-]{4,}))?\s*(?=\n|Adjuster|Insured)/i.exec(text);
++  const adjusterMatch = /Adjuster\s*:?\s*([A-Z][A-Za-z',.\- ]{2,60}?)(?=\s*(?:\(|\n|Insured|Owner|Claim))/i.exec(text);
++  const adjusterPhone = adjusterMatch
++    ? /\(\d{3}\)\s*\d{3}-\d{4}/.exec(text.slice(adjusterMatch.index, adjusterMatch.index + 120))?.[0]
++    : undefined;
++  const printedAt = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}:\d{2}\s*[AP]M)/i.exec(text);
++  const ownerName = identity.ownerTokens.length ? titleCase(identity.ownerTokens.join(" ")) : undefined;
++  const ownerWindow = /\b(?:Owner|Insured)\s*:?\s*([^\n]{0,80})/i.exec(text)?.[1] ?? "";
++  const ownerZip = selectOwnerOrInsuredZip(text);
++  const ownerState = extractMarketPreviewState(text, ownerZip) ?? /\bState\s*:?\s*([A-Z]{2})\b/.exec(text)?.[1];
++  const isGovernment = GOV.test(ownerWindow) || GOV.test(ownerName ?? "");
++
++  const vehicleLine = identity.vehicle ?? "";
++  const vehicleParts = /^((?:19|20)\d{2})\s+([A-Z][A-Z0-9-]*)\s+(.*)$/.exec(vehicleLine);
++  const trim = vehicleParts?.[3] ?? "";
++  const odometer = /Mileage\s*In\s*:?\s*([\d,]{2,7})\b/i.exec(text)?.[1];
++  const exteriorColor = /Exterior\s*Color\s*:?\s*([A-Z][A-Za-z ]{2,20}?)(?=\s*(?:Mileage|Production|\n))/i.exec(text)?.[1]?.trim();
++  const paintCode = /Paint\s*Code\s*:?\s*([A-Z0-9]{2,8})\b/i.exec(text)?.[1] ?? null;
++  const interiorColor = /Interior\s*Color\s*:?\s*([A-Z][A-Za-z ]{2,20}?)(?=\s*(?:Mileage|Vehicle|\n))/i.exec(text)?.[1]?.trim() ?? null;
++  const productionDate = /Production\s*Date\s*:?\s*(\d{1,2}\/\d{4})/i.exec(text)?.[1] ?? null;
++  const options = collectOptions(text);
++  const isPolice = /police|interceptor|pursuit/i.test(`${vehicleLine} ${fileName ?? ""}`);
++  const isFleet = isPolice || /\bfleet\b/i.test(vehicleLine);
++
++  const priorDamage = /Prior\s*Damage\s*:?\s*([^\n]{1,80})/i.exec(text)?.[1]?.trim() ?? null;
++  const certificationText = /(I,\s+[^\n]{0,80}?\bcertify[\s\S]{0,400}?(?:\.|\n\n))/i.exec(text)?.[1]?.replace(/\s+/g, " ").trim() ?? null;
++
++  return {
++    system,
++    documentTitle,
++    claimNo: identity.claimNumber ?? undefined,
++    workfileId,
++    policyNo,
++    typeOfLoss,
++    dateOfLoss: identity.dateOfLoss ?? undefined,
++    printedAt: printedAt ? `${printedAt[1]} ${printedAt[2]}` : undefined,
++    daysToRepair,
++    pointOfImpact,
++    writer: writerMatch ? { name: writerMatch[1].trim(), license: writerMatch[2] } : undefined,
++    adjuster: adjusterMatch ? { name: adjusterMatch[1].trim(), phone: adjusterPhone } : undefined,
++    owner: ownerName || ownerState ? { name: ownerName, state: ownerState, isGovernment } : undefined,
++    repairFacility: null,
++    vehicle: {
++      year: vehicleParts ? Number(vehicleParts[1]) : undefined,
++      make: vehicleParts?.[2] ? normalizeMake(vehicleParts[2]) : undefined,
++      model: trim ? trim.split(/\s+/).slice(0, 3).join(" ") : undefined,
++      trim: trim || undefined,
++      vin: identity.vin ?? undefined,
++      odometer: odometer ? Number(odometer.replace(/,/g, "")) : undefined,
++      exteriorColor,
++      paintCode,
++      interiorColor,
++      productionDate,
++      isFleet,
++      isPolice,
++      options,
++    },
++    priorDamageNote: priorDamage,
++    certificationText,
++  };
++}
++
++const MAKE_ALIASES: Record<string, string> = {
++  LEXU: "Lexus", CHEV: "Chevrolet", TOYT: "Toyota", HOND: "Honda", NISS: "Nissan", HYUN: "Hyundai",
++  VOLK: "Volkswagen", SUBA: "Subaru", MERZ: "Mercedes-Benz", MITS: "Mitsubishi", CHRY: "Chrysler",
++  CADI: "Cadillac", LINC: "Lincoln", PONT: "Pontiac", PORS: "Porsche", INFI: "Infiniti", MAZD: "Mazda",
++  ACUR: "Acura", VOLV: "Volvo", JAGU: "Jaguar", LNDR: "Land Rover", TESL: "Tesla", DODG: "Dodge",
++};
++function normalizeMake(token: string): string {
++  const upper = token.toUpperCase();
++  if (MAKE_ALIASES[upper]) return MAKE_ALIASES[upper];
++  return upper.charAt(0) + upper.slice(1).toLowerCase();
++}
++
++function collectOptions(text: string): string[] {
++  const wanted = [
++    /blind spot/i, /side impact air bags?/i, /head\/curtain air bags?/i, /drivers? side air bag/i, /passenger air bag/i,
++    /backup camera/i, /parking sensors?/i, /lane departure/i, /intelligent cruise/i, /xenon or l\.e\.d\. headlamps/i,
++    /adaptive cruise/i, /collision warning/i, /360 camera/i, /surround view/i,
++  ];
++  const out: string[] = [];
++  for (const re of wanted) {
++    const match = re.exec(text);
++    if (match) out.push(titleCase(match[0]));
++  }
++  return out;
++}
++
++function collectBoilerplate(text: string): string {
++  const tail = text.slice(Math.max(0, text.length - 4000));
++  return tail.replace(/\s+/g, " ").trim();
++}
++
++/* ------------------------------------------------------------------ */
++
++const money = (value: string) => Number(value.replace(/[$,]/g, ""));
++const round2 = (value: number) => Math.round(value * 100) / 100;
++function titleCase(value: string): string {
++  return value.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
++}
+diff --git a/src/lib/reports/forensicSingle/index.ts b/src/lib/reports/forensicSingle/index.ts
+new file mode 100644
+index 0000000..4004fb7
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/index.ts
+@@ -0,0 +1,17 @@
++/**
++ * forensic-single — single-estimate Forensic Estimate Review.
++ *
++ * Until this package existed the build only produced a forensic analysis
++ * inside a two-estimate comparison; a case with one estimate on file hit the
++ * delta release gate and shipped nothing. This runs the same discipline on
++ * one document: reconcile to printed totals → deterministic findings →
++ * branded PDF. `runForensicSingle` is pure and synchronous; the renderer is
++ * the only async step.
++ */
++export { runForensicSingle, type EngineOptions } from "./engine";
++export { buildNormalizedEstimateFromText } from "./fromEstimateText";
++export { renderForensicSingleReportPdf, type RenderForensicSingleOptions } from "./renderer";
++export { planReports, type ReportMode, type ReportPlan } from "./reportPlan";
++export type { ForensicReport, Finding, NormalizedEstimate } from "./types";
++
++export const FORENSIC_SINGLE_REPORT_FILENAME = "forensic-estimate-review.pdf";
+diff --git a/src/lib/reports/forensicSingle/reconcile.ts b/src/lib/reports/forensicSingle/reconcile.ts
+new file mode 100644
+index 0000000..1299f86
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/reconcile.ts
+@@ -0,0 +1,156 @@
++import type { NormalizedEstimate, Reconciliation, ReconciliationRow } from "./types";
++
++const r2 = (n: number) => Math.round(n * 100) / 100;
++const r1 = (n: number) => Math.round(n * 10) / 10;
++
++/**
++ * Rebuild every printed total from the line grid. Closure standard is
++ * $0.00 unexplained; anything else becomes a RECONCILIATION finding.
++ *
++ * Column-band ambiguity (CCC prints manual misc lines whose hours can land in
++ * the paint band) is resolved by trying the ambiguous lines in the other
++ * column and keeping the assignment that closes both labor subtotals.
++ */
++export function reconcile(est: NormalizedEstimate): Reconciliation {
++  const notes: string[] = [];
++  const t = est.totals;
++
++  const bodyPrinted = t.labor.find(l => l.category === "BODY")?.hours ?? 0;
++  const refPrinted = t.labor.find(l => l.category === "REFINISH")?.hours ?? 0;
++  const mechPrinted = t.labor.find(l => l.category === "MECH")?.hours ?? 0;
++
++  let body = 0, ref = 0, mech = 0;
++  const ambiguous: { idx: number; hrs: number }[] = [];
++  est.lines.forEach((ln, idx) => {
++    if (ln.laborHrs != null) {
++      if (ln.laborType === "MECH") mech += ln.laborHrs;
++      else if (ln.laborType === "REFINISH") ref += ln.laborHrs;
++      else body += ln.laborHrs;
++    }
++    if (ln.paintHrs != null) {
++      ref += ln.paintHrs;
++      if (ln.manual && ln.laborHrs == null && ln.section.toUpperCase().includes("MISC")) {
++        ambiguous.push({ idx, hrs: ln.paintHrs });
++      }
++    }
++  });
++
++  // No printed mechanical category: M-flagged hours were billed at the body rate.
++  if (!t.labor.some(l => l.category === "MECH") && mech > 0) {
++    body += mech; mech = 0;
++    notes.push("Mechanical-flagged hours are billed within Body Labor (no separate mechanical category printed).");
++  }
++
++  // Try flipping ambiguous misc lines paint->body if that closes both columns.
++  if (r1(body) !== r1(bodyPrinted) || r1(ref) !== r1(refPrinted)) {
++    for (const a of ambiguous) {
++      if (r1(body + a.hrs) === r1(bodyPrinted) && r1(ref - a.hrs) === r1(refPrinted)) {
++        body += a.hrs; ref -= a.hrs;
++        const ln = est.lines[a.idx];
++        notes.push(`Line ${ln.lineNo ?? "?"} (${ln.desc}, ${a.hrs.toFixed(1)}) prints in the refinish band but books as body labor for the printed subtotals to close.`);
++        ln.laborHrs = a.hrs; ln.paintHrs = null; ln.laborType = "BODY";
++      }
++    }
++  }
++
++  // Dollars
++  let partsUntaxedMisc = 0, taxedMisc = 0, other = 0;
++  for (const ln of est.lines) {
++    if (ln.price == null) continue;
++    const sec = ln.section.toUpperCase();
++    if (sec.includes("OTHER CHARGES")) other += ln.price;
++    else if (ln.taxed) taxedMisc += ln.price;
++    else partsUntaxedMisc += ln.price;
++  }
++
++  const bodyRate = t.labor.find(l => l.category === "BODY")?.rate ?? 0;
++  const refRate = t.labor.find(l => l.category === "REFINISH")?.rate ?? 0;
++  const mechRate = t.labor.find(l => l.category === "MECH")?.rate ?? bodyRate;
++  const supRate = t.paintSupplies?.rate ?? 0;
++
++  const rows: ReconciliationRow[] = [];
++  const push = (category: string, rebuiltFrom: string, rebuilt: number, printed: number) =>
++    rows.push({ category, rebuiltFrom, rebuilt: r2(rebuilt), printed: r2(printed), variance: r2(rebuilt - printed) });
++
++  push("Body labor (hrs)", "sum of body-column hours", r1(body), bodyPrinted);
++  push("Refinish labor (hrs)", "sum of paint-column hours incl. clear coat, overlap, tint", r1(ref), refPrinted);
++  if (mechPrinted || mech) push("Mechanical labor (hrs)", "sum of M-flagged hours", r1(mech), mechPrinted);
++  // The taxed-charge marker and the OTHER CHARGES section are how CCC splits
++  // priced lines across Parts / Miscellaneous / Other. A document (or an
++  // extraction) that carries neither cannot be split the same way; compare
++  // the priced lines as one pool so a missing marker never reads as a
++  // reconciliation failure it is not.
++  const hasTaxMarkers = est.lines.some(ln => ln.taxed);
++  const hasOtherSection = est.lines.some(ln => ln.section.toUpperCase().includes("OTHER CHARGES"));
++  if (hasTaxMarkers && hasOtherSection) {
++    push("Parts + untaxed misc ($)", "priced lines without T flag, outside OTHER CHARGES", partsUntaxedMisc, t.parts);
++    push("Taxed misc ($)", "priced lines with T flag", taxedMisc, t.misc);
++    push("Other charges ($)", "OTHER CHARGES section", other, t.other);
++  } else if (hasTaxMarkers) {
++    push("Parts + untaxed misc + other ($)", "priced lines without T flag", partsUntaxedMisc + other, t.parts + t.other);
++    push("Taxed misc ($)", "priced lines with T flag", taxedMisc, t.misc);
++    if (t.other) notes.push("No OTHER CHARGES section was read; other charges are pooled with parts for the closure test.");
++  } else {
++    push("Parts + misc + other ($)", "all priced lines (no taxed-charge markers read)", partsUntaxedMisc + taxedMisc + other, t.parts + t.misc + t.other);
++    if (t.misc || t.other) notes.push("No taxed-charge markers were read; parts, miscellaneous and other charges are pooled for the closure test.");
++  }
++
++  const laborCost = r2(body * bodyRate + ref * refRate + mech * mechRate);
++  const printedLabor = r2(t.labor.reduce((s, l) => s + l.cost, 0));
++  push("Labor dollars ($)", "hours x printed rates", laborCost, printedLabor);
++
++  if (t.paintSupplies) {
++    push("Paint supplies ($)", `${t.paintSupplies.hours} hrs x $${supRate}`, t.paintSupplies.hours * supRate, t.paintSupplies.cost);
++  }
++
++  const subtotal = r2(t.parts + printedLabor + (t.paintSupplies?.cost ?? 0) + t.misc + t.other);
++  push("Subtotal ($)", "parts + labor + supplies + misc + other", subtotal, t.subtotal);
++
++  if (t.salesTax) {
++    push("Sales tax ($)", `${t.salesTax.ratePct}% x $${t.salesTax.basis.toFixed(2)}`, t.salesTax.basis * t.salesTax.ratePct / 100, t.salesTax.amount);
++  }
++  push("Grand total ($)", "subtotal + tax", t.subtotal + (t.salesTax?.amount ?? 0), t.grandTotal);
++  if (t.deductible != null && t.netCost != null) {
++    push("Net cost ($)", "grand total - deductible", t.grandTotal - t.deductible, t.netCost);
++  }
++
++  const unexplained = r2(rows.reduce((s, r) => s + Math.abs(r.variance), 0));
++  return { rows, unexplained, notes, clearCoatCheck: clearCoatCheck(est) };
++}
++
++/**
++ * CCC clear-coat convention: first major panel 40% of refinish time, each
++ * additional panel 20%, computed after overlap netting, rounded to 0.1.
++ */
++export function clearCoatCheck(est: NormalizedEstimate): string[] {
++  const out: string[] = [];
++  const panels = panelRefinishGroups(est);
++  panels.forEach((p, i) => {
++    if (p.clearCoat == null) return;
++    const net = r1(p.base + p.overlap);
++    const pct = i === 0 ? 0.4 : 0.2;
++    const expect = r1(net * pct);
++    const ok = Math.abs(expect - p.clearCoat) <= 0.1;
++    out.push(`${p.section}: (${p.base}${p.overlap ? ` ${p.overlap}` : ""}) x ${pct * 100}% = ${expect.toFixed(1)}, written ${p.clearCoat.toFixed(1)} (${ok ? "correct" : "CHECK"})`);
++  });
++  return out;
++}
++
++export interface PanelGroup { section: string; base: number; overlap: number; clearCoat: number | null; repairHrs: number | null; oper: string; }
++
++export function panelRefinishGroups(est: NormalizedEstimate): PanelGroup[] {
++  const groups: PanelGroup[] = [];
++  let cur: PanelGroup | null = null;
++  for (const ln of est.lines) {
++    const d = ln.desc.toLowerCase();
++    if ((ln.oper === "RPR" || ln.oper === "REPL" || ln.oper === "REFN") && ln.paintHrs != null && !d.includes("clear coat")) {
++      cur = { section: ln.section, base: ln.paintHrs, overlap: 0, clearCoat: null, repairHrs: ln.oper === "RPR" ? ln.laborHrs : null, oper: ln.oper };
++      groups.push(cur);
++      continue;
++    }
++    if (!cur || ln.section !== cur.section) continue;
++    if (d.includes("overlap") && ln.paintHrs != null) cur.overlap += ln.paintHrs;
++    if (d.includes("clear coat") && ln.paintHrs != null && cur.clearCoat == null) cur.clearCoat = ln.paintHrs;
++  }
++  return groups;
++}
+diff --git a/src/lib/reports/forensicSingle/renderer.ts b/src/lib/reports/forensicSingle/renderer.ts
+new file mode 100644
+index 0000000..65bb178
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/renderer.ts
+@@ -0,0 +1,287 @@
++/**
++ * FORENSIC ESTIMATE REVIEW — single-estimate page renderer.
++ *
++ * Lays the engine's ForensicReport out on the same frame the two-estimate
++ * Forensic Estimate Analysis uses (shared `Writer`), so the two documents read
++ * as one family. Page order mirrors the hand-built review this engine was
++ * proven against: identity → verdict → findings at a glance → reconciliation
++ * → operations written correctly → detailed findings → exposure → revision
++ * checklist → references. Every figure comes from the engine; this file
++ * decides layout and wording, never arithmetic.
++ */
++import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
++import { maskVinForExport, redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
++import { Writer } from "../forensicReportRenderer";
++import type { Finding, ForensicReport } from "./types";
++
++const ACCENT = rgb(0.62, 0.24, 0.08);
++const MUTED = rgb(0.42, 0.44, 0.48);
++
++export type ForensicSingleAudience = "INTERNAL" | "CARRIER" | "OWNER";
++
++export interface RenderForensicSingleOptions {
++  audience?: ForensicSingleAudience;
++  /** Default true: names, phones, addresses and insurer identity are scrubbed; VIN tail masked. */
++  redactSensitive?: boolean;
++  /** Filename of the reviewed estimate, shown in the identity block. */
++  sourceFileName?: string | null;
++}
++
++const money = (value: number): string =>
++  `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
++const hrs = (value: number): string => value.toFixed(1);
++
++export async function renderForensicSingleReportPdf(
++  report: ForensicReport,
++  options: RenderForensicSingleOptions = {}
++): Promise<{ bytes: Uint8Array; pageCount: number }> {
++  const audience = options.audience ?? "INTERNAL";
++  const scrub =
++    options.redactSensitive === false
++      ? (value: string): string => value
++      : (value: string): string => redactDownloadContent(value);
++
++  const doc = await PDFDocument.create();
++  const font = await doc.embedFont(StandardFonts.Helvetica);
++  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
++
++  const h = report.header;
++  const v = h.vehicle;
++  const vehicleLabel = [v.year, v.make, v.model].filter(Boolean).join(" ") || "Vehicle not identified on the document";
++  const writer = new Writer(doc, font, bold, `Forensic Estimate Review  |  ${scrub(vehicleLabel)}  |  Collision IQ`);
++
++  writer.titleBlock(
++    "Forensic Estimate Review",
++    `Single-estimate reconciliation and completeness audit  |  ${scrub(vehicleLabel)}  |  Prepared ${report.generatedAt.slice(0, 10)}`
++  );
++
++  const identity: Array<{ label: string; value: string }> = [];
++  identity.push({
++    label: "Review type",
++    value:
++      audience === "INTERNAL"
++        ? "Internal quality-assurance audit of one estimate, performed before release. Scope: closure to printed totals, not-included operations, OEM repair position, restraint handling, tax treatment, header completeness."
++        : "Independent review of one estimate: closure to its own printed totals, not-included operations, OEM repair position, restraint handling, tax treatment, header completeness.",
++  });
++  identity.push({
++    label: "Estimate",
++    value: scrub(
++      [
++        h.documentTitle,
++        h.system !== "UNKNOWN" ? h.system : null,
++        h.workfileId ? `Workfile ${h.workfileId}` : null,
++        h.printedAt ? `printed ${h.printedAt}` : null,
++        options.sourceFileName ?? null,
++      ]
++        .filter(Boolean)
++        .join("  |  ") || "Estimate on file"
++    ),
++  });
++  if (h.claimNo) identity.push({ label: "Claim", value: scrub(h.claimNo) });
++  if (h.writer?.name) {
++    identity.push({ label: "Writer", value: scrub([h.writer.name, h.writer.license ? `license ${h.writer.license}` : null].filter(Boolean).join(", ")) });
++  }
++  if (h.owner?.name) identity.push({ label: "Owner / insured", value: scrub([h.owner.name, h.owner.state].filter(Boolean).join(", ")) });
++  identity.push({
++    label: "Vehicle",
++    value: scrub(
++      [
++        [v.year, v.make, v.model, v.trim && v.trim !== v.model ? v.trim : null].filter(Boolean).join(" "),
++        v.vin ? `VIN ${maskVinForExport(v.vin)}` : null,
++        v.odometer ? `${v.odometer.toLocaleString()} miles` : null,
++        v.exteriorColor ?? null,
++      ]
++        .filter(Boolean)
++        .join("  |  ")
++    ),
++  });
++  identity.push({
++    label: "Loss",
++    value:
++      [
++        h.dateOfLoss ? `Date of loss ${h.dateOfLoss}` : null,
++        h.pointOfImpact?.label ? `Point of impact ${h.pointOfImpact.code ? `${h.pointOfImpact.code} ` : ""}${h.pointOfImpact.label}` : null,
++        h.priorDamageNote ? `Prior damage: ${h.priorDamageNote}` : null,
++      ]
++        .filter(Boolean)
++        .join("  |  ") || "Loss details not printed on the document",
++  });
++  const t = report.printedTotals;
++  identity.push({
++    label: "Printed totals",
++    value: [
++      `Parts ${money(t.parts)}`,
++      ...t.labor.map((l) => `${labelLabor(l.category)} ${hrs(l.hours)} hrs @ $${l.rate.toFixed(2)} = ${money(l.cost)}`),
++      t.paintSupplies ? `Materials ${hrs(t.paintSupplies.hours)} hrs @ $${t.paintSupplies.rate.toFixed(2)} = ${money(t.paintSupplies.cost)}` : null,
++      t.misc ? `Misc ${money(t.misc)}` : null,
++      t.other ? `Other ${money(t.other)}` : null,
++      `Subtotal ${money(t.subtotal)}`,
++      t.salesTax ? `Tax ${t.salesTax.ratePct}% ${money(t.salesTax.amount)}` : "No sales tax printed",
++      `Total ${money(t.grandTotal)}`,
++      t.deductible != null ? `Deductible ${money(t.deductible)}` : null,
++      t.netCost != null ? `Net ${money(t.netCost)}` : null,
++    ]
++      .filter(Boolean)
++      .join("  |  "),
++  });
++  writer.identityRows(identity);
++
++  /* Verdict */
++  writer.heading("Verdict");
++  writer.paragraph(report.verdict.headline);
++  writer.paragraph(`Recommendation: ${report.verdict.recommendation}`, { color: ACCENT });
++
++  /* Findings at a glance */
++  writer.heading("Findings at a glance");
++  if (report.findings.length === 0) {
++    writer.paragraph("No findings. The estimate closes to its printed totals and every rule in the catalog was satisfied by the document as written.");
++  } else {
++    writer.table({
++      columns: [
++        { header: "ID", width: 0.08 },
++        { header: "Severity", width: 0.12 },
++        { header: "Finding", width: 0.62 },
++        { header: "Est. ref.", width: 0.18 },
++      ],
++      rows: report.findings.map((f) => [f.id, severityLabel(f.severity), scrub(f.title), refLabel(f)]),
++    });
++  }
++
++  /* Reconciliation */
++  writer.heading("1. Reconciliation of printed totals");
++  writer.paragraph(
++    report.reconciliation.unexplained === 0
++      ? "Every printed figure was rebuilt from the line items. The estimate reconciles to $0.00 unexplained."
++      : `Every printed figure was rebuilt from the line items. ${money(report.reconciliation.unexplained)} could not be explained; see the rows with a non-zero variance and finding ${report.findings.find((f) => f.ruleId === "RC-001")?.id ?? "RC-001"}.`
++  );
++  writer.table({
++    columns: [
++      { header: "Category", width: 0.24 },
++      { header: "Rebuilt from", width: 0.4 },
++      { header: "Rebuilt", width: 0.12, align: "right" },
++      { header: "Printed", width: 0.12, align: "right" },
++      { header: "Variance", width: 0.12, align: "right" },
++    ],
++    rows: report.reconciliation.rows.map((row) => [
++      row.category,
++      row.rebuiltFrom,
++      formatCategoryValue(row.category, row.rebuilt),
++      formatCategoryValue(row.category, row.printed),
++      formatCategoryValue(row.category, row.variance),
++    ]),
++  });
++  for (const note of report.reconciliation.notes) writer.paragraph(note, { color: MUTED, size: 8.6 });
++  if (report.reconciliation.clearCoatCheck?.length) {
++    writer.paragraph(`Clear coat check: ${report.reconciliation.clearCoatCheck.join("  ")}`, { color: MUTED, size: 8.6 });
++  }
++
++  /* Operations written correctly */
++  writer.heading("2. Operations written correctly");
++  writer.paragraph(
++    report.correctlyWritten.length
++      ? `For balance, the following are present and properly formed and should be preserved in any revision: ${report.correctlyWritten.join("; ")}.`
++      : "No positive-QA items were detected from the document's own lines."
++  );
++
++  /* Detailed findings */
++  writer.heading("3. Detailed findings");
++  for (const f of report.findings) {
++    writer.subheading(`${f.id}  ${severityLabel(f.severity)}  ${scrub(f.title)}`);
++    if (f.narrative) {
++      writer.paragraph(`Observation. ${scrub(f.narrative.observation)}`);
++      writer.paragraph(`Basis. ${scrub(f.narrative.basis)}`);
++      writer.paragraph(`Action. ${scrub(f.narrative.action)}`);
++      writer.paragraph(`Exposure. ${scrub(f.narrative.exposure)}`);
++    } else {
++      writer.paragraph(`Observation. ${f.facts.map(scrub).join(" ")}`);
++      if (f.authorities.length) {
++        writer.paragraph(
++          `Basis. ${f.authorities
++            .map((a) => `${a.label}${a.citation ? ` (${a.citation})` : ""}${a.verified === false ? " [verify]" : ""}`)
++            .join("; ")}.`
++        );
++      }
++      writer.paragraph(`Action. ${scrub(f.action)}`);
++      writer.paragraph(`Exposure. ${describeExposure(f)}`);
++    }
++  }
++
++  /* Exposure */
++  writer.heading("4. Quantified exposure");
++  writer.paragraph(
++    report.exposure.quantifiedLow === report.exposure.quantifiedHigh
++      ? `Quantifiable at the estimate's own rates: ${money(report.exposure.quantifiedLow)}.`
++      : `Quantifiable at the estimate's own rates: ${money(report.exposure.quantifiedLow)} to ${money(report.exposure.quantifiedHigh)}, depending on which defensible basis applies.`
++  );
++  if (report.exposure.openItems.length) {
++    writer.paragraph("Open items that need a dealer quote, vendor invoice or database lookup before they carry a number:");
++    for (const item of report.exposure.openItems) writer.bullet(scrub(item));
++  }
++
++  /* Checklist */
++  writer.heading("5. Revision checklist");
++  for (const item of report.checklist) writer.bullet(`${item.n}. ${scrub(item.action)} (${item.ref})`);
++
++  /* References */
++  if (report.references.length) {
++    writer.heading("References");
++    for (const ref of report.references) writer.bullet(ref);
++    writer.paragraph(
++      "Authorities are the standards each rule expects to apply. Any authority marked [verify] was not matched to a retrieved document and must be confirmed before external use.",
++      { color: MUTED, size: 8.6 }
++    );
++  }
++
++  writer.paragraph(
++    audience === "INTERNAL"
++      ? "Collision IQ internal QA work product. Prepared for the writing appraiser; not for distribution to carrier, owner or repairer."
++      : "Prepared by Collision IQ from the estimate's own printed lines and totals. Observed facts, inferences and open verification items are labelled as such.",
++    { color: MUTED, size: 8 }
++  );
++
++  writer.finish();
++  const bytes = await doc.save();
++  return { bytes, pageCount: doc.getPageCount() };
++}
++
++function labelLabor(category: string): string {
++  switch (category) {
++    case "BODY": return "Body";
++    case "REFINISH": return "Refinish";
++    case "MECH": return "Mechanical";
++    case "STRUCT": return "Structural";
++    case "FRAME": return "Frame";
++    case "ELEC": return "Electrical";
++    case "GLASS": return "Glass";
++    case "DIAG": return "Diagnostic";
++    default: return category.charAt(0) + category.slice(1).toLowerCase();
++  }
++}
++
++function severityLabel(severity: Finding["severity"]): string {
++  return severity.charAt(0) + severity.slice(1).toLowerCase();
++}
++
++function refLabel(f: Finding): string {
++  if (f.lineRefs.length === 0) return f.cls === "HEADER" ? "Header" : f.cls === "TAX" || f.cls === "RECONCILIATION" ? "Totals" : "Absent";
++  return `Line ${f.lineRefs.join(", ")}`;
++}
++
++function formatCategoryValue(category: string, value: number): string {
++  return /\(hrs\)/.test(category) ? hrs(value) : money(value);
++}
++
++function describeExposure(f: Finding): string {
++  const parts: string[] = [];
++  if (f.exposure.quantified !== 0 || f.exposure.quantifiedAlt != null) {
++    const alt = f.exposure.quantifiedAlt;
++    parts.push(
++      alt != null && alt !== f.exposure.quantified
++        ? `${money(Math.min(f.exposure.quantified, alt))} to ${money(Math.max(f.exposure.quantified, alt))} at the estimate's own rates`
++        : `${money(f.exposure.quantified)} at the estimate's own rates`
++    );
++  }
++  if (f.exposure.open) parts.push(f.exposure.open);
++  if (!parts.length) parts.push("Not quantifiable from the document alone.");
++  return `${parts.join(". ")}${parts[parts.length - 1].endsWith(".") ? "" : "."}`;
++}
+diff --git a/src/lib/reports/forensicSingle/reportPlan.ts b/src/lib/reports/forensicSingle/reportPlan.ts
+new file mode 100644
+index 0000000..c4a5eae
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/reportPlan.ts
+@@ -0,0 +1,64 @@
++/**
++ * Report-mode routing for the Reports page.
++ *
++ * Product rule (Sep 2026):
++ *   1 estimate uploaded  -> FORENSIC report only (no Citation Density).
++ *   2 estimates uploaded -> FORENSIC (two-estimate, unchanged) + Citation Density.
++ *
++ * The Reports card is renamed "Forensic Report w/ Citation Density Report".
++ * Its description and buttons adapt to the mode returned here.
++ */
++
++export type ReportMode = "FORENSIC_SINGLE" | "FORENSIC_WITH_CITATION_DENSITY";
++
++export interface AnalysisInput {
++  estimateIds: string[];
++  /** True when the user explicitly requested a comparison. Two uploads imply it. */
++  comparisonRequested?: boolean;
++}
++
++export interface ReportPlan {
++  mode: ReportMode;
++  documents: Array<
++    | { kind: "FORENSIC_SINGLE"; estimateId: string }
++    | { kind: "FORENSIC_DELTA"; targetId: string; sourceId: string }
++    | { kind: "CITATION_DENSITY"; targetId: string; sourceId: string }
++  >;
++  card: { title: string; description: string; downloadLabel: string; disabledReason?: string };
++}
++
++export function planReports(input: AnalysisInput, pick?: (ids: string[]) => { targetId: string; sourceId: string }): ReportPlan {
++  const ids = input.estimateIds;
++  if (ids.length === 0) {
++    return {
++      mode: "FORENSIC_SINGLE", documents: [],
++      card: { title: "Forensic Report w/ Citation Density Report", description: "Upload an estimate to generate a forensic review.", downloadLabel: "Download PDF", disabledReason: "No estimate uploaded" },
++    };
++  }
++  if (ids.length === 1) {
++    return {
++      mode: "FORENSIC_SINGLE",
++      documents: [{ kind: "FORENSIC_SINGLE", estimateId: ids[0] }],
++      card: {
++        title: "Forensic Report w/ Citation Density Report",
++        description:
++          "One estimate on file. The Forensic Estimate Review reconciles the document to its own printed totals, then audits it for not-included operations, OEM repair position, restraint handling, tax basis and header completeness. The Citation Density annotation requires a second estimate to compare against and is not generated in this mode.",
++        downloadLabel: "Download Forensic Report",
++      },
++    };
++  }
++  const pair = pick ? pick(ids) : { targetId: ids[0], sourceId: ids[1] };
++  return {
++    mode: "FORENSIC_WITH_CITATION_DENSITY",
++    documents: [
++      { kind: "FORENSIC_DELTA", ...pair },
++      { kind: "CITATION_DENSITY", ...pair },
++    ],
++    card: {
++      title: "Forensic Report w/ Citation Density Report",
++      description:
++        "Two documents. The estimate PDF annotated in place, every mark anchored to the line it came from; and the Forensic Estimate Analysis — a line-level reconciliation that balances to each document's own totals, quantifies the gap category by category, and separates fact from open verification item.",
++      downloadLabel: "Download PDF",
++    },
++  };
++}
+diff --git a/src/lib/reports/forensicSingle/rules/catalog.ts b/src/lib/reports/forensicSingle/rules/catalog.ts
+new file mode 100644
+index 0000000..b4268e4
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/rules/catalog.ts
+@@ -0,0 +1,378 @@
++/**
++ * Rule catalog for single-estimate forensic review.
++ *
++ * Every rule is deterministic and document-shape based: no rule keys on a
++ * carrier name, shop name, or RO literal (universality invariant). Rules emit
++ * FACTS (what was observed) and expected AUTHORITIES; the narrative layer
++ * verifies authorities against RAG and writes prose. Rules never invent
++ * dollar figures they cannot compute from the estimate's own rates.
++ */
++import type { Rule } from "./context";
++import { A, f, lineNos, money } from "./context";
++
++const PANEL = /door|quarter|fender|hood|deck lid|liftgate|roof|rocker|bedside|cab corner|pillar/i;
++const PULL_WELD = /weld|pull metal|pull.*dent|stud|tab/i;
++const SENSOR = /impact sensor|pressure sensor|side sensor|satellite sensor|restraint|rcm|srs|air ?bag/i;
++const STRUCT_CHECK = /pillar|rocker|aperture|measure|set ?up|adjust|algn|align|hinge|striker/i;
++const GRAPHIC = /decal|graphic|stripe|striping|lettering|wrap|emblem/i;
++const FPB = /feather|prime.*block|f\/p\/b|\bfpb\b|block sand/i;
++const BLEND = /blend|blnd/i;
++const TINT = /tint/i;
++const HAZ = /hazard|waste|disposal/i;
++const SCAN = /scan|diagnostic/i;
++const CAL = /calibrat|aim|target/i;
++const ADAS_PART = /camera|radar|lidar|sonar|park(ing)? sensor|windshield|w\/shield|headlamp|distance sensor|blind spot|mirror.*camera/i;
++const NON_OEM = /\b(a\/m|aftermarket|lkq|recond|recore|nags|capa|used|rcy|opt oem|alt oem)\b/i;
++const SAFETY_PART = /rail|apron|reinf|bracket|absorber|beam|pillar|rocker|rail|airbag|seat belt|sensor|camera|radar|bumper|headlamp/i;
++const UPFIT = /partition|window bar|barrier|upfit|console|light ?bar|push bumper|spotlight|antenna|cage|prisoner/i;
++const GOV = /township|borough|county|city of|commonwealth|state of|police|sheriff|school district|authority|municipal|dept\.? of|department of/i;
++const LABOR_TAX_EXEMPT_STATES = new Set(["PA"]); // separately stated motor-vehicle repair labor not taxed; extend per jurisdiction table.
++const TYPOS: Record<string, string> = { wedl: "weld", replce: "replace", refnish: "refinish", panle: "panel" };
++
++export const RULES: Rule[] = [
++  /* ---------------- RR-001 repair vs. replace ---------------- */
++  {
++    id: "RR-001", cls: "REPAIR_REPLACE",
++    run(ctx) {
++      const hits = ctx.panels.filter(p => p.oper === "RPR" && (p.repairHrs ?? 0) > 0 && PANEL.test(p.section));
++      const out = [];
++      for (const p of hits) {
++        const adds = ctx.inSection(new RegExp(`^${escape(p.section)}$`)).filter(l => l.manual && PULL_WELD.test(l.desc) && (l.laborHrs ?? 0) > 0);
++        const addHrs = adds.reduce((s, l) => s + (l.laborHrs ?? 0), 0);
++        const total = (p.repairHrs ?? 0) + addHrs;
++        if (total < 6) continue;
++        const shellLine = ctx.lines.find(l => l.section === p.section && l.oper === "RPR");
++        const refs = lineNos([shellLine!, ...adds].filter(Boolean));
++        out.push({ p, adds, addHrs, total, refs });
++      }
++      if (!out.length) return null;
++      const worst = out.sort((a, b) => b.total - a.total)[0];
++      const make = ctx.est.header.vehicle.make ?? "OEM";
++      return f({
++        ruleId: "RR-001", cls: "REPAIR_REPLACE", severity: worst.adds.length ? "CRITICAL" : "HIGH",
++        title: `${worst.p.section.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}: repair vs. replace not defensible as written`,
++        lineRefs: worst.refs,
++        facts: [
++          `Repair time ${worst.p.repairHrs?.toFixed(1)} hr plus ${worst.addHrs.toFixed(1)} hr manual pull/weld adds = ${worst.total.toFixed(1)} hr body time on one panel.`,
++          worst.adds.length ? "Weld-on pulling implies load into the inner structure / intrusion beam; neither is mentioned on the estimate." : "No note documents why repair was chosen over an OEM replacement panel.",
++          `Repair at the profile rate = ${money(worst.total * ctx.rates.body)}; no OEM part price captured for comparison.`,
++        ],
++        authorities: [A.oem(make, "door intrusion beams / high-strength structural components are replace-only"), A.icar("UHSS components are not repairable"), A.motor("repair time is a judgment item; document the basis")],
++        action: `Re-inspect with trim removed; photograph inner structure and beam. If deformed, convert to Repl (dealer-quoted OEM shell) and drop the pull/weld add. If skin-only, add a line note stating the beam and inner panel were inspected and undamaged. Add 'Adjust' for the panel in either case.`,
++        exposure: { quantified: 0, direction: "MIXED", open: "OEM panel price and MOTOR R&R time required" },
++      });
++    },
++  },
++
++  /* ---------------- RS-001 side-impact restraint sensors ---------------- */
++  {
++    id: "RS-001", cls: "RESTRAINTS",
++    run(ctx) {
++      if (!ctx.impact.isSideImpact) return null;
++      if (ctx.has(SENSOR)) return null;
++      const doorWork = ctx.inSection(/door/i).length > 0;
++      const make = ctx.est.header.vehicle.make ?? "OEM";
++      const inspect = 0.3 * 2;
++      return f({
++        ruleId: "RS-001", cls: "RESTRAINTS", severity: "HIGH",
++        title: "Side-impact restraint sensors not inspected",
++        facts: [
++          `Point of impact is ${ctx.impact.label || "side"}; vehicle options list side / curtain airbags: ${ctx.hasOption(/side impact|curtain/i) ? "yes" : "not listed"}.`,
++          doorWork ? "Door panels on the impact side are being repaired or replaced; the door-mounted pressure sensor sits inside that structure." : "No sensor R&I, inspect, or replace line exists.",
++          "No line addresses the door pressure sensor or B-pillar acceleration sensor; scans alone do not satisfy an inspection requirement.",
++        ],
++        authorities: [A.oem(make, "restraints control module and impact sensors: inspect after any collision, replace if deformed or heat-exposed"), A.ccc("sensor inspection is a manual (not-included) operation")],
++        action: "Add 'Inspect side-impact (pressure) sensor' and 'Inspect B-pillar side-impact sensor' as manual lines with photo reference; convert to R&I/Repl if the panel is replaced or any deformation is found. Note that the post-repair scan must confirm no restraint DTCs.",
++        exposure: { quantified: r2(inspect * ctx.rates.body), direction: "INCREASE", open: "Sensor replacement TBD (dealer quote)" },
++      });
++    },
++  },
++
++  /* ---------------- ST-001 impact path / aperture ---------------- */
++  {
++    id: "ST-001", cls: "STRUCTURE",
++    run(ctx) {
++      if (!ctx.impact.isSideImpact) return null;
++      if (ctx.has(STRUCT_CHECK)) return null;
++      const heavy = ctx.panels.some(p => (p.repairHrs ?? 0) >= 4);
++      const hrs = 1.0 + 0.8;
++      return f({
++        ruleId: "ST-001", cls: "STRUCTURE", severity: heavy ? "HIGH" : "MEDIUM",
++        title: "Impact path not verified beyond the outer panels",
++        facts: [
++          `Side impact (${ctx.impact.label || "side"}) scoped to outer panels only; no line for pillar, rocker, aperture, hinge, striker, measure, or adjust.`,
++          heavy ? "Repair time on the impact panel is 4.0 hr or more, which is inconsistent with an untouched pillar and rocker." : "No documentation shows the pillar and rocker were checked.",
++        ],
++        authorities: [A.ccc("'Adjust door' and aperture inspection are not included in panel repair or R&I"), A.icar("side-impact damage analysis: verify pillar and rocker before authorizing door repair")],
++        action: "Add 'Inspect / measure pillar, rocker and aperture' (manual, photo-referenced) and 'Adjust' for each door on the impact side. If aperture deviation exists, rewrite as a structural estimate rather than supplementing.",
++        exposure: { quantified: r2(hrs * ctx.rates.body), direction: "INCREASE", open: "Structural repair TBD if found" },
++      });
++    },
++  },
++
++  /* ---------------- GR-001 graphics removed but not replaced ---------------- */
++  {
++    id: "GR-001", cls: "GRAPHICS",
++    run(ctx) {
++      const removes = ctx.find(GRAPHIC).filter(l => /remov|r&i|strip/i.test(l.desc) || (l.manual && (l.laborHrs ?? 0) > 0 && !/repl|apply|install/i.test(l.desc)));
++      if (!removes.length) return null;
++      const replaces = ctx.find(GRAPHIC).filter(l => /repl|apply|install|sublet|new/i.test(l.desc) || l.oper === "REPL" || l.oper === "SUBL");
++      if (replaces.length) return null;
++      const perDoor = 1.0;
++      return f({
++        ruleId: "GR-001", cls: "GRAPHICS", severity: "HIGH",
++        title: "Graphics removed but not replaced",
++        lineRefs: lineNos(removes),
++        facts: [
++          `${removes.length} line(s) pay to remove decals/graphics (${removes.reduce((s, l) => s + (l.laborHrs ?? 0), 0).toFixed(1)} hr); the panels are refinished.`,
++          "No line supplies or applies replacement graphics (sublet or in-house).",
++        ],
++        authorities: [A.ccc("graphics replacement and application are not included in any refinish operation"), A.industry("customary sublet, open to invoice")],
++        action: "Add 'Sublet: graphics — open to invoice' and application labor per panel; confirm the graphics source (upfitter / fleet vendor) with the owner.",
++        exposure: { quantified: r2(removes.length * perDoor * ctx.rates.body), direction: "INCREASE", open: "Graphics material / vendor invoice TBD" },
++      });
++    },
++  },
++
++  /* ---------------- NI-001 feather, prime & block ---------------- */
++  {
++    id: "NI-001", cls: "NOT_INCLUDED_OP",
++    run(ctx) {
++      const repaired = ctx.panels.filter(p => p.oper === "RPR" && (p.repairHrs ?? 0) > 0);
++      if (!repaired.length || ctx.has(FPB)) return null;
++      const hrs = repaired.reduce((s, p) => s + ((p.repairHrs ?? 0) >= 3 ? 1.0 : 0.5), 0);
++      const primerMask = ctx.has(/mask.*prim/i);
++      return f({
++        ruleId: "NI-001", cls: "NOT_INCLUDED_OP", severity: "MEDIUM",
++        title: "Feather, prime and block omitted on repaired panels",
++        facts: [
++          `${repaired.length} repaired panel(s) refinished: ${repaired.map(p => p.section).join(", ")}.`,
++          primerMask ? "'Mask for primer' is written, so priming is anticipated, but no feather/prime/block time appears." : "No feather/prime/block time appears.",
++        ],
++        authorities: [A.ccc("refinish time assumes a new undamaged panel; feather, prime and block of a repaired area is not included")],
++        action: `Add 'Feather, prime & block' as a manual body-labor line (${hrs.toFixed(1)} hr total across panels) plus materials at the paint-supply rate.`,
++        exposure: { quantified: r2(hrs * ctx.rates.body + hrs * ctx.rates.supplies), direction: "INCREASE" },
++      });
++    },
++  },
++
++  /* ---------------- RF-001 blend / tint consistency, paint code ---------------- */
++  {
++    id: "RF-001", cls: "REFINISH",
++    run(ctx) {
++      const refinished = ctx.panels.length > 0;
++      if (!refinished) return null;
++      const tint = ctx.find(TINT);
++      const blends = ctx.lines.filter(l => l.oper === "BLND" || BLEND.test(l.desc));
++      const code = ctx.est.header.vehicle.paintCode;
++      const problems: string[] = [];
++      if (tint.length && !blends.length) problems.push(`Color tint is written (${tint.reduce((s, l) => s + (l.paintHrs ?? l.laborHrs ?? 0), 0).toFixed(1)} hr) but no adjacent-panel blend is written; the two operations should agree.`);
++      if (!code) problems.push("Paint code is not captured in the header; the blend decision depends on it (metallic/pearl vs. solid).");
++      if (!problems.length) return null;
++      return f({
++        ruleId: "RF-001", cls: "REFINISH", severity: "MEDIUM",
++        title: "Blend decision unresolved / paint code not captured",
++        lineRefs: lineNos(tint),
++        facts: problems,
++        authorities: [A.ccc("blend adjacent panels is a not-included operation at 50% of panel refinish time"), A.motor("tint is written only when the color cannot be matched without adjustment")],
++        action: "Record the paint code from the door/VIN label. If metallic or pearl, add blends for adjacent panels with clear coat; if solid and matchable panel-to-panel, remove or justify the tint line.",
++        exposure: { quantified: 0, direction: "INCREASE", open: "Blends at 50% of MOTOR refinish time pending paint code" },
++      });
++    },
++  },
++
++  /* ---------------- TX-001 sales tax basis / exempt purchaser ---------------- */
++  {
++    id: "TX-001", cls: "TAX",
++    run(ctx) {
++      const t = ctx.est.totals;
++      if (!t.salesTax || t.salesTax.amount === 0) return null;
++      const state = ctx.est.header.owner?.state ?? ctx.est.header.repairFacility?.state ?? "";
++      const laborDollars = t.labor.reduce((s, l) => s + l.cost, 0);
++      const taxableGoods = t.parts + (t.paintSupplies?.cost ?? 0) + t.misc;
++      const laborTaxed = t.salesTax.basis > taxableGoods + 0.01;
++      const gov = ctx.est.header.owner?.isGovernment || GOV.test(ctx.est.header.owner?.name ?? "");
++      const facts: string[] = [];
++      let low = 0, high = 0;
++      if (laborTaxed && LABOR_TAX_EXEMPT_STATES.has(state)) {
++        const goodsOnly = r2(taxableGoods * t.salesTax.ratePct / 100);
++        facts.push(`Tax of ${t.salesTax.ratePct}% is applied to ${money(t.salesTax.basis)}, which includes ${money(laborDollars)} of labor; ${state} does not tax separately stated motor-vehicle repair labor. Goods-only basis = ${money(goodsOnly)}.`);
++        low = r2(t.salesTax.amount - goodsOnly);
++      }
++      if (gov) {
++        facts.push(`Owner/insured '${ctx.est.header.owner?.name}' appears to be a government entity; sales to political subdivisions are exempt.`);
++        high = t.salesTax.amount;
++      }
++      if (!facts.length) return null;
++      const auths = [];
++      if (laborTaxed && state === "PA") auths.push(A.tax("PA Dept. of Revenue REV-717 — motor vehicle repair labor separately stated is not taxable", "61 Pa. Code Ch. 31"));
++      if (gov && state === "PA") auths.push(A.tax("Sales to the Commonwealth and political subdivisions are exempt", "72 P.S. § 7204(12)"));
++      return f({
++        ruleId: "TX-001", cls: "TAX", severity: "MEDIUM",
++        title: "Sales tax basis and/or exempt purchaser",
++        facts,
++        authorities: auths,
++        action: "Correct the profile tax setting for this file (goods-only basis, or zero with the exemption certificate on file) and add a line note so the repairer does not re-add it.",
++        exposure: { quantified: -(high || low), quantifiedAlt: low && high ? -low : undefined, direction: "DECREASE", open: low && high ? `Overstated by ${money(low)} (goods-only) to ${money(high)} (exempt)` : undefined },
++      });
++    },
++  },
++
++  /* ---------------- UF-001 fleet / police upfit ---------------- */
++  {
++    id: "UF-001", cls: "UPFIT",
++    run(ctx) {
++      const v = ctx.est.header.vehicle;
++      const police = v.isPolice || /police|interceptor|pursuit|ssv|ppv/i.test(`${v.model} ${v.trim}`);
++      if (!police) return null;
++      if (ctx.has(UPFIT)) return null;
++      const doorTrim = ctx.find(/trim panel/i);
++      if (!doorTrim.length) return null;
++      return f({
++        ruleId: "UF-001", cls: "UPFIT", severity: "MEDIUM",
++        title: "Police upfit equipment not confirmed or scoped",
++        lineRefs: lineNos(doorTrim),
++        facts: [
++          "Vehicle is a police / pursuit unit; door trim panels are being removed.",
++          "No line addresses upfitter equipment (window barriers, partition mounts, door-disable hardware, spotlights, antennas).",
++        ],
++        authorities: [A.ccc("R&I of non-OEM upfit equipment is not part of any MOTOR operation")],
++        action: "Verify with the fleet contact which upfit items are on the affected doors; add R&I lines or a sublet-to-upfitter line.",
++        exposure: { quantified: 0, direction: "INCREASE", open: "Typically 0.5–1.5 hr if window barriers are present" },
++      });
++    },
++  },
++
++  /* ---------------- HD-001 header completeness ---------------- */
++  {
++    id: "HD-001", cls: "HEADER",
++    run(ctx) {
++      const h = ctx.est.header;
++      const missing: string[] = [];
++      if (!h.daysToRepair) missing.push("Days to Repair (0 / blank)");
++      if (!h.typeOfLoss) missing.push("Type of Loss");
++      if (!h.policyNo) missing.push("Policy #");
++      if (!h.vehicle.paintCode) missing.push("Paint code");
++      if (!h.vehicle.interiorColor) missing.push("Interior color");
++      if (!h.repairFacility?.name) missing.push("Repair facility");
++      if (missing.length < 2) return null;
++      const hrs = ctx.est.totals.labor.reduce((s, l) => s + l.hours, 0);
++      return f({
++        ruleId: "HD-001", cls: "HEADER", severity: "LOW",
++        title: "Header fields incomplete",
++        facts: [`Blank or zero: ${missing.join("; ")}.`, `Written labor content is ${hrs.toFixed(1)} hr, which implies a non-zero cycle time.`],
++        authorities: [A.reg("Appraisal must be complete and legible", "31 Pa. Code § 62.3")],
++        action: "Populate Type of Loss, Days to Repair (from labor content plus parts lead time), paint code, and the repair facility once known.",
++        exposure: { quantified: 0, direction: "INCREASE" },
++      });
++    },
++  },
++
++  /* ---------------- DB-001 labor + sublet on the same operation ---------------- */
++  {
++    id: "DB-001", cls: "DOUBLE_BOOK",
++    run(ctx) {
++      const dbl = ctx.lines.filter(l => (l.laborHrs ?? 0) > 0 && (l.notes ?? []).some(n => /sublet|invoice/i.test(n)));
++      if (!dbl.length) return null;
++      return f({
++        ruleId: "DB-001", cls: "DOUBLE_BOOK", severity: "LOW",
++        title: "Operation written as labor and as sublet",
++        lineRefs: lineNos(dbl),
++        facts: dbl.map(l => `Line ${l.lineNo}: ${l.laborHrs?.toFixed(1)} hr labor plus note '${(l.notes ?? []).join("; ")}'.`),
++        authorities: [A.industry("either in-house labor or sublet at invoice, not both")],
++        action: "Choose one method per operation: keep the labor and remove the note, or convert to a sublet line with a $0.00 placeholder and the note.",
++        exposure: { quantified: 0, direction: "MIXED", open: "Prevents a duplicate on the supplement" },
++      });
++    },
++  },
++
++  /* ---------------- MC-001 hazardous waste ---------------- */
++  {
++    id: "MC-001", cls: "MISC_CHARGES",
++    run(ctx) {
++      const ref = ctx.est.totals.labor.find(l => l.category === "REFINISH")?.hours ?? 0;
++      if (ref <= 0 || ctx.has(HAZ)) return null;
++      return f({
++        ruleId: "MC-001", cls: "MISC_CHARGES", severity: "LOW",
++        title: "No hazardous-waste line",
++        facts: [`${ref.toFixed(1)} hr of refinish is written with no paint/solvent waste disposal charge.`],
++        authorities: [A.industry("customary, separately billed shop charge when refinish is performed")],
++        action: "Add 'Hazardous waste removal' as a manual misc line at the profile amount.",
++        exposure: { quantified: 0, direction: "INCREASE", open: "Profile amount, typically $5–$10" },
++      });
++    },
++  },
++
++  /* ---------------- HY-001 document hygiene ---------------- */
++  {
++    id: "HY-001", cls: "HYGIENE",
++    run(ctx) {
++      const issues: string[] = [];
++      const refs: number[] = [];
++      for (const l of ctx.lines) {
++        for (const [bad, good] of Object.entries(TYPOS)) {
++          if (new RegExp(`\\b${bad}\\b`, "i").test(l.desc)) { issues.push(`Line ${l.lineNo}: '${bad}' → '${good}'.`); if (l.lineNo) refs.push(l.lineNo); }
++        }
++      }
++      const cert = ctx.est.header.certificationText ?? "";
++      if (/insurance commission/i.test(cert)) issues.push("Certification references a 'State Insurance Commission'; the Pennsylvania regulator is the Insurance Department.");
++      if (!issues.length) return null;
++      return f({
++        ruleId: "HY-001", cls: "HYGIENE", severity: "LOW",
++        title: "Document hygiene",
++        lineRefs: refs,
++        facts: issues,
++        authorities: [A.reg("Appraiser certification", "31 Pa. Code § 62.3(e)")],
++        action: "Correct the typo(s) and update the certification template.",
++        exposure: { quantified: 0, direction: "INCREASE" },
++      });
++    },
++  },
++
++  /* ---------------- AD-001 scans and calibration ---------------- */
++  {
++    id: "AD-001", cls: "ADAS",
++    run(ctx) {
++      const facts: string[] = [];
++      const pre = ctx.has(/pre[- ]?repair scan|pre[- ]?scan/i);
++      const post = ctx.has(/post[- ]?repair scan|post[- ]?scan/i);
++      if (!pre) facts.push("No pre-repair diagnostic scan line.");
++      if (!post) facts.push("No post-repair diagnostic scan line.");
++      const adasLines = ctx.find(ADAS_PART).filter(l => ["R&I", "R&R", "REPL"].includes(l.oper));
++      if (adasLines.length && !ctx.has(CAL)) facts.push(`ADAS-related component(s) removed or replaced (${adasLines.map(l => `Ln ${l.lineNo}`).join(", ")}) with no calibration/aim line.`);
++      if (!facts.length) return null;
++      const make = ctx.est.header.vehicle.make ?? "OEM";
++      return f({
++        ruleId: "AD-001", cls: "ADAS", severity: "HIGH",
++        title: "Diagnostic scan / calibration gap",
++        lineRefs: lineNos(adasLines),
++        facts,
++        authorities: [A.oem(make, "pre- and post-repair scans and calibration after R&I/replacement of ADAS components")],
++        action: "Add the missing scan line(s) and a calibration line (static/dynamic per OEM procedure) for each affected component.",
++        exposure: { quantified: 0, direction: "INCREASE", open: "Calibration sublet / labor per OEM procedure" },
++      });
++    },
++  },
++
++  /* ---------------- PT-001 non-OEM markers on safety / structural parts ---------------- */
++  {
++    id: "PT-001", cls: "PARTS",
++    run(ctx) {
++      const flagged = ctx.lines.filter(l => l.oper === "REPL" && NON_OEM.test(`${l.desc} ${l.partNo ?? ""}`) && SAFETY_PART.test(l.desc));
++      if (!flagged.length) return null;
++      const make = ctx.est.header.vehicle.make ?? "OEM";
++      return f({
++        ruleId: "PT-001", cls: "PARTS", severity: "HIGH",
++        title: "Non-OEM part specified on a safety or structural component",
++        lineRefs: lineNos(flagged),
++        facts: flagged.map(l => `Line ${l.lineNo}: ${l.desc}`),
++        authorities: [A.oem(make, "new OEM parts for structural / safety components")],
++        action: "Replace with OEM part number and dealer price; attach the position statement.",
++        exposure: { quantified: 0, direction: "INCREASE", open: "OEM vs. alternate price difference" },
++      });
++    },
++  },
++];
++
++function escape(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
++const r2 = (n: number) => Math.round(n * 100) / 100;
+diff --git a/src/lib/reports/forensicSingle/rules/context.ts b/src/lib/reports/forensicSingle/rules/context.ts
+new file mode 100644
+index 0000000..9a6d650
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/rules/context.ts
+@@ -0,0 +1,89 @@
++import type { EstimateLine, NormalizedEstimate, Finding, Severity, Authority, Exposure, FindingClass } from "../types";
++import { panelRefinishGroups, type PanelGroup } from "../reconcile";
++
++/** Everything a rule may read. Built once per run. */
++export interface RuleContext {
++  est: NormalizedEstimate;
++  lines: EstimateLine[];
++  text: string;                       // all descs + notes + boilerplate, lower-cased
++  rates: { body: number; refinish: number; mech: number; supplies: number };
++  panels: PanelGroup[];
++  impact: ImpactProfile;
++  has(re: RegExp): boolean;           // any line desc/notes match
++  find(re: RegExp): EstimateLine[];
++  inSection(re: RegExp): EstimateLine[];
++  hasOption(re: RegExp): boolean;
++}
++
++export interface ImpactProfile {
++  side: "LT" | "RT" | null;
++  isSideImpact: boolean;              // T-bone / side codes
++  isFront: boolean;
++  isRear: boolean;
++  label: string;
++}
++
++export interface Rule {
++  id: string;
++  cls: FindingClass;
++  /** Return null when the rule does not fire. */
++  run(ctx: RuleContext): Omit<Finding, "id"> | null;
++}
++
++export function buildContext(est: NormalizedEstimate): RuleContext {
++  const lines = est.lines;
++  const text = [
++    ...lines.map(l => `${l.section} ${l.oper} ${l.desc} ${(l.notes ?? []).join(" ")}`),
++    est.boilerplate ?? "",
++  ].join("\n").toLowerCase();
++  const rate = (c: string) => est.totals.labor.find(l => l.category === c)?.rate ?? 0;
++  const body = rate("BODY");
++  const rates = { body, refinish: rate("REFINISH") || body, mech: rate("MECH") || body, supplies: est.totals.paintSupplies?.rate ?? 0 };
++  const opts = (est.header.vehicle.options ?? []).join(" | ").toLowerCase();
++  const impact = impactProfile(est);
++  const matchLine = (l: EstimateLine, re: RegExp) => re.test(`${l.desc} ${(l.notes ?? []).join(" ")}`);
++  return {
++    est, lines, text, rates, panels: panelRefinishGroups(est), impact,
++    has: re => lines.some(l => matchLine(l, re)),
++    find: re => lines.filter(l => matchLine(l, re)),
++    inSection: re => lines.filter(l => re.test(l.section)),
++    hasOption: re => re.test(opts),
++  };
++}
++
++export function impactProfile(est: NormalizedEstimate): ImpactProfile {
++  const label = (est.header.pointOfImpact?.label ?? "").toLowerCase();
++  const code = est.header.pointOfImpact?.code ?? "";
++  const side = /right|rt\b/.test(label) ? "RT" : /left|lt\b/.test(label) ? "LT" : null;
++  // CCC POI codes: 01 front, 02 RF, 03 right side / T-bone, 04 RR, 05 rear, 06 LR, 07 left side, 08 LF
++  const isSideImpact = /t-bone|side/.test(label) || ["03", "07"].includes(code);
++  return {
++    side, isSideImpact,
++    isFront: /front/.test(label) || ["01", "02", "08"].includes(code),
++    isRear: /rear/.test(label) || ["04", "05", "06"].includes(code),
++    label: est.header.pointOfImpact?.label ?? "",
++  };
++}
++
++/* helpers for rule authors */
++export const f = (
++  p: { ruleId: string; cls: FindingClass; severity: Severity; title: string; lineRefs?: number[];
++       facts: string[]; authorities?: Authority[]; action: string; exposure?: Partial<Exposure> },
++): Omit<Finding, "id"> => ({
++  ruleId: p.ruleId, cls: p.cls, severity: p.severity, title: p.title,
++  lineRefs: p.lineRefs ?? [], facts: p.facts, authorities: p.authorities ?? [], action: p.action,
++  exposure: { quantified: 0, direction: "INCREASE", ...p.exposure },
++});
++
++export const A = {
++  motor: (label: string): Authority => ({ kind: "MOTOR_GTE", label: `MOTOR Guide to Estimating — ${label}` }),
++  ccc: (label: string): Authority => ({ kind: "CCC_GTE", label: `CCC ONE / MOTOR not-included operations — ${label}` }),
++  oem: (make: string, topic: string): Authority => ({ kind: "OEM_POSITION", label: `${make} position statement — ${topic}` }),
++  icar: (topic: string): Authority => ({ kind: "ICAR", label: `I-CAR — ${topic}` }),
++  reg: (label: string, citation?: string): Authority => ({ kind: "REGULATION", label, citation }),
++  tax: (label: string, citation?: string): Authority => ({ kind: "TAX_GUIDANCE", label, citation }),
++  industry: (label: string): Authority => ({ kind: "INDUSTRY", label }),
++};
++
++export const money = (n: number) => `$${n.toFixed(2)}`;
++export const lineNos = (ls: EstimateLine[]) => ls.map(l => l.lineNo).filter((n): n is number => n != null);
+diff --git a/src/lib/reports/forensicSingle/types.ts b/src/lib/reports/forensicSingle/types.ts
+new file mode 100644
+index 0000000..3be93cc
+--- /dev/null
++++ b/src/lib/reports/forensicSingle/types.ts
+@@ -0,0 +1,198 @@
++/**
++ * forensic-single — single-estimate forensic review for Collision IQ.
++ *
++ * Adapter contract. Map the output of estimate-normalize.ts onto
++ * `NormalizedEstimate` in adapters/from-normalized.ts. Every field the rule
++ * catalog reads is declared here; nothing else is required.
++ */
++
++export type EstimatingSystem = "CCC" | "MITCHELL" | "AUDATEX" | "UNKNOWN";
++
++export type Operation =
++  | "REPL" | "RPR" | "R&I" | "R&R" | "REFN" | "BLND" | "SUBL" | "ALGN"
++  | "SECT" | "OH" | "ADD" | "MANUAL" | "NOTE" | "UNKNOWN";
++
++export type LaborType = "BODY" | "REFINISH" | "MECH" | "STRUCT" | "FRAME" | "ELEC" | "GLASS" | "DIAG" | "UNKNOWN";
++
++export interface EstimateLine {
++  /** Printed line number; null for continuation/notes rows. */
++  lineNo: number | null;
++  /** Section header the line sits under, e.g. "FRONT DOOR", "VEHICLE DIAGNOSTICS". */
++  section: string;
++  oper: Operation;
++  /** Raw description as printed, one line, whitespace-collapsed. */
++  desc: string;
++  partNo?: string;
++  qty?: number;
++  /** Extended price in dollars (already qty-multiplied), null if none. */
++  price: number | null;
++  /** Labor hours as printed; null if blank or "Incl." */
++  laborHrs: number | null;
++  laborType: LaborType;
++  /** Refinish hours (paint column); null if blank. */
++  paintHrs: number | null;
++  /** True when the hours cell printed "Incl." */
++  included?: boolean;
++  /** Manual entry marker (# in CCC). */
++  manual?: boolean;
++  /** Free-text notes attached to the line ("Sublet cost open to invoice"). */
++  notes?: string[];
++  /** Taxed-misc marker (T in CCC), when the extractor sees one. */
++  taxed?: boolean;
++  /** Side token when the extractor resolves it. */
++  side?: "LT" | "RT" | "BOTH" | null;
++}
++
++export interface LaborCategoryTotal {
++  category: "BODY" | "REFINISH" | "MECH" | "STRUCT" | "FRAME" | "ELEC" | "GLASS" | "DIAG" | "PAINT_SUPPLIES" | "OTHER";
++  hours: number;
++  rate: number;
++  cost: number;
++}
++
++export interface PrintedTotals {
++  parts: number;
++  labor: LaborCategoryTotal[];
++  paintSupplies?: { hours: number; rate: number; cost: number };
++  misc: number;
++  other: number;
++  subtotal: number;
++  salesTax: { basis: number; ratePct: number; amount: number } | null;
++  grandTotal: number;
++  deductible?: number | null;
++  netCost?: number | null;
++}
++
++export interface EstimateHeader {
++  system: EstimatingSystem;
++  documentTitle?: string;          // "Estimate of Record", "Supplement 1", ...
++  claimNo?: string;
++  workfileId?: string;
++  policyNo?: string;
++  typeOfLoss?: string;
++  dateOfLoss?: string;             // ISO
++  printedAt?: string;              // ISO
++  daysToRepair?: number | null;
++  pointOfImpact?: { code?: string; label?: string } | null;
++  writer?: { name?: string; license?: string; company?: string };
++  adjuster?: { name?: string; phone?: string };
++  owner?: { name?: string; address?: string; state?: string; isGovernment?: boolean };
++  repairFacility?: { name?: string; address?: string; state?: string } | null;
++  vehicle: {
++    year?: number; make?: string; model?: string; trim?: string;
++    vin?: string; odometer?: number; exteriorColor?: string; paintCode?: string | null;
++    interiorColor?: string | null; productionDate?: string | null;
++    isFleet?: boolean; isPolice?: boolean;
++    options?: string[];
++  };
++  priorDamageNote?: string | null;
++  /** Free text found under the certification block, if any. */
++  certificationText?: string | null;
++}
++
++export interface NormalizedEstimate {
++  header: EstimateHeader;
++  lines: EstimateLine[];
++  totals: PrintedTotals;
++  /** Body text outside the line grid (legends, disclosures). */
++  boilerplate?: string;
++}
++
++/* ------------------------------------------------------------------ */
++/* Findings                                                            */
++/* ------------------------------------------------------------------ */
++
++export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
++
++export type FindingClass =
++  | "REPAIR_REPLACE"        // repair hours vs OEM position / replace economics
++  | "RESTRAINTS"            // side-impact / airbag sensor handling
++  | "STRUCTURE"             // impact path, aperture, adjust, measure
++  | "GRAPHICS"              // decals/graphics removed but not replaced
++  | "NOT_INCLUDED_OP"       // feather/prime/block, blend, adjust, etc.
++  | "REFINISH"              // blend / tint / paint-code consistency
++  | "TAX"                   // sales tax basis, exempt purchaser
++  | "UPFIT"                 // fleet/police upfit equipment
++  | "HEADER"                // missing header fields
++  | "DOUBLE_BOOK"           // labor + sublet on same op
++  | "MISC_CHARGES"          // hazardous waste, EPC
++  | "HYGIENE"               // typos, certification wording
++  | "ADAS"                  // scan/calibration
++  | "PARTS"                 // non-OEM markers on safety/structural parts
++  | "RECONCILIATION";       // printed totals do not rebuild
++
++export interface Exposure {
++  /** Dollars quantifiable at the estimate's own rates; 0 when TBD. */
++  quantified: number;
++  /** Optional alternative value when two defensible bases exist (e.g. goods-only tax vs. fully exempt). */
++  quantifiedAlt?: number;
++  /** Human note for unquantified components. */
++  open?: string;
++  /** Sign: positive increases the estimate, negative reduces it. */
++  direction: "INCREASE" | "DECREASE" | "MIXED";
++}
++
++export interface Authority {
++  kind: "MOTOR_GTE" | "CCC_GTE" | "OEM_POSITION" | "ICAR" | "STATUTE" | "REGULATION" | "TAX_GUIDANCE" | "INDUSTRY";
++  label: string;              // "Ford position statement — impact sensors"
++  citation?: string;          // section / doc id / URL when known
++  /** Set by the narrative layer after RAG retrieval; never invented by rules. */
++  verified?: boolean;
++}
++
++export interface Finding {
++  id: string;                 // "F-01"
++  ruleId: string;             // "RR-001"
++  cls: FindingClass;
++  severity: Severity;
++  title: string;
++  /** Line numbers implicated (empty = absence finding). */
++  lineRefs: number[];
++  /** Deterministic facts the rule observed — narrative must not contradict. */
++  facts: string[];
++  /** Authorities the rule expects to apply; narrative layer verifies/cites. */
++  authorities: Authority[];
++  /** Templated action; narrative layer may expand but not drop. */
++  action: string;
++  exposure: Exposure;
++  /** Filled by narrative layer. */
++  narrative?: {
++    observation: string;
++    basis: string;
++    action: string;
++    exposure: string;
++  };
++}
++
++export interface ReconciliationRow {
++  category: string;
++  rebuiltFrom: string;
++  rebuilt: number;
++  printed: number;
++  variance: number;
++}
++
++export interface Reconciliation {
++  rows: ReconciliationRow[];
++  unexplained: number;         // sum |variance| over rows; closure standard 0.00
++  notes: string[];
++  clearCoatCheck?: string[];
++}
++
++export interface ForensicReport {
++  mode: "SINGLE";
++  generatedAt: string;
++  header: EstimateHeader;
++  printedTotals: PrintedTotals;
++  reconciliation: Reconciliation;
++  verdict: { headline: string; recommendation: string; holdRelease: boolean };
++  findings: Finding[];
++  correctlyWritten: string[];
++  exposure: {
++    quantifiedLow: number;
++    quantifiedHigh: number;
++    openItems: string[];
++  };
++  checklist: { n: number; action: string; ref: string }[];
++  references: string[];
++}
+-- 
+2.43.0
+
