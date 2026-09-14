@@ -550,7 +550,7 @@ function engineResultToLineItemDeltas(params: {
  *  double every glyph in the WORD layer too ("$$77,,117744..8811"), and no
  *  money or label pattern in the engine matches the doubled form. Identity on
  *  plain text. */
-function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
+export function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
   const byPage = new Map<number, DeltaEngineWord[]>();
   for (const word of words) {
     const list = byPage.get(word.pageNumber) ?? [];
@@ -1228,11 +1228,21 @@ export function buildProductionReleaseBundle(input: {
     const key = authority.title.trim().toLowerCase();
     attachedTitles.set(key, [...(attachedTitles.get(key) ?? []), finding.id]);
   }
-  const authorities = classifyAuthorities(input.retrievedSources).accepted.map((authority) => ({
-    title: authority.title,
-    tier: authority.tier,
-    attached_to: attachedTitles.get(authority.title.trim().toLowerCase()) ?? null,
-  }));
+  // The bundle's authority list is the authority TABLE the report prints,
+  // not the retrieval log. The renderer (forensicReportRenderer, R26/U7)
+  // lists a source below the industry-body tier only when a finding relied
+  // on it and discloses the rest as "retrieved, not relied upon"; the bundle
+  // must mirror that, or the gate refuses a run over a source the report
+  // would never have printed. A pair with clean findings and three
+  // unattached tier-5 search hits shipped nothing for exactly that reason.
+  const attachmentThreshold = DELTA_RULES.authority.tableRequiresAttachmentAboveTier;
+  const authorities = classifyAuthorities(input.retrievedSources)
+    .accepted.map((authority) => ({
+      title: authority.title,
+      tier: authority.tier,
+      attached_to: attachedTitles.get(authority.title.trim().toLowerCase()) ?? null,
+    }))
+    .filter((authority) => authority.tier <= attachmentThreshold || (authority.attached_to?.length ?? 0) > 0);
 
   return {
     run_mode: runMode,

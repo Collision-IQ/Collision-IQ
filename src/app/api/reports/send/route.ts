@@ -10,6 +10,7 @@ export type ReportKind =
   | "customer_report"
   | "repair_intelligence"
   | "estimate_scrubber"
+  | "forensic_estimate_review"
   | "oem_citation_density"
   | "policy_rights_review";
 
@@ -37,6 +38,7 @@ const REPORT_TYPES: ReportKind[] = [
   "customer_report",
   "repair_intelligence",
   "estimate_scrubber",
+  "forensic_estimate_review",
   "oem_citation_density",
   "policy_rights_review",
 ];
@@ -75,6 +77,12 @@ export async function POST(request: Request) {
   if (reportType === "estimate_scrubber" && !/^delta-citation-density-report\.pdf$/i.test(filename)) {
     return NextResponse.json(
       { error: "Delta Citation Density Report email requires the annotated original-estimate PDF artifact." },
+      { status: 400 }
+    );
+  }
+  if (reportType === "forensic_estimate_review" && !/^forensic-estimate-review\.pdf$/i.test(filename)) {
+    return NextResponse.json(
+      { error: "Forensic Estimate Review email requires the Forensic Estimate Review PDF artifact." },
       { status: 400 }
     );
   }
@@ -238,6 +246,8 @@ function safeReportLabel(reportType: ReportKind): string {
       return "Repair Intelligence Report";
     case "estimate_scrubber":
       return "Delta Citation Density Report";
+    case "forensic_estimate_review":
+      return "Forensic Estimate Review";
     case "oem_citation_density":
       return "OEM Citation Density Report";
     case "policy_rights_review":

@@ -13,7 +13,7 @@
  * layout and wording, never arithmetic.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import { withWinAnsiPage } from "@/lib/pdf/winAnsiText";
+import { toWinAnsiPdfText, withWinAnsiPage } from "@/lib/pdf/winAnsiText";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import { maskVinForExport, redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import RULES from "./data/deltaRules.json";
@@ -49,7 +49,12 @@ const hours = (value: number | null | undefined): string =>
 
 type Cursor = { page: PDFPage; y: number; pageNumber: number };
 
-class Writer {
+/**
+ * Shared page writer. Exported so sibling report renderers (the single-
+ * estimate Forensic Estimate Review) lay out on the same frame, fonts and
+ * footer without duplicating the pagination logic.
+ */
+export class Writer {
   private readonly doc: PDFDocument;
   readonly font: PDFFont;
   readonly bold: PDFFont;
@@ -96,9 +101,13 @@ class Writer {
     return PAGE_WIDTH - MARGIN * 2;
   }
 
-  /** Greedy wrap on word boundaries; never splits a word mid-token. */
+  /** Greedy wrap on word boundaries; never splits a word mid-token.
+   * Text is folded to WinAnsi BEFORE measuring: the page guard only wraps
+   * drawText, and a standard font throws on width measurement of a glyph it
+   * cannot encode ("→", "≥") — a finding sentence carrying one would abort
+   * the whole render before a page was drawn. */
   wrap(text: string, size: number, font: PDFFont, maxWidth: number): string[] {
-    const words = text.split(/\s+/).filter(Boolean);
+    const words = toWinAnsiPdfText(text).split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
     for (const word of words) {

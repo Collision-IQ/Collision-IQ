@@ -77,6 +77,7 @@ import {
   buildReviewCompletenessMessage,
 } from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
+import { planReports } from "@/lib/reports/forensicSingle/reportPlan";
 import { selectAcademyServiceCta, type AcademyServiceCta } from "@/lib/academy/serviceCta";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -143,6 +144,7 @@ export type ReportKind =
   | "customer_report"
   | "repair_intelligence"
   | "estimate_scrubber"
+  | "forensic_estimate_review"
   | "estimator_change_request_list"
   | "policy_rights_review"
   | "oem_citation_density"
@@ -2385,9 +2387,28 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
-  const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
-    (doc) => doc.kind === "estimate"
-  ).length;
+  // Distinct estimate FILES. The evidence registry keeps one entry per
+  // attachment id and merges across every analysis run on the case, so the
+  // same print uploaded twice would otherwise count as a pair.
+  const reviewedEstimateCount = new Set(
+    buildReportUploadedDocuments(analysisResult)
+      .filter((doc) => doc.kind === "estimate")
+      .map((doc) => (doc.filename ?? doc.id ?? "").trim().toLowerCase())
+  ).size;
+  // Report-mode routing (Sep 2026): one estimate on file → Forensic Estimate
+  // Review only; two → the two-estimate Forensic Analysis + Citation Density.
+  // Client-side candidates only exist for files uploaded this session, so the
+  // analysis's own reviewed-estimate count stands in on a restored case. The
+  // server re-derives the plan from the stored attachments and answers 409
+  // when the client guessed single but the case carries a pair.
+  const reportPlan = useMemo(() => {
+    const ids =
+      citationDensityEstimateCandidates.length >= reviewedEstimateCount
+        ? citationDensityEstimateCandidates.map((candidate) => candidate.documentId)
+        : Array.from({ length: reviewedEstimateCount }, (_, index) => `reviewed-estimate-${index + 1}`);
+    return planReports({ estimateIds: ids });
+  }, [citationDensityEstimateCandidates, reviewedEstimateCount]);
+  const forensicSingleMode = reportPlan.mode === "FORENSIC_SINGLE";
   const serviceIntentText = [
     caseIntent,
     primaryAnalysisContent,
@@ -2547,11 +2568,11 @@ function RailContent({
       setSnapshotStatus("Snapshot could not be generated from the current report.");
       return;
     }
-    if ((reportType === "estimate_scrubber" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
+    if ((reportType === "estimate_scrubber" || reportType === "forensic_estimate_review" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
       setReportSendStatus(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
       return;
     }
-    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "oem_citation_density" && !canRenderExports) {
+    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "forensic_estimate_review" && reportType !== "oem_citation_density" && !canRenderExports) {
       setReportSendStatus("Report is not ready to send yet.");
       return;
     }
@@ -2682,8 +2703,16 @@ function RailContent({
   }
 
   async function downloadReportDocument(reportType: ReportKind) {
-    if (reportType === "estimate_scrubber") {
+    if (reportType === "estimate_scrubber" || reportType === "forensic_estimate_review") {
       try {
+        if (forensicSingleMode) {
+          const forensicResult = await generateForensicEstimateReview();
+          if (forensicResult) {
+            downloadBlob(forensicResult.blob, forensicResult.filename);
+            setReportSendStatus(buildForensicEstimateReviewStatus(forensicResult));
+            return;
+          }
+        }
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
         await downloadCitationDensityFindingsReport(exportResult);
@@ -2771,6 +2800,69 @@ function RailContent({
       plan,
       exportType: "customer_report",
     });
+  }
+
+  type ForensicEstimateReviewResult = {
+    blob: Blob;
+    filename: string;
+    pageCount: number;
+    headline: string;
+    recommendation: string;
+    holdRelease: boolean;
+    findingCount: number;
+    warnings: string[];
+  };
+
+  /**
+   * Single-estimate Forensic Estimate Review. Returns null when the server
+   * finds a second estimate on the case (409) — the caller then continues
+   * with the two-estimate Citation Density flow, which is the right report
+   * for a pair.
+   */
+  async function generateForensicEstimateReview(): Promise<ForensicEstimateReviewResult | null> {
+    if (!analysisReportId) {
+      throw new Error("The Forensic Estimate Review needs an active case.");
+    }
+    setReportSendStatus("Generating Forensic Estimate Review...");
+    const response = await fetch("/api/reports/forensic-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        caseId: analysisReportId,
+        selectedSourceDocumentId: citationDensitySelectedSourceDocumentId || undefined,
+        redactSensitive: true,
+      }),
+    });
+    const data = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      mode?: string;
+      pdfBase64?: unknown;
+      filename?: unknown;
+      pageCount?: unknown;
+      warnings?: unknown;
+      summary?: { headline?: unknown; recommendation?: unknown; holdRelease?: unknown; findingCount?: unknown };
+      error?: string;
+      userMessage?: string;
+    } | null;
+    if (response.status === 409 && data?.mode === "FORENSIC_WITH_CITATION_DENSITY") {
+      return null;
+    }
+    if (!response.ok || typeof data?.pdfBase64 !== "string") {
+      throw new Error(formatAnnotatedExportError(data, "Forensic Estimate Review failed."));
+    }
+    return {
+      blob: pdfBase64ToBlob(data.pdfBase64),
+      filename: typeof data.filename === "string" ? data.filename : getDefaultReportFilename("forensic_estimate_review"),
+      pageCount: typeof data.pageCount === "number" ? data.pageCount : 0,
+      headline: typeof data.summary?.headline === "string" ? data.summary.headline : "",
+      recommendation: typeof data.summary?.recommendation === "string" ? data.summary.recommendation : "",
+      holdRelease: data.summary?.holdRelease === true,
+      findingCount: typeof data.summary?.findingCount === "number" ? data.summary.findingCount : 0,
+      warnings: Array.isArray(data.warnings)
+        ? data.warnings.filter((warning): warning is string => typeof warning === "string")
+        : [],
+    };
   }
 
   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
@@ -3054,8 +3146,58 @@ function RailContent({
     setCustomerReportError(null);
 
     try {
-      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "oem_citation_density") {
-        const reportTypeForRegenerate = activeReportToSend;
+      if (activeReportToSend === "forensic_estimate_review") {
+        const forensicResult = await generateForensicEstimateReview();
+        if (forensicResult) {
+          const pdfBase64 = await blobToBase64(forensicResult.blob);
+          const response = await fetch("/api/reports/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              reportType: "forensic_estimate_review",
+              destinationType: reportSendTarget,
+              recipientEmail: reportRecipientEmail,
+              subject: reportSubject,
+              message: reportMessage,
+              pdfBase64,
+              filename: forensicResult.filename,
+              metadata: {
+                caseId: analysisReportId ?? undefined,
+                vehicle: vehicleIdentity ?? undefined,
+                vin: vehicleVin ?? undefined,
+                customerEmail: undefined,
+              },
+            }),
+          });
+          const result = (await response.json().catch(() => null)) as {
+            deliveryMode?: "email" | "manual";
+            message?: string;
+            error?: string;
+          } | null;
+          if (!response.ok) {
+            throw new Error(result?.error || "Forensic Estimate Review email failed.");
+          }
+          if (result?.deliveryMode === "manual") {
+            setReportSendStatus(result.message || "Email provider is not configured. Download the PDF and send manually.");
+          } else {
+            setReportSent(true);
+            setReportSendStatus(buildForensicEstimateReviewStatus(forensicResult, "Sent successfully."));
+          }
+          emitSafeCrmEventFromClient({
+            event: "report_sent",
+            plan,
+            exportType: "forensic_estimate_review",
+            destinationType: reportSendTarget,
+          });
+          if (analysisReportId) {
+            void fetchReportSendHistory();
+          }
+          return;
+        }
+      }
+      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "forensic_estimate_review" || activeReportToSend === "oem_citation_density") {
+        const reportTypeForRegenerate: ReportKind = activeReportToSend === "forensic_estimate_review" ? "estimate_scrubber" : activeReportToSend;
         const exportResult = activeReportToSend === "oem_citation_density"
           ? await generateOemCitationDensityReport()
           : await generateAnnotatedCitationDensityEstimate();
@@ -3072,7 +3214,7 @@ function RailContent({
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify({
-            reportType: activeReportToSend,
+            reportType: reportTypeForRegenerate,
             destinationType: reportSendTarget,
             recipientEmail: reportRecipientEmail,
             subject: reportSubject,
@@ -3881,7 +4023,7 @@ function RailContent({
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
-            {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
+            {(canUseEstimateScrubberExport || canUsePolicyRightsReviewExport) && !forensicSingleMode ? (
               <CitationDensityTargetSelector
                 value={citationDensityTargetEstimate}
                 onChange={onCitationDensityTargetEstimateChange}
@@ -3895,10 +4037,12 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
-                    Citation Density Report
+                    {reportPlan.card.title}
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations.
+                    {forensicSingleMode
+                      ? reportPlan.card.description
+                      : "Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations."}
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -3909,26 +4053,26 @@ function RailContent({
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
-                        exportType: "estimate_scrubber",
+                        exportType: forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber",
                       });
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                     data-tour="download-button"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Citation Density Report</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {forensicSingleMode ? reportPlan.card.downloadLabel : "Download Citation Density Report"}</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
-                    onClick={() => openReportSend("estimate_scrubber", "carrier")}
+                    onClick={() => openReportSend(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Citation Density Report</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> {forensicSingleMode ? "Email Forensic Report" : "Email Citation Density Report"}</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
-                  send={getLastSendFor("estimate_scrubber")}
+                  send={getLastSendFor(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber")}
                   loading={reportSendHistoryLoading}
                 />
               </div>
@@ -4055,7 +4199,7 @@ function RailContent({
 
       {variant === "reports-tab" && (canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
         <div className="flex flex-col gap-3">
-          {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
+          {(canUseEstimateScrubberExport || canUsePolicyRightsReviewExport) && !forensicSingleMode ? (
             <div className="rounded-2xl border border-border bg-card p-4">
               <CitationDensityTargetSelector
                 value={citationDensityTargetEstimate}
@@ -4089,8 +4233,8 @@ function RailContent({
               id="report-card-delta"
               icon={FileDiff}
               tone="violet"
-              title="Citation Density Report"
-              description="Two documents. The estimate PDF annotated in place, every mark anchored to the line it came from; and the Forensic Estimate Analysis — a line-level reconciliation that balances to each document’s own totals, quantifies the gap category by category, and separates fact from open verification item."
+              title={reportPlan.card.title}
+              description={reportPlan.card.description}
               locked={!canUseEstimateScrubberExport}
               onUnlock={onCustomerReportLocked}
               actions={
@@ -4099,20 +4243,31 @@ function RailContent({
                     type="button"
                     onClick={() => {
                       void downloadReportDocument("estimate_scrubber");
-                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "estimate_scrubber" });
+                      emitSafeCrmEventFromClient({
+                        event: "report_generated",
+                        plan,
+                        exportType: forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber",
+                      });
                     }}
                     className={REPORT_TAB_DOWNLOAD_BTN}
                     data-tour="download-button"
                   >
-                    <Download size={14} aria-hidden /> Download PDF
+                    <Download size={14} aria-hidden /> {reportPlan.card.downloadLabel}
                   </button>
-                  <button type="button" onClick={() => openReportSend("estimate_scrubber", "carrier")} className={REPORT_TAB_EMAIL_BTN}>
+                  <button
+                    type="button"
+                    onClick={() => openReportSend(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber", "carrier")}
+                    className={REPORT_TAB_EMAIL_BTN}
+                  >
                     <Mail size={14} aria-hidden /> Email report
                   </button>
                 </div>
               }
               status={
-                <ReportSendStatusLine send={getLastSendFor("estimate_scrubber")} loading={reportSendHistoryLoading} />
+                <ReportSendStatusLine
+                  send={getLastSendFor(forensicSingleMode ? "forensic_estimate_review" : "estimate_scrubber")}
+                  loading={reportSendHistoryLoading}
+                />
               }
             />
             <ReportTabCard
@@ -4782,6 +4937,8 @@ function getDefaultReportSubject(reportType: ReportKind): string {
       return "[Collision IQ] Repair Intelligence Report";
     case "estimate_scrubber":
       return "[Collision IQ] Delta Citation Density Report";
+    case "forensic_estimate_review":
+      return "[Collision IQ] Forensic Estimate Review";
     case "estimator_change_request_list":
       return "[Collision IQ] Estimate Delta / Change Requests";
     case "oem_citation_density":
@@ -4803,6 +4960,8 @@ function getDefaultReportFilename(reportType: ReportKind): string {
       return "repair-intelligence-report.pdf";
     case "estimate_scrubber":
       return "delta-citation-density-report.pdf";
+    case "forensic_estimate_review":
+      return "forensic-estimate-review.pdf";
     case "estimator_change_request_list":
       return "estimate-delta-change-requests.pdf";
     case "oem_citation_density":
@@ -4837,6 +4996,8 @@ function getReportWorkspaceTitle(reportType: ReportKind, document: CarrierReport
       return "Policy & Rights Review";
     case "estimate_scrubber":
       return "Delta Citation Density Report";
+    case "forensic_estimate_review":
+      return "Forensic Estimate Review";
     case "oem_citation_density":
       return "OEM Citation Density Report";
   }
@@ -5800,6 +5961,19 @@ function formatDebugCounts(value: unknown) {
     record.findingIdPrefixCheckPassed === false ? "findingPrefix=false" : "",
   ].filter(Boolean);
   return fields.length ? `Diagnostics: ${fields.join(", ")}.` : "";
+}
+
+function buildForensicEstimateReviewStatus(
+  result: { headline: string; recommendation: string; findingCount: number; pageCount: number; warnings: string[] },
+  prefix?: string
+): string {
+  const parts = [
+    prefix,
+    `Forensic Estimate Review ready (${result.pageCount} page${result.pageCount === 1 ? "" : "s"}, ${result.findingCount} finding${result.findingCount === 1 ? "" : "s"}).`,
+    result.headline,
+    result.warnings.length ? `Note: ${result.warnings.join(" ")}` : undefined,
+  ].filter(Boolean);
+  return parts.join(" ");
 }
 
 function buildAnnotatedCitationDensityStatus(
