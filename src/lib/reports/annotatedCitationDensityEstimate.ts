@@ -550,7 +550,7 @@ function engineResultToLineItemDeltas(params: {
  *  double every glyph in the WORD layer too ("$$77,,117744..8811"), and no
  *  money or label pattern in the engine matches the doubled form. Identity on
  *  plain text. */
-function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
+export function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
   const byPage = new Map<number, DeltaEngineWord[]>();
   for (const word of words) {
     const list = byPage.get(word.pageNumber) ?? [];

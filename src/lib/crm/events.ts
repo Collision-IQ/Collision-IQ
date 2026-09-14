@@ -27,6 +27,7 @@ export type SafeCrmEventPayload = {
     | "customer_report"
     | "repair_intelligence"
     | "estimate_scrubber"
+    | "forensic_estimate_review"
     | "oem_citation_density"
     | "estimator_change_request_list"
     | "policy_rights_review"
