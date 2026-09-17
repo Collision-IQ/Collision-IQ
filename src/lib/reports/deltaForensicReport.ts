@@ -185,7 +185,7 @@ function clean(value: string | null | undefined): string {
  * operation — a label with no prefix, or one whose tail is too short to stand
  * on its own, is returned whole rather than truncated into nonsense.
  */
-function shortOperationName(label: string | null | undefined): string {
+export function shortOperationName(label: string | null | undefined): string {
   const text = clean(label);
   const separator = text.lastIndexOf(": ");
   if (separator < 0) return text;

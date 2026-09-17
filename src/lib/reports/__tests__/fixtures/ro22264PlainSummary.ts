@@ -1,0 +1,82 @@
+/**
+ * Fixture: RO 22264 — 2023 Audi Q5 45 S Line Prestige, Shop Post-TD vs SOR-1.
+ * Every number is transcribed from the Forensic Estimate Analysis dated 2026-09-17.
+ * Findings are the subset that drive the plain-language summary; the full set is 68.
+ * Pinned by plainLanguageSummary.test.ts to the cent.
+ */
+import type { PlainSummaryInput } from "../../plainLanguageSummary";
+
+export const RO22264: PlainSummaryInput = {
+  preparedDate: "2026-09-17",
+  vehicle: "2023 Audi Q5 45 S Line Prestige",
+  roNumber: "22264",
+  docA: {
+    title: "Shop Post-TD 22264.pdf", lineCount: 171,
+    totals: {
+      parts: 11589.41,
+      bodyLabor: { hours: 77.0, rate: 75, total: 5775.00 },
+      paintLabor: { hours: 44.6, rate: 75, total: 3345.00 },
+      paintSupplies: { hours: 44.6, rate: 60, total: 2676.00 },
+      miscellaneous: 1427.21, subtotal: 24812.62, tax: 1452.58, total: 26265.20,
+    },
+  },
+  docB: {
+    title: "SOR-1 22264.pdf", label: "Coast National", lineCount: 98,
+    totals: {
+      parts: 5130.05,
+      bodyLabor: { hours: 59.0, rate: 60, total: 3540.00 },
+      paintLabor: { hours: 26.0, rate: 60, total: 1560.00 },
+      paintSupplies: { hours: 26.0, rate: 39, total: 1014.00 },
+      miscellaneous: 183.99, subtotal: 11428.04, tax: 685.68, total: 12113.72,
+    },
+  },
+  missingLineCount: 107,
+  findings: [
+    { id: 1, category: "category_amount", section: "other", title: "Parts", amountDelta: 6459.36 },
+    { id: 2, category: "rate_difference", section: "other", title: "Body Labor" },
+    { id: 3, category: "rate_difference", section: "refinish", title: "Paint Labor" },
+    { id: 4, category: "rate_difference", section: "refinish", title: "Paint Supplies" },
+    { id: 5, category: "category_amount", section: "other", title: "Miscellaneous", amountDelta: 1243.22 },
+    { id: 6, category: "total_difference", section: "other", title: "Estimate total", amountDelta: 14151.48 },
+    { id: 7, category: "lower_only_lines", section: "other", title: "Lines only on the lower estimate", lowerOnlyCount: 47,
+      lowerOnlySamples: ["a used (LKQ) mirror at $406.25", "aftermarket wheel moldings", "a CAPA fender at $252.50", "a reconditioned wheel"] },
+    { id: 8, category: "missing_operation", section: "other", title: "RT Fender", lineA: 35, amountDelta: 905.00, laborDelta: 2.3, paintDelta: 2.4 },
+    { id: 9, category: "missing_operation", section: "adas", title: "RT Mirror assy power folding w/side camera", lineA: 94, amountDelta: 1927.85, laborDelta: 0.7 },
+    { id: 10, category: "missing_operation", section: "other", title: "RT/Front Wheel, alloy 5 spoke/code 40T", lineA: 59, amountDelta: 1638.57, laborDelta: 0.3 },
+    { id: 11, category: "missing_operation", section: "other", title: "Bumper cover w/auto park", lineA: 8, laborDelta: 4.0, paintDelta: 3.0 },
+    { id: 12, category: "missing_operation", section: "other", title: "LT Wheel opng mldg all", lineA: 143, amountDelta: 561.66, paintDelta: 1.0 },
+    { id: 13, category: "missing_operation", section: "other", title: "RT Wheel opng mldg All", lineA: 47, amountDelta: 473.34, paintDelta: 1.1 },
+    { id: 14, category: "missing_operation", section: "other", title: "RT Door shell from 02/25/2019", lineA: 105, laborDelta: 3.0, paintDelta: 2.0 },
+    { id: 15, category: "missing_operation", section: "structural", title: "Four wheel suspension alignment", lineA: 61, amountDelta: 268.00 },
+    { id: 16, category: "missing_operation", section: "adas", title: "Front camera", lineA: 15, laborDelta: 0.2 },
+    { id: 17, category: "missing_operation", section: "adas", title: "In-proc repair scan +34%", lineA: 190, amountDelta: 0.01, priceA: 0.01 },
+    { id: 18, category: "missing_operation", section: "adas", title: "Front Driver assistance camera static calibration +34%", lineA: 192, amountDelta: 0.01, priceA: 0.01 },
+    { id: 19, category: "missing_operation", section: "adas", title: "Lane change radar calibration +34%", lineA: 193, amountDelta: 0.01, priceA: 0.01 },
+    { id: 20, category: "missing_operation", section: "adas", title: "Adaptive cruise control dynamic calibration +34%", lineA: 194, amountDelta: 0.01, priceA: 0.01 },
+    { id: 21, category: "missing_operation", section: "adas", title: "Peripheral cameras dynamic calibration +34%", lineA: 195, amountDelta: 0.01, priceA: 0.01 },
+    { id: 22, category: "missing_operation", section: "adas", title: "Steering angle sensor calibration +34%", lineA: 196, amountDelta: 0.01, priceA: 0.01 },
+    { id: 23, category: "missing_operation", section: "adas", title: "Post-repair scan +34%", lineA: 198, amountDelta: 0.01, priceA: 0.01 },
+    { id: 24, category: "missing_operation", section: "other", title: "RT Front sill plate w/illuminated", lineA: 83, amountDelta: 440.00, laborDelta: 0.1 },
+    { id: 25, category: "part_or_price_difference", section: "adas", title: "Pre-repair scan +34%", lineA: 188, lineB: 107, amountDelta: 201.00, laborDelta: -0.5, priceA: 201.00, priceB: 0 },
+    { id: 26, category: "missing_operation", section: "other", title: "CONT 255/45R20 Continental CrossContact LX Sport (All Season) BW 101H +34%", lineA: 64, amountDelta: 347.06, laborDelta: 0.3 },
+    { id: 27, category: "reduced_labor", section: "other", title: "O/H bumper assy", lineA: 6, lineB: 4, laborDelta: 8.1 },
+    { id: 28, category: "missing_operation", section: "other", title: "Transport vehicle to sublet (Paid out) +34%", lineA: 191, amountDelta: 301.50 },
+    { id: 29, category: "missing_operation", section: "other", title: "Transport vehicle from sublet (Paid out) +34%", lineA: 199, amountDelta: 301.50 },
+    { id: 31, category: "part_or_price_difference", section: "other", title: "RT Mirror cover w/lane change assist primed", lineA: 95, lineB: 63, amountDelta: 478.33, paintDelta: 0.5, priceA: 478.33, priceB: 0 },
+    { id: 33, category: "missing_operation", section: "other", title: "Blnd RT Ctr plr & rocker", lineA: 78, paintDelta: 3.6 },
+    { id: 36, category: "missing_operation", section: "other", title: "Test fit-Front bumper", lineA: 22, laborDelta: 1.0 },
+    { id: 37, category: "missing_operation", section: "other", title: "Test fit-RT Fender", lineA: 54, laborDelta: 1.0 },
+    { id: 39, category: "missing_operation", section: "other", title: "Blnd RT Roof rail", lineA: 74, paintDelta: 2.0 },
+    { id: 42, category: "missing_operation", section: "other", title: "Feather/Prime/Block", lineA: 150, paintDelta: 2.0 },
+    { id: 43, category: "missing_operation", section: "other", title: "Blnd Lift gate (ALU)", lineA: 158, paintDelta: 2.0 },
+    { id: 45, category: "missing_operation", section: "adas", title: "Measure control points to blind spot", lineA: 185, laborDelta: 1.0 },
+    { id: 46, category: "missing_operation", section: "other", title: "Test fit-Rear bumper", lineA: 186, laborDelta: 1.0 },
+    { id: 49, category: "missing_operation", section: "refinish", title: "Add for Clear Coat", lineA: 36, paintDelta: 1.5 },
+    { id: 50, category: "missing_operation", section: "adas", title: "REVVAdas Report", lineA: 189, amountDelta: 25.00, laborDelta: 0.5 },
+    { id: 52, category: "missing_operation", section: "refinish", title: "Add for Clear Coat", lineA: 9, paintDelta: 1.3 },
+    { id: 54, category: "missing_operation", section: "other", title: "Mount & road force balance wheel & tire (18\" to 20\")", lineA: 65, amountDelta: 75.00 },
+    { id: 55, category: "missing_operation", section: "refinish", title: "Add for Clear Coat", lineA: 127, paintDelta: 1.2 },
+    { id: 62, category: "missing_operation", section: "other", title: "Feather/Prime/Block", lineA: 122, paintDelta: 1.0 },
+    { id: 68, category: "support_review", section: "refinish", title: "Finish sand & polish (0.5 Refinish)", lineA: 208 },
+  ],
+};

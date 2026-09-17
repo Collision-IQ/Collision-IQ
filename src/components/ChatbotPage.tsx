@@ -133,6 +133,11 @@ type AnnotatedEstimateExportResult = {
   findingsReportUrl?: string;
   findingsReportPdfBase64?: string;
   findingsReportFilename?: string;
+  // Plain-Language Dispute Summary (shop staff only). Delta flavor only, and
+  // only on a shop-versus-carrier comparison; absent otherwise.
+  plainSummaryUrl?: string;
+  plainSummaryPdfBase64?: string;
+  plainSummaryFilename?: string;
 };
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
@@ -2685,21 +2690,39 @@ function RailContent({
     return promptText.trim() || null;
   }
 
-  async function downloadCitationDensityFindingsReport(exportResult: AnnotatedEstimateExportResult) {
+  async function downloadCompanionPdf(pdfBase64: string | undefined, url: string | undefined, filename: string) {
     try {
       let blob: Blob | null = null;
-      if (exportResult.findingsReportPdfBase64) {
-        blob = pdfBase64ToBlob(exportResult.findingsReportPdfBase64);
-      } else if (exportResult.findingsReportUrl) {
-        const res = await fetch(exportResult.findingsReportUrl, { credentials: "same-origin" });
+      if (pdfBase64) {
+        blob = pdfBase64ToBlob(pdfBase64);
+      } else if (url) {
+        const res = await fetch(url, { credentials: "same-origin" });
         if (res.ok) blob = await res.blob();
       }
       if (blob) {
-        downloadBlob(blob, exportResult.findingsReportFilename ?? "forensic-estimate-analysis.pdf");
+        downloadBlob(blob, filename);
       }
     } catch {
       // Non-blocking: the annotated estimate already downloaded successfully.
     }
+  }
+
+  async function downloadCitationDensityFindingsReport(exportResult: AnnotatedEstimateExportResult) {
+    await downloadCompanionPdf(
+      exportResult.findingsReportPdfBase64,
+      exportResult.findingsReportUrl,
+      exportResult.findingsReportFilename ?? "forensic-estimate-analysis.pdf"
+    );
+  }
+
+  /** The third Delta document, when the run produced one. */
+  async function downloadPlainLanguageSummary(exportResult: AnnotatedEstimateExportResult) {
+    if (!exportResult.plainSummaryPdfBase64 && !exportResult.plainSummaryUrl) return;
+    await downloadCompanionPdf(
+      exportResult.plainSummaryPdfBase64,
+      exportResult.plainSummaryUrl,
+      exportResult.plainSummaryFilename ?? "plain-language-summary.pdf"
+    );
   }
 
   async function downloadReportDocument(reportType: ReportKind) {
@@ -2716,6 +2739,7 @@ function RailContent({
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
         await downloadCitationDensityFindingsReport(exportResult);
+        await downloadPlainLanguageSummary(exportResult);
         onCitationDensityReportReady({
           reportFlavor: "delta",
           result: exportResult,
@@ -2905,6 +2929,8 @@ function RailContent({
       pdfBase64?: unknown;
       findingsReportUrl?: unknown;
       findingsReportPdfBase64?: unknown;
+      plainSummaryUrl?: unknown;
+      plainSummaryPdfBase64?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2931,6 +2957,10 @@ function RailContent({
       findingsReportPdfBase64:
         typeof data.findingsReportPdfBase64 === "string" ? data.findingsReportPdfBase64 : undefined,
       findingsReportFilename: "forensic-estimate-analysis.pdf",
+      plainSummaryUrl: typeof data.plainSummaryUrl === "string" ? data.plainSummaryUrl : undefined,
+      plainSummaryPdfBase64:
+        typeof data.plainSummaryPdfBase64 === "string" ? data.plainSummaryPdfBase64 : undefined,
+      plainSummaryFilename: "plain-language-summary.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"

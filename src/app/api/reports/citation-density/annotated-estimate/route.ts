@@ -473,6 +473,10 @@ export async function POST(request: Request) {
       const findingsReportUrl = findingsReportArtifactId
         ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(findingsReportArtifactId)}`
         : undefined;
+      const plainSummaryArtifactId = result.plainSummaryExportId;
+      const plainSummaryUrl = plainSummaryArtifactId
+        ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
+        : undefined;
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
       annotatedFindingCount += result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
@@ -489,6 +493,12 @@ export async function POST(request: Request) {
           ? Buffer.from(result.findingsReportBytes).toString("base64")
           : undefined,
         findingsReportPageCount: result.findingsReportPageCount,
+        plainSummaryArtifactId,
+        plainSummaryUrl,
+        plainSummaryPdfBase64: result.plainSummaryBytes
+          ? Buffer.from(result.plainSummaryBytes).toString("base64")
+          : undefined,
+        plainSummaryPageCount: result.plainSummaryPageCount,
         annotatedFindingCount: result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
@@ -527,6 +537,12 @@ export async function POST(request: Request) {
       findingsReportUrl: primaryOutput?.findingsReportUrl,
       findingsReportPdfBase64: primaryOutput?.findingsReportPdfBase64,
       findingsReportPageCount: primaryOutput?.findingsReportPageCount,
+      // The Plain-Language Dispute Summary (shop staff only) rides beside it,
+      // present only on a shop-versus-carrier comparison.
+      plainSummaryArtifactId: primaryOutput?.plainSummaryArtifactId,
+      plainSummaryUrl: primaryOutput?.plainSummaryUrl,
+      plainSummaryPdfBase64: primaryOutput?.plainSummaryPdfBase64,
+      plainSummaryPageCount: primaryOutput?.plainSummaryPageCount,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,
