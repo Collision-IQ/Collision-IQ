@@ -300,10 +300,29 @@ export class Writer {
   }
 }
 
+/**
+ * The redaction policy a run's generated documents share. `natural_person`
+ * keeps the insurer, claim number and document names legible and masks only
+ * the VIN tail; `full` runs the download redactor over everything. Exported
+ * so every document of a run (this report, the Plain-Language Dispute Summary)
+ * applies one policy.
+ */
+export function resolveExportScrub(
+  redactSensitive: boolean | undefined,
+  redactionScope: "full" | "natural_person" | undefined
+): (value: string) => string {
+  if (redactSensitive === false) return (value: string): string => value;
+  if (redactionScope === "natural_person") return (value: string): string => maskVinForExport(value);
+  return (value: string): string => redactDownloadContent(value);
+}
+
+export type ForensicDomain = "structural" | "adas" | "parts" | "refinish" | "other";
+
 /** Domain grouping for the findings sections, by the finding's own category. */
-const DOMAINS: Array<{ title: string; match: (finding: CitationDensityFinding) => boolean }> = [
+const DOMAINS: Array<{ title: string; key: ForensicDomain; match: (finding: CitationDensityFinding) => boolean }> = [
   {
     title: "Findings — structural repair",
+    key: "structural",
     match: (finding) =>
       // A refinish operation ON a structural part is a refinish finding. The
       // label reads "Missing from comparison estimate: Roof rail" — the CCC
@@ -320,6 +339,7 @@ const DOMAINS: Array<{ title: string; match: (finding: CitationDensityFinding) =
   },
   {
     title: "Findings — advanced driver assistance systems",
+    key: "adas",
     match: (finding) =>
       finding.category === "adas_calibration" ||
       finding.category === "scan_diagnostic" ||
@@ -327,6 +347,7 @@ const DOMAINS: Array<{ title: string; match: (finding: CitationDensityFinding) =
   },
   {
     title: "Findings — parts type and one-time-use components",
+    key: "parts",
     match: (finding) =>
       finding.category === "parts_downgrade" ||
       finding.category === "one_time_use_parts" ||
@@ -335,11 +356,21 @@ const DOMAINS: Array<{ title: string; match: (finding: CitationDensityFinding) =
   },
   {
     title: "Findings — refinish and materials",
+    key: "refinish",
     match: (finding) =>
       finding.category === "refinish" ||
       /\brefinish|blend|clear ?coat|tint|paint|seam sealer|corrosion|cavity wax\b/i.test(finding.operationLabel),
   },
 ];
+
+/** The findings section a finding is filed under — first matching domain, as
+ *  the report itself files it; "other" when none matches. */
+export function forensicDomainOf(finding: CitationDensityFinding): ForensicDomain {
+  for (const domain of DOMAINS) {
+    if (domain.match(finding)) return domain.key;
+  }
+  return "other";
+}
 
 export type ForensicReportInput = {
   reconciliation: ForensicReconciliation;
@@ -408,12 +439,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   // insurers, claim numbers and every phone/address) is the wrong tool; the
   // identity rows were already scoped by the caller and prose keeps the
   // insurer's name. Only the VIN tail is masked here.
-  const scrub =
-    input.redactSensitive === false
-      ? (value: string): string => value
-      : input.redactionScope === "natural_person"
-        ? (value: string): string => maskVinForExport(value)
-        : (value: string): string => redactDownloadContent(value);
+  const scrub = resolveExportScrub(input.redactSensitive, input.redactionScope);
 
   // R05 (Test 99 item 3): a finding card with NO line anchor, NO dollar
   // figure, and NO hour figure is unresolved template output, not evidence —

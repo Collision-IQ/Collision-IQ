@@ -15,7 +15,9 @@ import {
   buildForensicReconciliation,
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
-import { buildForensicReportPdf } from "./forensicReportRenderer";
+import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
+import { buildPlainSummaryModel, renderPlainSummaryPdf } from "./plainLanguageSummary";
+import { adaptForensicToPlainSummary } from "./plainLanguageSummaryAdapter";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import { normalizeOverprintLine, normalizeOverprintText } from "./overprintNormalize";
 /**
@@ -759,6 +761,13 @@ export type AnnotatedEstimateResult = {
   findingsReportExportId?: string;
   findingsReportBytes?: Uint8Array;
   findingsReportPageCount?: number;
+  // The third document of a two-estimate run: the Plain-Language Dispute
+  // Summary, shop-staff talking points built from the same reconciliation and
+  // findings as the Forensic Estimate Analysis. Produced only for a
+  // shop-versus-carrier comparison; absent otherwise.
+  plainSummaryExportId?: string;
+  plainSummaryBytes?: Uint8Array;
+  plainSummaryPageCount?: number;
 };
 
 export type CitationDensityDebugTrace = {
@@ -2856,6 +2865,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let findingsReportExportId: string | undefined;
   let findingsReportBytes: Uint8Array | undefined;
   let findingsReportPageCount = 0;
+  let plainSummaryExportId: string | undefined;
+  let plainSummaryBytes: Uint8Array | undefined;
+  let plainSummaryPageCount = 0;
   // THE SECOND DOCUMENT IS THE FORENSIC REPORT, NOT A CARD DUMP.
   //
   // The Citation Density Report produces exactly two PDFs: the annotated delta
@@ -2967,6 +2979,58 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         reportType: reportIdentity.reportType,
       }
     );
+
+    // THE THIRD DOCUMENT IS THE PLAIN-LANGUAGE DISPUTE SUMMARY.
+    //
+    // Shop-staff talking points built from the SAME reconciliation, findings
+    // and badge numbers the forensic report was just rendered from — it adds
+    // no facts. Its fixed copy speaks of "our estimate" and "the insurer",
+    // so it is produced only when the annotated document is the shop's and
+    // the comparison is carrier-authored; any other pair gets nothing, not a
+    // document with the wrong nouns in it. It is a companion, never a
+    // deliverable the run depends on: a failure here is a warning on the
+    // run, and the two documents above still ship.
+    const comparisonRole = params.comparisonEstimateTexts?.[0]?.estimateRole;
+    if (sourceDocumentRole === "shop" && comparisonRole === "carrier") {
+      try {
+        const adapted = adaptForensicToPlainSummary({
+          reconciliation: forensicInput.reconciliation,
+          findings,
+          findingNumbers: findingNumberById,
+          higherDocumentName: sourcePdfName,
+          lowerDocumentName: params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate",
+          lowerDocumentLabel: claimContext.insurer ?? null,
+          higherLineCount: forensicInput.higherLineCount,
+          lowerLineCount: forensicInput.lowerLineCount,
+          noCounterpartRows: forensicInput.noCounterpartRows,
+          vehicleLabel: claimContext.vehicle ?? params.vehicleMake ?? null,
+          roNumber: claimContext.roNumber ?? null,
+          identity: identity.filter((row) => /^(Vehicle|RO number|Claim number|Insurer)$/i.test(row.label)),
+          generatedAt: new Date().toISOString(),
+          scrub: resolveExportScrub(request.redactSensitive !== false, redactionScope),
+        });
+        if (adapted.ok) {
+          const rendered = await renderPlainSummaryPdf(buildPlainSummaryModel(adapted.input));
+          plainSummaryBytes = rendered.bytes;
+          plainSummaryPageCount = rendered.pageCount;
+          plainSummaryExportId = putAnnotatedEstimateExport(
+            rendered.bytes,
+            `plain-language-summary-${reportIdentity.artifactFilename}`,
+            [],
+            {
+              artifactVersion: reportIdentity.artifactVersion,
+              reportType: reportIdentity.reportType,
+            }
+          );
+        } else {
+          warnings.push(`The Plain-Language Dispute Summary was not produced: ${adapted.reason}.`);
+        }
+      } catch (error) {
+        warnings.push(
+          `The Plain-Language Dispute Summary could not be rendered (${error instanceof Error ? error.message : "unknown error"}); the annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        );
+      }
+    }
   }
 
   const includeUnanchored = unmatched.length > 0 && request.includeUnanchoredAppendix !== false;
@@ -3158,6 +3222,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     findingsReportExportId,
     findingsReportBytes,
     findingsReportPageCount,
+    plainSummaryExportId,
+    plainSummaryBytes,
+    plainSummaryPageCount,
   };
 }
 
