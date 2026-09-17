@@ -2980,7 +2980,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       }
     );
 
-    // THE THIRD DOCUMENT IS THE PLAIN-LANGUAGE DISPUTE SUMMARY.
+    // THE THIRD DOCUMENT IS THE APPRAISAL DISPUTE REPORT.
     //
     // Shop-staff talking points built from the SAME reconciliation, findings
     // and badge numbers the forensic report was just rendered from — it adds
@@ -3015,7 +3015,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           plainSummaryPageCount = rendered.pageCount;
           plainSummaryExportId = putAnnotatedEstimateExport(
             rendered.bytes,
-            `plain-language-summary-${reportIdentity.artifactFilename}`,
+            `appraisal-dispute-report-${reportIdentity.artifactFilename}`,
             [],
             {
               artifactVersion: reportIdentity.artifactVersion,
@@ -3023,11 +3023,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             }
           );
         } else {
-          warnings.push(`The Plain-Language Dispute Summary was not produced: ${adapted.reason}.`);
+          warnings.push(`The Appraisal Dispute Report was not produced: ${adapted.reason}.`);
         }
       } catch (error) {
         warnings.push(
-          `The Plain-Language Dispute Summary could not be rendered (${error instanceof Error ? error.message : "unknown error"}); the annotated estimate and the Forensic Estimate Analysis are unaffected.`
+          `The Appraisal Dispute Report could not be rendered (${error instanceof Error ? error.message : "unknown error"}); the annotated estimate and the Forensic Estimate Analysis are unaffected.`
         );
       }
     }

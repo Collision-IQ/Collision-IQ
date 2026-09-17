@@ -133,7 +133,7 @@ type AnnotatedEstimateExportResult = {
   findingsReportUrl?: string;
   findingsReportPdfBase64?: string;
   findingsReportFilename?: string;
-  // Plain-Language Dispute Summary (shop staff only). Delta flavor only, and
+  // Appraisal Dispute Report (shop staff only). Delta flavor only, and
   // only on a shop-versus-carrier comparison; absent otherwise.
   plainSummaryUrl?: string;
   plainSummaryPdfBase64?: string;
@@ -2721,7 +2721,7 @@ function RailContent({
     await downloadCompanionPdf(
       exportResult.plainSummaryPdfBase64,
       exportResult.plainSummaryUrl,
-      exportResult.plainSummaryFilename ?? "plain-language-summary.pdf"
+      exportResult.plainSummaryFilename ?? "appraisal-dispute-report.pdf"
     );
   }
 
@@ -2960,7 +2960,7 @@ function RailContent({
       plainSummaryUrl: typeof data.plainSummaryUrl === "string" ? data.plainSummaryUrl : undefined,
       plainSummaryPdfBase64:
         typeof data.plainSummaryPdfBase64 === "string" ? data.plainSummaryPdfBase64 : undefined,
-      plainSummaryFilename: "plain-language-summary.pdf",
+      plainSummaryFilename: "appraisal-dispute-report.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"

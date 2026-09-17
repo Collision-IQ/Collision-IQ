@@ -1,5 +1,5 @@
 /**
- * The Plain-Language Dispute Summary's contract: every figure it prints is the
+ * The Appraisal Dispute Report's contract: every figure it prints is the
  * Forensic report's figure to the cent, an absent basis is never a zero, the
  * fixed copy stays inside the wording rules, and the adapter reads the
  * pipeline's own finding objects rather than a hand-typed shape.
@@ -89,7 +89,7 @@ describe("RO 22264 — the numbers the hand-built summary printed", () => {
     expect(text).toContain("Finding 27");
     expect(text).toContain("Pre-repair scan +34%: $201.00 on ours, $0.00 on theirs.");
     expect(text).not.toMatch(/undefined|NaN|\[object/);
-    expect(doc.footerLine).toBe("Plain-Language Dispute Summary | RO 22264 | 2023 Audi Q5 45 S Line Prestige | Shop staff only");
+    expect(doc.footerLine).toBe("Appraisal Dispute Report | RO 22264 | 2023 Audi Q5 45 S Line Prestige | Shop staff only");
     expect(doc.sections.map((section) => section.title)).toEqual([
       "The thirty-second version",
       "Where the money is",
@@ -113,7 +113,7 @@ describe("RO 22264 — the numbers the hand-built summary printed", () => {
     expect(rendered.bytes.byteLength).toBeGreaterThan(5000);
     const pdfParse = (await import("pdf-parse")).default as (b: Buffer) => Promise<{ text: string }>;
     const { text } = await pdfParse(Buffer.from(rendered.bytes));
-    expect(text).toMatch(/Plain-Language Dispute Summary/);
+    expect(text).toMatch(/Appraisal Dispute Report/);
     expect(text).toMatch(/\$14,151\.48/);
     expect(text).toMatch(/Shop staff only/);
     expect(text).toMatch(/Page 1/);

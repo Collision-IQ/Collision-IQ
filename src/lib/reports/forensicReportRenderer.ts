@@ -304,7 +304,7 @@ export class Writer {
  * The redaction policy a run's generated documents share. `natural_person`
  * keeps the insurer, claim number and document names legible and masks only
  * the VIN tail; `full` runs the download redactor over everything. Exported
- * so every document of a run (this report, the Plain-Language Dispute Summary)
+ * so every document of a run (this report, the Appraisal Dispute Report)
  * applies one policy.
  */
 export function resolveExportScrub(

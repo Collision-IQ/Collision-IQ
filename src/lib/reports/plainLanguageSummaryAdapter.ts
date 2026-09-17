@@ -2,7 +2,7 @@
  * Adapter: the Forensic report's input → PlainSummaryInput.
  *
  * This is the only wiring point between the Delta pipeline and the
- * Plain-Language Dispute Summary. It reads the SAME objects the Forensic
+ * Appraisal Dispute Report. It reads the SAME objects the Forensic
  * Estimate Analysis is rendered from — the Section 4 reconciliation (both
  * documents' printed totals), the numbered findings, the no-counterpart rows
  * that make up Appendix A — and maps them onto the summary's narrow contract.

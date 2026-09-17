@@ -537,7 +537,7 @@ export async function POST(request: Request) {
       findingsReportUrl: primaryOutput?.findingsReportUrl,
       findingsReportPdfBase64: primaryOutput?.findingsReportPdfBase64,
       findingsReportPageCount: primaryOutput?.findingsReportPageCount,
-      // The Plain-Language Dispute Summary (shop staff only) rides beside it,
+      // The Appraisal Dispute Report (shop staff only) rides beside it,
       // present only on a shop-versus-carrier comparison.
       plainSummaryArtifactId: primaryOutput?.plainSummaryArtifactId,
       plainSummaryUrl: primaryOutput?.plainSummaryUrl,

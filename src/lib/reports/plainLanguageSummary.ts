@@ -1,5 +1,5 @@
 /**
- * PLAIN-LANGUAGE DISPUTE SUMMARY — model builder and document builder.
+ * APPRAISAL DISPUTE REPORT — model builder and document builder.
  *
  * Third output of the Delta pipeline: a shop-staff-only, plain-English
  * companion to the Forensic Estimate Analysis and the Delta Citation Density
@@ -348,7 +348,7 @@ function describeLabor(a: LaborCategory | null, b: LaborCategory | null, tail: s
 // Document — sections and blocks for the shared forensic renderer
 // ---------------------------------------------------------------------------
 
-const REPORT_TITLE = "Plain-Language Dispute Summary";
+const REPORT_TITLE = "Appraisal Dispute Report";
 
 /** Footer line stamped on every page: title | RO | vehicle | audience. The
  *  renderer appends the page number. */
