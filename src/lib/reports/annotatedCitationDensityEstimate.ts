@@ -1176,6 +1176,9 @@ export function buildProductionReleaseBundle(input: {
   intakeModeActive: boolean;
   unanchoredAppendixRendered: boolean;
   retrievedSources: Array<{ title: string; url?: string; locator?: string }>;
+  /** Operation rows the engine recovered from each document, so a refusal
+   *  can say whether the documents were read at all. */
+  lineCounts?: { target: number | null; source: number | null };
 }): DeltaBundle {
   const reconciliation = input.reconciliation;
   const comparisonText = input.comparison?.text ?? "";
@@ -1210,7 +1213,15 @@ export function buildProductionReleaseBundle(input: {
     ]
       .map((line) => (line === null || line === undefined ? "" : String(line).trim()))
       .filter(Boolean);
-    return [...new Set(lines)].map((line) => `ln:${line}`);
+    if (lines.length > 0) return [...new Set(lines)].map((line) => `ln:${line}`);
+    // A finding anchored to a resolved row that prints no line number — a
+    // measured row whose number cell did not parse — is still anchored to
+    // the document. The row's anchor id is its evidence; a finding is not
+    // discarded for the absence of a printed number.
+    const anchorIds = [finding.shopAnchor?.anchorId, finding.carrierAnchor?.anchorId]
+      .map((id) => (id ?? "").trim())
+      .filter(Boolean);
+    return [...new Set(anchorIds)].map((id) => `anchor:${id}`);
   };
   const findings: NonNullable<DeltaBundle["findings"]> = input.findings.map((finding) => {
     const anchors = anchorIdsOf(finding);
@@ -1260,11 +1271,13 @@ export function buildProductionReleaseBundle(input: {
       file: input.sourcePdfName,
       grand_total: reconciliation?.higherGrandTotal ?? null,
       platform: detectEstimatePlatform(input.sourceText),
+      line_count: input.lineCounts?.target ?? null,
     },
     source: {
       file: input.comparison?.fileName ?? "",
       grand_total: reconciliation?.lowerGrandTotal ?? null,
       platform: input.comparison ? detectEstimatePlatform(comparisonText) : null,
+      line_count: input.lineCounts?.source ?? null,
     },
     findings,
     category_deltas: categoryDeltas,
@@ -2097,6 +2110,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         reconciliation: forensicInput?.reconciliation ?? null,
         intakeModeActive: generated.debug?.intakeModeActive === true,
         unanchoredAppendixRendered: request.includeUnanchoredAppendix !== false,
+        lineCounts: {
+          target: forensicInput?.higherLineCount ?? null,
+          source: forensicInput?.lowerLineCount ?? null,
+        },
         retrievedSources: [
           ...(params.resolvedAuthorities ?? []).map((authority) => ({
             title: authority.sourceTitle,

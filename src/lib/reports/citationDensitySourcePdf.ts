@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
@@ -119,6 +120,31 @@ function estimateRoleFamily(role: HeaderEstimateRole) {
   if (role === "carrier_estimate") return "carrier";
   if (role === "shop_initial" || role === "shop_supplement" || role === "shop_final") return "shop";
   return "unknown";
+}
+
+/**
+ * Two attachments that are the SAME estimate — the same PDF bytes, or the same
+ * non-trivial extracted text — must never be paired as target and source. A
+ * pair collapsed onto one document compares an estimate with itself: the
+ * delta engine finds nothing, and the run is refused as "found nothing" when
+ * the real comparison was simply never read (RO 22084). Returns which
+ * signal matched, or null when the documents differ.
+ */
+export function sameEstimateDocument(a: StoredAttachment, b: StoredAttachment): "bytes" | "text" | null {
+  if (a.id === b.id) return "bytes";
+  const bytesA = pdfDataUrlHash(a.imageDataUrl);
+  const bytesB = pdfDataUrlHash(b.imageDataUrl);
+  if (bytesA && bytesB && bytesA === bytesB) return "bytes";
+  const textA = (a.text ?? "").replace(/\s+/g, " ").trim();
+  const textB = (b.text ?? "").replace(/\s+/g, " ").trim();
+  if (textA.length >= 200 && textA === textB) return "text";
+  return null;
+}
+
+function pdfDataUrlHash(dataUrl: string | null | undefined): string | null {
+  const match = dataUrl?.match(/^data:application\/pdf(?:;[^,]*)?;base64,(.+)$/i);
+  if (!match) return null;
+  return createHash("sha256").update(Buffer.from(match[1], "base64")).digest("hex");
 }
 
 export function isAnnotatableEstimatePdf(attachment: StoredAttachment) {

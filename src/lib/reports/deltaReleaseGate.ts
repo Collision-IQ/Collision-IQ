@@ -624,17 +624,32 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
     if (bundle.run_mode === "TOTALS_ONLY" && (bundle.category_deltas ?? []).length === 0) {
       fail("R24", "TOTALS_ONLY run produced no category deltas — nothing was compared");
     }
+    // Evidence is tiered, and the two estimates ARE evidence: a delta anchored
+    // to a resolved row is publishable on its own; an authority citation
+    // raises the tier, it never gates existence. A refusal names the tiers
+    // so a run that found plenty is never reported as having found nothing.
     const speculative = new Set(RULES.content.speculativeFindingTypes as string[]);
-    const evidenceBacked = findings.filter(
-      (finding) =>
-        !(finding.type && speculative.has(finding.type)) &&
-        ((finding.anchors?.length ?? 0) > 0 || finding.scope === "category" || Boolean(finding.totals_anchor))
-    );
+    const isSpeculative = (finding: BundleFinding) => Boolean(finding.type && speculative.has(finding.type));
+    const isAnchored = (finding: BundleFinding) => (finding.anchors?.length ?? 0) > 0;
+    const isCategory = (finding: BundleFinding) => finding.scope === "category" || Boolean(finding.totals_anchor);
+    const evidenceBacked = findings.filter((finding) => !isSpeculative(finding) && (isAnchored(finding) || isCategory(finding)));
     const floor = RULES.content.minEvidenceBackedFindings;
     if (evidenceBacked.length < floor) {
+      const tiers = {
+        lineAnchored: findings.filter((finding) => !isSpeculative(finding) && isAnchored(finding)).length,
+        categoryLevel: findings.filter((finding) => !isSpeculative(finding) && !isAnchored(finding) && isCategory(finding)).length,
+        speculative: findings.filter(isSpeculative).length,
+        unanchored: findings.filter((finding) => !isSpeculative(finding) && !isAnchored(finding) && !isCategory(finding)).length,
+      };
+      const rows = (doc: BundleDocument | undefined) =>
+        doc?.line_count === null || doc?.line_count === undefined ? "unknown" : String(doc.line_count);
+      const why =
+        findings.length === 0
+          ? `no findings were produced — rows read: target ${rows(bundle.target)}, source ${rows(bundle.source)}; check that the two documents are different and that the comparison was read`
+          : `${findings.length} finding(s) produced: ${tiers.lineAnchored} line-anchored, ${tiers.categoryLevel} category-level, ${tiers.unanchored} unanchored (open verification), ${tiers.speculative} speculative`;
       fail(
         "R24",
-        `only ${evidenceBacked.length} evidence-backed finding(s) — below the release floor of ${floor}; the run found nothing it can show a reader`
+        `only ${evidenceBacked.length} evidence-backed finding(s) — below the release floor of ${floor}; ${why}`
       );
     }
   }

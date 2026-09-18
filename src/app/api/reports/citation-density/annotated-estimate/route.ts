@@ -7,7 +7,7 @@ import {
   getAnalysisReport,
   getLatestActiveAnalysisReport,
 } from "@/lib/analysisReportStore";
-import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import { getUploadedAttachments, type StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
   buildAnnotatedCitationDensityEstimatePdf,
@@ -28,6 +28,7 @@ import {
   isPdfDocument,
   resolveHigherEstimatePdfSelection,
   resolveSourceEstimatePdfSelections,
+  sameEstimateDocument,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
 import { resolveCanonicalDeltaSetFromFixtures } from "@/lib/reports/canonicalDeltaFixtureRegistry";
@@ -363,8 +364,48 @@ export async function POST(request: Request) {
         );
       }
       const carrierAuthored = hasCarrierAuthoredEstimate(sourceDocuments);
+      // A DISTINCT PAIR, by content. A copy of the annotated estimate on the
+      // case — the same bytes uploaded twice, or the same print re-exported —
+      // is an estimate-like PDF with a different id, so it qualified as the
+      // comparison and the engine compared the document with itself: zero
+      // deltas, and a release refusal that read as "found nothing" (RO
+      // 22084). Copies are excluded here; when nothing distinct remains, the
+      // run says so instead of comparing nothing.
+      const sameDocumentCopies = sourceDocuments.filter(
+        (document) =>
+          document.id !== selection.selectedSourceDocumentId &&
+          isAnnotatableEstimatePdf(document) &&
+          sameEstimateDocument(sourceDocument, document) !== null
+      );
+      const isDistinctComparison = (document: StoredAttachment) =>
+        document.id !== selection.selectedSourceDocumentId &&
+        isAnnotatableEstimatePdf(document) &&
+        !sameDocumentCopies.some((copy) => copy.id === document.id);
+      if (sameDocumentCopies.length > 0) {
+        const copyNames = sameDocumentCopies.map((copy) => copy.filename || copy.id).join(", ");
+        aggregateWarnings.add(
+          `${sameDocumentCopies.length} uploaded estimate(s) are the same document as the annotated estimate and were not compared: ${copyNames}.`
+        );
+        if (!sourceDocuments.some(isDistinctComparison)) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `The comparison estimate is the same document as the annotated estimate (${sourceDocument.filename || sourceDocument.id}; copies: ${copyNames}).`,
+              userMessage:
+                `The only other estimate on this case is a copy of ${sourceDocument.filename || "the annotated estimate"}, so there is nothing to compare it against. Upload the other party's estimate and run the Delta Citation Density Report again.`,
+              reportType: "citation-density",
+              routeName: "citation-density",
+              selectedSourceDocumentId: selection.selectedSourceDocumentId,
+              selectedSourceLabel: selection.selectedSourceLabel,
+              sameDocumentCopies: sameDocumentCopies.map((copy) => ({ id: copy.id, filename: copy.filename })),
+              ...sourceDiagnostics,
+            },
+            { status: 422 }
+          );
+        }
+      }
       const comparisonEstimateTexts = sourceDocuments
-        .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
+        .filter(isDistinctComparison)
         .map((document) => ({
           sourceDocumentId: document.id,
           fileName: document.filename || "Comparison estimate",
@@ -377,8 +418,7 @@ export async function POST(request: Request) {
       const comparisonEstimatePdfs = sourceDocuments
         .filter(
           (document) =>
-            document.id !== selection.selectedSourceDocumentId &&
-            isAnnotatableEstimatePdf(document) &&
+            isDistinctComparison(document) &&
             isPdfDocument(document.type, document.filename) &&
             document.imageDataUrl
         )
