@@ -389,6 +389,14 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
     ],
   };
 
+  section("A note for the customer (copy and paste)", [
+    {
+      kind: "note",
+      text: "Written for the vehicle owner, in the shop's voice. Paste it into an email or a text as-is, or edit it. It uses only the figures on the two estimates and stays inside the say / don't-say rules further down: no promise about what the carrier will pay, no date, no comment on anyone's intent.",
+    },
+    { kind: "callout", tone: "owner", paragraphs: [buildCustomerNote(model)] },
+  ]);
+
   section("The thirty-second version", [
     orientation,
     {
@@ -638,6 +646,55 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
     sections,
     footerLine: plainSummaryFooterLine(model),
   };
+}
+
+/**
+ * The customer-facing paragraph a manager can paste into an email.
+ *
+ * Customer wording, so it names no line numbers, no finding numbers and no
+ * internal report. Every figure is one the two estimates print; each driver
+ * of the gap is named only when the estimates show it (a parts gap, a rate
+ * or hours difference, operations with no counterpart, ADAS lines). It makes
+ * no claim about part quality, the carrier's intent, or what will be paid.
+ */
+export function buildCustomerNote(model: PlainSummaryModel): string {
+  const total = model.buckets.find((b) => b.key === "total")!;
+  const parts = model.buckets.find((b) => b.key === "parts");
+  const drivers: string[] = [];
+  if (parts && parts.gap !== null && parts.gap > 0) {
+    drivers.push("which replacement parts are written and how they are priced");
+  }
+  const hoursShort = (model.hoursGap.body ?? 0) > 0 || (model.hoursGap.paint ?? 0) > 0;
+  if (model.rateEffect && hoursShort) {
+    drivers.push("the hourly labor rate and the number of labor hours allowed");
+  } else if (model.rateEffect) {
+    drivers.push("the hourly labor rate");
+  } else if (hoursShort) {
+    drivers.push("the number of labor hours allowed");
+  }
+  if (model.missingLineCount > 0) {
+    drivers.push(
+      `${model.missingLineCount} ${model.missingLineCount === 1 ? "operation" : "operations"} on our estimate that the insurance estimate does not include yet`
+    );
+  }
+  const driverSentence = drivers.length
+    ? ` The difference comes mainly from ${sentenceList(drivers)}.`
+    : "";
+  const adasSentence = model.adas.lines.length
+    ? " Your vehicle has driver-assistance cameras or sensors on the damaged side, and the manufacturer requires them to be recalibrated after the repair. That work is on our estimate, and we will make sure it is completed and documented for you."
+    : "";
+  return (
+    `Thank you for trusting us with your ${model.header.vehicle}. Two repair plans have been written for it. Ours comes to ${total.ours}, and the insurance company's appraiser has written ${total.theirs}, a difference of ${money(model.header.gap)}. A gap like this is common at this stage and does not mean anyone has acted in bad faith; two appraisers looked at the same vehicle and reached different conclusions.` +
+    driverSentence +
+    adasSentence +
+    " The next step is a supplement and a joint reinspection with the damaged panels removed, which is where most of these differences get settled. We will keep you updated as that happens, and we will keep every estimate, supplement and invoice on file for you. Please call us with any questions."
+  );
+}
+
+function sentenceList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 function describeRateGaps(r: RateEffect): string {

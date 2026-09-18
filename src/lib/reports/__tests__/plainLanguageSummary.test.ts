@@ -9,6 +9,7 @@ import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import { buildForensicReconciliation } from "../forensicEstimateAnalysis";
 import { findBannedPhrases } from "../deltaWording";
 import {
+  buildCustomerNote,
   buildPlainSummaryDocument,
   buildPlainSummaryModel,
   plainSummaryDocumentText,
@@ -91,6 +92,7 @@ describe("RO 22264 — the numbers the hand-built summary printed", () => {
     expect(text).not.toMatch(/undefined|NaN|\[object/);
     expect(doc.footerLine).toBe("Appraisal Dispute Report | RO 22264 | 2023 Audi Q5 45 S Line Prestige | Shop staff only");
     expect(doc.sections.map((section) => section.title)).toEqual([
+      "A note for the customer (copy and paste)",
       "The thirty-second version",
       "Where the money is",
       "The four kinds of difference you will see",
@@ -100,6 +102,41 @@ describe("RO 22264 — the numbers the hand-built summary printed", () => {
       "What happens next",
       "Reading the two companion reports",
     ]);
+  });
+
+  it("opens with a customer-ready paragraph that names the figures and nothing internal", () => {
+    const note = buildCustomerNote(model);
+    expect(note).toContain("Ours comes to $26,265.20");
+    expect(note).toContain("$12,113.72, a difference of $14,151.48");
+    expect(note).toContain("107 operations on our estimate that the insurance estimate does not include yet");
+    expect(note).toContain("the hourly labor rate and the number of labor hours allowed");
+    expect(note).toContain("recalibrated after the repair");
+    expect(note).not.toMatch(/Finding|Ln \d|line \d|Citation Density|Forensic|lowball|will pay|appraisal clause/i);
+    expect(findBannedPhrases(note)).toEqual([]);
+    const doc = buildPlainSummaryDocument(model);
+    expect(doc.sections[0].blocks[1]).toEqual({ kind: "callout", tone: "owner", paragraphs: [note] });
+  });
+
+  it("the customer paragraph names only the drivers the estimates show", () => {
+    const quiet = buildPlainSummaryModel({
+      ...RO22264,
+      findings: [],
+      missingLineCount: 0,
+      docB: {
+        ...RO22264.docB,
+        totals: {
+          ...RO22264.docB.totals,
+          parts: RO22264.docA.totals.parts,
+          bodyLabor: { hours: 77.0, rate: 75, total: 5775.0 },
+          paintLabor: { hours: 44.6, rate: 75, total: 3345.0 },
+          paintSupplies: { hours: 44.6, rate: 60, total: 2676.0 },
+        },
+      },
+    });
+    const note = buildCustomerNote(quiet);
+    expect(note).not.toContain("The difference comes mainly from");
+    expect(note).not.toContain("recalibrated");
+    expect(note).toContain("joint reinspection");
   });
 
   it("stays inside the wording rules the release gate enforces", () => {
