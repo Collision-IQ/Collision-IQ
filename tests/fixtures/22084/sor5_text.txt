@@ -1,0 +1,521 @@
+
+
+ALLSTATE FIRE AND CASUALTY INSURANCE COMPANY
+PENNSYLVANIA
+For Self Service Customer Inquiries:
+www.allstate.com/claims/track-claim.aspx
+-----------------------------------------------------------------------------------------------
+For Body Shop Inquires, chat with us at:
+www.allstate.com/vendorservices
+Mailing Address:
+P.O. Box 660636
+Dallas, TX 75266
+Claim #:
+Workfile ID:
+000812092088B03
+f961e3f1
+Supplement of Record 5 Summary
+Written By: Francesco Marzullo, License Number: 1117300, 9/14/2026 2:55:43 PM
+Adjuster: Boyer, Kevin, (972) 915-2184 Business
+Insured:Owner Policy #:Claim #:000812092088B03
+Type of Loss:LiabilityDate of Loss:11/19/2025 06:11 PMDays to Repair:3
+Point of Impact:05 Right RearDeductible:
+Owner (Claimant):Inspection Location:Appraiser Information:Repair Facility:
+Redacted OWNER
+200 SNOWBERRY WAY
+west chester, PA 19380
+(000) 000-0000 Cellular
+owner@example.com
+Connestoga Collision
+961 Lancaster Ave
+Berwyn, PA 19312
+Repair Facility
+(610) 644-1000 Evening
+(267) 361-7156Connestoga Collision
+961 Lancaster Ave
+Berwyn, PA 19312
+(610) 644-1000 Evening
+VEHICLE
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+VIN: 5YJ3E1EA8XXXXXXXXProduction Date: Interior Color: 
+License: xxx0000Odometer: 175811Exterior Color: White Water Pearl
+Tr
+State: PACondition: Good
+TRANSMISSIONCONVENIENCERADIOSkyview Roof
+Automatic TransmissionAir ConditioningAM RadioSEATS
+POWERIntermittent WipersFM RadioBucket Seats
+Power SteeringTilt WheelStereoLeather Seats
+Power BrakesCruise ControlSearch/SeekHeated Seats
+Power WindowsRear DefoggerAuxiliary Audio ConnectionRear Heated Seats
+Power LocksKeyless EntrySAFETYWHEELS
+Power MirrorsAlarmDrivers Side Air BagWheel Covers
+Heated MirrorsMessage CenterPassenger Air BagPAINT
+Power Driver SeatSteering Wheel Touch ControlsAnti-Lock Brakes (4)Three Stage Paint
+Power Passenger SeatTelescopic Wheel4 Wheel Disc BrakesOTHER
+Memory PackageClimate ControlFront Side Impact Air BagsFog Lamps
+DECORNavigation SystemHead/Curtain Air BagsTraction Control
+Dual MirrorsRemote StarterHands Free DeviceStability Control
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 1
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+Tinted GlassBackup CameraBlind Spot DetectionXenon or L.E.D. Headlamps
+Console/StorageParking SensorsLane Departure WarningPower Trunk/Liftgate
+Wood Interior TrimHome LinkROOF
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 2
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+1#PAYMENT ISSUED TO CUSTOMER10.000.00.0
+2#00.000.00.0
+3ELECTRICAL
+4S03R&ICover type 100.00m1.2M0.0
+5WHEELS
+6*S03R&ILT/Rear R&I wheel00.00m0.2
+M0.0
+7*S03R&IRT/Rear R&I wheel00.00m0.2
+M0.0
+8INSTRUMENT PANEL
+9S01R&IWoofer00.000.20.0
+10SEATS & TRACKS
+11S01R&IBolster00.000.10.0
+12S01ReplBolster clip111103300E11.190.00.0
+13*S01R&ISeat back assy00.000.8
+0.0
+14*S01R&ISeat back assy00.000.80.0
+15S01R&IBolster00.000.10.0
+16S01ReplBolster clip111103300E11.190.00.0
+17*S01R&ICushion assy00.000.30.0
+18*S01R&IRT Inner support00.000.20.0
+19S01R&IRT Outer support00.000.20.0
+20*S01R&ILT Inner support00.000.20.0
+21S01R&ILT Outer support00.000.20.0
+22PILLARS, ROCKER & FLOOR
+23S01R&IRT Rear sill plate00.00Incl.0.0
+24S01R&ILT Rear sill plate00.00Incl.0.0
+25S01ReplRT Rear sill plate clip109840800B11.190.00.0
+26S01ReplLT Rear sill plate clip109840800B11.190.00.0
+27QUARTER PANEL
+28*S01RprRT Lower extn (ALU)00.001.0S0.3
+29S01Add for Three Stage00.000.00.1
+30S01R&IRT Splash shield00.000.30.0
+31*S01RprLT Lower extn (ALU)00.001.0S0.3
+32S01Add for Three Stage00.000.00.1
+33S01R&ILT Splash shield00.000.30.0
+34S01R&IRT Pressure vent00.000.20.0
+35S01R&ILT Pressure vent00.000.20.0
+36REAR BODY & FLOOR
+37*S04ReplRear body panel (ALU)1077958S0A1970.00
+8.51.4
+38S01Add for Three Stage00.000.01.0
+39S01Add for Inside00.000.00.8
+40#S01ReplRear body structural bulb rivet
+6.5mm
+1063943-00-A2323.000.00.0
+41#S01ReplRear body flow form rivet S181069329-00-A24.000.00.0
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 3
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+42S01ReplRear cover113781900A1300.00Incl.0.0
+43S01ReplRear body panel nut104733700A88.000.00.0
+44S01ReplRear body panel bolt2007069824.000.00.0
+45S01R&IEnd cover00.000.30.0
+46*S01R&IPackage tray00.000.1
+0.0
+47S01R&ITrunk trim00.00Incl.0.0
+48S01R&ITrunk trim front00.00Incl.0.0
+49S01R&ITrunk trim rear00.00Incl.0.0
+50S01R&IFloor cover00.00Incl.0.0
+51S01R&IRT Side trim00.00Incl.0.0
+52S01R&ILT Side trim00.00Incl.0.0
+53S01R&ISill trim00.00Incl.0.0
+54*S05RprRear floor pan (ALU)00.001.0
+2.0
+NOTE: Repair is to mating flange of replacement part
+55*S05RprRT Tail lamp panel00.001.00.5
+NOTE: Repair is to mating flange of replacement part
+56S05Overlap Minor Panel00.000.0-0.2
+57*S05RprLT Tail lamp panel00.001.00.5
+NOTE: Repair is to mating flange of replacement part
+58S05Overlap Minor Panel00.000.0-0.2
+59TRUNK LID
+60*S05RprTrunk lid00.005.0
+2.1
+61S01Overlap Major Non-Adj. Panel00.000.0-0.2
+62S01Add for Three Stage00.000.00.8
+63S01R&IR&I trunk lid00.000.80.0
+64S04ReplLatch109230800E1225.000.30.0
+65S01R&IRelease handle handle/camera00.000.30.0
+66*S04ReplLatch bolt155981300A37.500.00.0
+67S01R&IWeatherstrip00.000.40.0
+68*S04ReplOrnament109082900E165.000.30.0
+69S01R&ILicense mount00.000.10.0
+70S01R&ITrim panel00.000.20.0
+71S01R&IUpper trim00.000.20.0
+72REAR LAMPS
+73R&IRT Tail lamp assy00.000.30.0
+74R&ILT Tail lamp assy00.000.30.0
+75ReplRT Tail lamp assy grommet
+8.2x12.2
+110492600B210.00Incl.0.0
+76ReplLT Tail lamp assy grommet
+8.2x12.2
+110492600B210.00Incl.0.0
+77ReplRT Tail lamp assy grommet
+8.0x5-0.9
+110433500B210.00Incl.0.0
+78ReplLT Tail lamp assy grommet
+8.0x5-0.9
+110433500B210.00Incl.0.0
+79ReplRT Tail lamp assy gasket145338100A19.00Incl.0.0
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 4
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+80ReplLT Tail lamp assy gasket145338100A19.00Incl.0.0
+81S01R&IRT Backup lamp assy00.00Incl.0.0
+82S01R&ILT Backup lamp assy00.00Incl.0.0
+83S01ReplRT Backup lamp assy gasket145338300A19.720.00.0
+84S01ReplLT Backup lamp assy gasket145338300A19.720.00.0
+85S01R&IRT License lamp00.000.10.0
+86S01R&ILT License lamp00.000.10.0
+87REAR BUMPER
+88S04O/H bumper assy00.002.50.0
+89<>S02ReplBumper cover unpainted w/park
+brackets
+1916698S0A1791.01Incl.2.8
+NOTE: lkq , quote #5073699
+877-391-2727
+90S02Overlap Major Non-Adj. Panel00.000.0-0.2
+91S02Add for Three Stage00.000.01.0
+92S03Add for park sensor00.00m0.6M0.0
+93S02ReplLower cover110303500D1300.00Incl.0.0
+94*S03ReplPark sensor rear, inner pearl
+white
+112750311A1120.00mIncl.
+M0.0
+95S04ReplCenter bracket112119100E160.000.30.0
+96*S04ReplRT Reflector107740700C116.00Incl.0.0
+97**S01ReplOpt OEM Mud guards +25%146.010.00.0
+NOTE: FastChe FastChe painted mud guards. Quote:
+https://www.amazon.com/gp/product/B0BRL7TH82/ref=sw_img_1?smid=&psc=1
+98*S04ReplImpact bar (ALU)109531400C1350.00
+0.60.0
+99VEHICLE DIAGNOSTICS
+100*S04RprTesla Tool Box00.00m1.0M0.0
+NOTE: (includes pre and post and 1 Calibration and Service Mode)
+101#S04Remove vehicle from "Service
+Mode"
+10.000.1M0.0
+102#S04Drive time for camera calibration10.001.0M0.0
+103#S05RprIsolate high voltage00.001.0M0.0
+104#S05RprConfirm/test  high voltage
+isolation
+00.000.5M0.0
+105MISCELLANEOUS OPERATIONS
+106#S03Cover Car for Overspray16.000.20.0
+107**ReplA/M Flex Additive18.000.00.0
+108#S01RprD&R Battery/Reset electronics00.000.50.0
+109#S01RprMask Jambs00.000.30.0
+110**S05ReplA/M Flex Additive112.000.00.0
+111#S01RprSet back, secure Protect wiring &
+connectors
+00.000.50.0
+112#S01Cover Car for Interior15.000.20.0
+113#S01RprColor Tint00.000.01.0
+114#S03Cover Car for Overspray - primer16.000.20.0
+115#S01RprMaintain Battery Charge00.000.50.0
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 5
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+116#S03RprDenib and Polish00.001.00.5
+117#S03Insp. Restraints10.000.50.0
+118**S05ReplA/M Cavity Wax-3m 8852230.800.00.0
+119**S05ReplA/M 3m 7333 structural adhesive1111.490.00.0
+120**S05ReplA/M 3M Heavy-Bodied Seam
+Sealer 08308 
+178.320.00.0
+121**S05ReplA/M 3M Controlled-Flow Seam
+Sealer 08329
+158.990.00.0
+122**S05ReplA/M 3M Urethane Seam Sealer
+08365 
+131.210.00.0
+123**S05ReplA/M 3M 8194 static mixing
+nozzles
+110.460.00.0
+124**S05ReplA/M 3M 8187 Threaded nozzle17.000.00.0
+125**S05ReplA/M 3M 0001 Acid Brush 14.400.00.0
+126**S05ReplA/M 3M 05916 Welding & spark
+deflection paper
+17.680.00.0
+127#S05RprSet Up & Measure Universal
+Bench
+00.002.00.0
+128#S05RprRemove Factory Seam Sealer
+Caulk
+00.001.00.0
+129#S05RprFeather/Prime/Block00.000.01.0
+130OTHER CHARGES
+131#E.P.C.14.50
+SUBTOTALS3,773.5742.515.4
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts3,769.07
+Body Labor34.7 hrs@$ 100.00 /hr3,470.00
+Paint Labor15.4 hrs@$ 100.00 /hr1,540.00
+Mechanical Labor5.8 hrs@$ 220.00 /hr1,276.00
+Structural Labor2.0 hrs@$ 135.00 /hr270.00
+Paint Supplies15.4 hrs@$ 41.00 /hr631.40
+Other Charges4.50
+Subtotal10,960.97
+Sales Tax$ 10,960.97@6.0000 %657.66
+Total Cost of Repairs11,618.63
+Total Adjustments0.00
+Net Cost of Repairs11,618.63
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 6
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+SUPPLEMENT SUMMARY
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+Changed Items
+55*S01RprTrunk lid00.00-4.0
+-2.1
+60*S05RprTrunk lid00.005.0
+2.1
+103**S01ReplA/M Flex Additive1-8.000.00.0
+110**S05ReplA/M Flex Additive112.000.00.0
+Deleted Items
+110**S03ReplA/M Seam Sealer/Caulking2-30.00-0.20.0
+Added Items
+54*S05RprRear floor pan (ALU)00.001.0
+2.0
+NOTE: Repair is to mating flange of replacement part
+55*S05RprRT Tail lamp panel00.001.00.5
+NOTE: Repair is to mating flange of replacement part
+56S05Overlap Minor Panel00.000.0-0.2
+57*S05RprLT Tail lamp panel00.001.00.5
+NOTE: Repair is to mating flange of replacement part
+58S05Overlap Minor Panel00.000.0-0.2
+103#S05RprIsolate high voltage00.001.0M0.0
+104#S05RprConfirm/test  high voltage
+isolation
+00.000.5M0.0
+118**S05ReplA/M Cavity Wax-3m 8852230.800.00.0
+119**S05ReplA/M 3m 7333 structural adhesive1111.490.00.0
+120**S05ReplA/M 3M Heavy-Bodied Seam
+Sealer 08308 
+178.320.00.0
+121**S05ReplA/M 3M Controlled-Flow Seam
+Sealer 08329
+158.990.00.0
+122**S05ReplA/M 3M Urethane Seam Sealer
+08365 
+131.210.00.0
+123**S05ReplA/M 3M 8194 static mixing
+nozzles
+110.460.00.0
+124**S05ReplA/M 3M 8187 Threaded nozzle17.000.00.0
+125**S05ReplA/M 3M 0001 Acid Brush 14.400.00.0
+126**S05ReplA/M 3M 05916 Welding & spark
+deflection paper
+17.680.00.0
+127#S05RprSet Up & Measure Universal
+Bench
+00.002.00.0
+128#S05RprRemove Factory Seam Sealer
+Caulk
+00.001.00.0
+129#S05RprFeather/Prime/Block00.000.01.0
+SUBTOTALS314.358.33.6
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 7
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+TOTALS SUMMARY
+CategoryBasisRateCost $
+Parts314.35
+Body Labor6.8 hrs@$ 100.00 /hr680.00
+Paint Labor3.6 hrs@$ 100.00 /hr360.00
+Mechanical Labor1.5 hrs@$ 220.00 /hr330.00
+Paint Supplies3.6 hrs@$ 41.00 /hr147.60
+Subtotal1,831.95
+Sales Tax$ 1,831.95@6.0000 %109.92
+Total Supplement Amount1,941.87
+NET COST OF SUPPLEMENT1,941.87
+CUMULATIVE EFFECTS OF SUPPLEMENT(S)
+Estimate1,922.92Francesco Marzullo 
+Supplement S014,856.30Francesco Marzullo 
+Supplement S02980.11Francesco Marzullo 
+Supplement S03481.77Francesco Marzullo 
+Supplement S041,435.66Francesco Marzullo 
+Supplement S051,941.87Francesco Marzullo 
+Workfile Total: $11,618.63
+NET COST OF REPAIRS: $11,618.63
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 8
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+SUPPLEMENT PROCESS INSTRUCTIONS:
+Please be aware that any additional damage must be inspected by an Allstate technician while the vehicle is at the
+shop and torn down (when reasonably appropriate), prior to the repairs being completed. If Allstate is not informed
+of supplemental damage, it may not be covered under the claim. In addition, all invoices will be requested and
+reviewed.
+For repair shops using CCC One Estimating, supplement requests can be submitted using Estimate Share. The claim
+number and work file Id located at the top of this document will be needed to proceed. Instructions for using
+Estimate Share can be found at
+https://help.cccis.com/static/ccc_one/training/EstimateShare/RequestingEstimateShareStaffRF.pdf
+For all other repair shops, please follow the Virtual Assist App process for future supplement requests. The Virtual
+Assist App can be downloaded at no charge by visiting the Apple App store or the Google Play store. Search,
+download and install: Virtual Assist Allstate Insurance Co
+Current Version: PENNSYLVANIA Updated   08.25.2025
+***********************************************************************************************
+********************************************************
+This is Allstate's Estimate ("the Estimate") of the cost of repairing your vehicle and it addresses Allstate's financial
+obligations and limitations regarding the Estimate, and informs you of your potential financial obligations if additional
+costs are incurred in excess of the Estimate. You should carefully review this information, the Estimate, the rates for
+work shown in the Estimate and miscellaneous costs and fees. Allstate does not require, as a condition of payment of
+your claim, that the repairs to your vehicle must be made by any specified repair shop. The selection of a repair shop
+is entirely your choice. It is important you are aware that different repair shops may charge rates different than those
+provided in the Estimate. Some may charge more or less than the rates shown in the Estimate. However, the most
+Allstate will pay for the repair of your vehicle is the lowest amount for which your vehicle can be properly and fairly
+repaired at a repair shop within a reasonable geographical area of your location for the work shown in the Estimate.
+If the repair shop you choose to make repairs to your vehicle charges more for those repairs than provided for in the
+Estimate, the repair shop may hold you responsible for the difference in costs and may not return your vehicle to you
+until you pay this difference. Allstate will not be responsible for any storage fees or other ancillary charges which
+result from nonpayment of charges in excess of the Estimate by the repair shop of your choice. Allstate will also not
+be responsible for any additional towing or storage charges incurred after the completion of the work shown in the
+Estimate and such charges will be your responsibility. Additionally, Allstate will not be responsible for any additional
+towing or storage charges incurred after Allstate provides notice to you that such charges will become your
+responsibility. The amount of the Estimate is the cost to repair your vehicle to its physical condition before it was
+damaged and it is based on the damage Allstate found to your vehicle on its initial inspection. There may be
+additional damage which was not known or discovered at the initial inspection which may require additional repairs.
+If you or your chosen repair facility find any hidden damage or believe additional work is necessary, you or the repair
+facility should contact Allstate immediately so Allstate can re-inspect the vehicle to address any additional damage.
+*****************************************************************************
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 9
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+ANY PERSON WHO KNOWINGLY AND WITH INTENT TO DEFRAUD ANY INSURANCE COMPANY OR OTHER PERSON
+FILES AN APPLICATION FOR INSURANCE OR STATEMENT OF CLAIM CONTAINING ANY MATERIALLY FALSE
+INFORMATION OR CONCEALS FOR THE PURPOSE OF MISLEADING, INFORMATION CONCERNING ANY FACT
+MATERIAL THERETO COMMITS A FRAUDULENT INSURANCE ACT, WHICH IS A CRIME AND SUBJECTS SUCH PERSON
+TO CRIMINAL AND CIVIL PENALTIES.
+THE FOLLOWING IS A LIST OF ABBREVIATIONS OR SYMBOLS THAT MAY BE USED TO DESCRIBE WORK TO BE
+DONE OR PARTS TO BE REPAIRED OR REPLACED:D=DISCONTINUED PART A=APPROXIMATE PRICE B=BODY
+LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL
+T=TAXED MISCELLANEOUS X=NON TAXED MISCELLANEOUS ADJ=ADJACENT ALGN=ALIGN  A/M=AFTERMARKET 
+BLND=BLEND CAPA=CERTIFIED AUTOMOTIVE PARTS ASSOCIATION  D&R=DISCONNECT AND RECONNECT
+EST=ESTIMATE EXT. PRICE=UNIT PRICE MULTIPLIED BY THE QUANTITY INCL=INCLUDED MISC=MISCELLANEOUS
+NON-ADJ=NON ADJACENT O/H=OVERHAUL OP=OPERATION NO=LINE NUMBER QTY=QUANTITY
+RECOND=RECONDITION REFN=REFINISH REPL=REPLACE R&I=REMOVE AND INSTALL R&R=REMOVE AND
+REPLACE RPR=REPAIR RT=RIGHT SECT=SECTION SUBL=SUBLET LT=LEFT W/O=WITHOUT W/_=WITH/_
+#=MANUAL LINE ENTRY *=OTHER [IE..MOTORS DATABASE INFORMATION WAS CHANGED]. **=DATABASE LINE
+WITH AFTERMARKET N=NOTES ATTACHED TO LINE NAGS=NATIONAL AUTO GLASS SPECIFICATIONS. OPT
+OEM=ORIGINAL EQUIPMENT MANUFACTURER PARTS EITHER OPTIONALLY SOURCED OR OTHERWISE PROVIDED
+WITH SOME UNIQUE PRICING OR DISCOUNT.
+THE ATTACHED ESTIMATE REPRESENTS AN APPRAISAL OF THE COST OF REPAIR FOR THE VISIBLE DAMAGE TO
+THE VEHICLE NOTED AT THE TIME OF INSPECTION NECESSARY TO RETURN THE VEHICLE TO ITS PREDAMAGED
+CONDITION.  COSTS ABOVE THE APPRAISED AMOUNT MAY BE THE RESPONSIBILITY OF THE VEHICLE OWNER. 
+THERE IS NO REQUIREMENT THAT THE VEHICLE OWNER USE ANY SPECIFIED REPAIR SHOP. INFORMATION
+REGARDING REPAIR FACILITIES WHICH WILL BE ABLE TO REPAIR THE VEHICLE FOR THE APPRAISED AMOUNT IS
+AVAILABLE FROM THE INSURANCE COMPANY. IF USED PARTS ARE SPECIFIED, THEY ARE REQUIRED TO BE OF
+LIKE KIND AND QUALITY TO THOSE BEING REPLACED. INCIDENTAL CHARGES SUCH AS TOWING, PROTECTIVE
+CARE, CUSTODY, STORAGE, DEPRECIATION, BATTERY AND TIRE REPLACEMENT ARE NOTED WHEN APPLICABLE.
+AFTERMARKET CRASH PART - A NONORIGINAL EQUIPMENT MANUFACTURER (NON-OEM) REPLACEMENT PART,
+EITHER NEW OR USED, FOR ANY OF THE NONMECHANICAL PARTS THAT GENERALLY CONSTITUTE THE EXTERIOR
+OF THE MOTOR VEHICLE, INCLUDING INNER AND OUTER PANELS. THIS APPRAISAL WILL INDICATE IF
+AFTERMARKET CRASH PARTS ARE SPECIFIED.  IF THE USE OF SUCH PARTS VOIDS THE WARRANTY ON THE PART
+BEING REPLACED OR ON ANY OTHER PART, THE AFTER MARKET CRASH PART SHALL HAVE A WARRANTY EQUAL
+TO OR BETTER THAN THE REMAINDER OF THE EXISTING WARRANTY.
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 10
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide DR7QA18, CCC Data Date 09/09/2026, and potentially
+other third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for
+the vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM
+parts are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM
+(Alternative OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM
+vehicle dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or
+labor data provided by third party sources of data may have been modified or may have come from an alternate data
+source.  Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category. 
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category. 
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel. 
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part. 
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet. 
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 11
+
+Claim #:000812092088B03
+Workfile ID:f961e3f1
+Supplement of Record 5 Summary
+2018 TESL Model 3 RWD w/Long Range Battery 4D SED Electric- Electric White Water Pearl Tr 
+IMPORTANT INFORMATION ABOUT THE NAMED INSURANCE COMPANY'S PARTS POLICY.
+THIS ESTIMATE MAY LIST PARTS FOR USE IN THE REPAIR OF YOUR VEHICLE THAT ARE MANUFACTURED BY A
+COMPANY OTHER THAN THE ORIGINAL MANUFACTURER OF YOUR VEHICLE. THESE PARTS ARE COMMONLY
+REFERRED TO AS AFTERMARKET PARTS OR COMPETITIVE PARTS, AND MAY INCLUDE COSMETIC OUTER BODY
+CRASH PARTS SUCH AS HOODS, FENDERS, BUMPER COVERS, ETC. THE INSURANCE COMPANY GUARANTEES THE
+FIT AND CORROSION RESISTANCE OF ANY AFTERMARKET/COMPETITIVE OUTER BODY CRASH PARTS THAT ARE
+LISTED ON THIS ESTIMATE AND ACTUALLY USED IN THE REPAIR OF YOUR VEHICLE FOR AS LONG AS YOU OWN
+IT. IF A PROBLEM DEVELOPS WITH THE FIT OR CORROSION RESISTANCE OF THESE PARTS, THEY WILL BE
+REPAIRED OR REPLACED AT THE INSURANCE COMPANY'S EXPENSE. THIS GUARANTEE IS LIMITED TO THE REPAIR
+OR REPLACEMENT OF THE PART. THE INSURANCE COMPANY DOES NOT SEPARATELY GUARANTEE THE
+PERFORMANCE OF ORIGINAL EQUIPMENT MANUFACTURER PARTS AND MAKES NO REPRESENTATION ABOUT THE
+AVAILABILITY OF ANY MANUFACTURER'S GUARANTEE.
+9/14/2026 2:55:44 PM468807  |  2.0.02.06190Page 12

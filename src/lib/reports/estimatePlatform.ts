@@ -57,8 +57,18 @@ const AUDATEX_MARKERS = /\baudatex\b|\bsolera\b/i;
 export function detectEstimatePlatform(text: string | null | undefined): EstimatePlatform | null {
   const value = text ?? "";
   if (!value.trim()) return null;
-  if (MITCHELL_MARKERS.test(value) || looksLikeMitchellLayout(value)) return "mitchell";
+  // The producer's own words about itself come first. The row-shape
+  // heuristic is a fallback for a text layer that lost its footers, never
+  // an override of a footer that is present: a CCC print of a Tesla estimate
+  // glues the part number to the price cell ("1104926-00-B" prints as
+  // "110492600B210.00Incl."), and three such lines satisfy the Mitchell
+  // `<line><6-digit code><letter>` anchor. RO 22084 read BOTH of its CCC
+  // documents as Mitchell on that evidence, ran them through the Mitchell
+  // reader (one row, categories whose cost is the rate, no grand total),
+  // gated the comparison as unread, and shipped nothing.
+  if (MITCHELL_MARKERS.test(value)) return "mitchell";
   if (CCC_MARKERS.test(value)) return "ccc";
+  if (looksLikeMitchellLayout(value)) return "mitchell";
   if (AUDATEX_MARKERS.test(value)) return "audatex";
   // A CCC print with its header stripped still prints "ESTIMATE TOTALS" and
   // CCC operation codes; that is CCC-shaped enough to route to the CCC reader,
