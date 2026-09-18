@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pdfParse from "pdf-parse";
 import { ocrPdfBuffer, shouldOcrPdf } from "@/lib/attachments/ocrPdfFallback";
+import { probePdfTextLayer } from "@/lib/attachments/pdfTextLayerProbe";
 import {
   buildOcrAttachmentText,
   findCachedOcrText,
@@ -21,44 +22,14 @@ const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
  * Independent second parser lane: pdfjs-dist (legacy build), the same
  * configuration the serverless OCR pipeline already runs in production.
  * pdf-parse's bundled pdf.js can refuse a file this lane reads fine — the
- * two must never share a failure mode.
+ * two must never share a failure mode. The read itself lives in the text-
+ * layer probe so the scan decision below sees the same words.
  */
 async function extractTextWithPdfjs(
   buffer: Buffer
 ): Promise<{ text: string; numpages: number }> {
-  const { ensurePdfJsNodePolyfills } = await import(
-    "@/lib/reports/citationDensityRowAnchors"
-  );
-  const polyfillError = await ensurePdfJsNodePolyfills([]);
-  if (polyfillError) throw new Error(polyfillError);
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdf = await pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    disableWorker: true,
-    useSystemFonts: true,
-  } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
-
-  const pages: string[] = [];
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const lines: string[] = [];
-    let line: string[] = [];
-    let lastY: number | null = null;
-    for (const item of content.items as Array<{ str?: string; transform?: number[] }>) {
-      const str = item.str ?? "";
-      const y = item.transform?.[5] ?? null;
-      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2 && line.length) {
-        lines.push(line.join(""));
-        line = [];
-      }
-      if (str) line.push(str);
-      if (y !== null) lastY = y;
-    }
-    if (line.length) lines.push(line.join(""));
-    pages.push(lines.join("\n"));
-  }
-  return { text: pages.join("\n"), numpages: pdf.numPages };
+  const probe = await probePdfTextLayer(buffer);
+  return { text: probe.text, numpages: probe.numpages };
 }
 
 async function parsePdfWithRepair(
@@ -158,6 +129,27 @@ export async function extractPreviewDataFromBuffer(params: {
     // Image-only ("scanned") PDF: no text layer. Fall back to server-side OCR so
     // the estimate text still reaches the reviewed set and the line extractors.
     if (shouldOcrPdf(text, pageCount)) {
+      // TEXT DENSITY FIRST. A hybrid PDF — a full-page raster of the form's
+      // rule lines under a real, positioned text layer — can come out of the
+      // first parser with almost no text and would be OCR'd as a scan, its
+      // good text layer replaced by OCR output (RO 22084: the Delta engine
+      // then read fragments, resolved neither grand total, and R24 refused
+      // the run). A page with a positioned text layer is never a scan, so the
+      // independent pdfjs lane is asked first; only a document it too reads
+      // as image-only goes to OCR.
+      const probe = await probePdfTextLayer(params.buffer).catch(() => null);
+      if (probe && probe.classification.kind !== "scan" && !shouldOcrPdf(probe.text, probe.numpages)) {
+        console.info("[pdf-text-layer] positioned text layer read; OCR skipped", {
+          filename: params.filename ?? null,
+          kind: probe.classification.kind,
+          pages: probe.numpages,
+          textPages: probe.classification.textPages,
+          medianWordsPerPage: probe.classification.medianWordsPerPage,
+          firstLaneChars: text.replace(/\s+/g, " ").trim().length,
+          chars: probe.text.length,
+        });
+        return { text: probe.text, pageCount: probe.numpages };
+      }
       // Keyed by content hash: a re-upload of the same bytes reuses the OCR
       // text a prior UploadedAttachment row stored, skipping the 45-80s pass.
       const sha256 = createHash("sha256").update(params.buffer).digest("hex");

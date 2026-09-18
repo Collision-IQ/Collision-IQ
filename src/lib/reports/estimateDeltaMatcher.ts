@@ -3418,6 +3418,16 @@ export function compareEstimateTotals(params: {
 }): EstimateTotalsDelta[] {
   const { higher, lower } = params;
   if (!higher || !lower) return [];
+  // An unread block is not an empty block (nullIsNotZero). A side whose totals
+  // block yielded no categories — its grand total resolved from the word
+  // layer alone, as on RO 22084 — supports no category or tax-lane claim:
+  // sweeping the other side's categories against an empty map would report
+  // every one of them as missing, and the reconciliation check would then
+  // dress the whole comparison total up as an "unexplained gap". Only the
+  // difference between the two printed totals can be stated.
+  if (higher.categories.length === 0 || lower.categories.length === 0) {
+    return grandTotalDifference(higher, lower);
+  }
   const deltas: EstimateTotalsDelta[] = [];
   const lowerByName = new Map(lower.categories.map((c) => [normalizeTotalsCategoryKey(c.category), c]));
   const higherNames = new Set(higher.categories.map((c) => normalizeTotalsCategoryKey(c.category)));
@@ -3549,19 +3559,7 @@ export function compareEstimateTotals(params: {
     }
   }
 
-  if (higher.grandTotal !== null && lower.grandTotal !== null) {
-    const totalDiff = Math.round((higher.grandTotal - lower.grandTotal) * 100) / 100;
-    if (Math.abs(totalDiff) >= 1) {
-      deltas.push({
-        kind: "total_difference",
-        category: "Grand Total",
-        higher: null,
-        lower: null,
-        summary: `Grand total ${fmtMoney(higher.grandTotal)} vs ${fmtMoney(lower.grandTotal)} — a ${fmtMoney(Math.abs(totalDiff))} difference.`,
-        amount: Math.round(Math.abs(totalDiff) * 100) / 100,
-      });
-    }
-  }
+  deltas.push(...grandTotalDifference(higher, lower));
 
   // Reconciliation assertion: Σ per-category deltas + tax delta must land
   // A TAX LANE one document charges and the other does not. Jurisdictions
@@ -3643,6 +3641,23 @@ export function compareEstimateTotals(params: {
   }
 
   return deltas;
+}
+
+/** The headline difference between the two printed grand totals, when both resolved. */
+function grandTotalDifference(higher: EstimateTotalsSummary, lower: EstimateTotalsSummary): EstimateTotalsDelta[] {
+  if (higher.grandTotal === null || lower.grandTotal === null) return [];
+  const totalDiff = Math.round((higher.grandTotal - lower.grandTotal) * 100) / 100;
+  if (Math.abs(totalDiff) < 1) return [];
+  return [
+    {
+      kind: "total_difference",
+      category: "Grand Total",
+      higher: null,
+      lower: null,
+      summary: `Grand total ${fmtMoney(higher.grandTotal)} vs ${fmtMoney(lower.grandTotal)} — a ${fmtMoney(Math.abs(totalDiff))} difference.`,
+      amount: Math.round(Math.abs(totalDiff) * 100) / 100,
+    },
+  ];
 }
 
 /** Fields that differ between two matched rows (operation code / part number). */

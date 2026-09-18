@@ -181,17 +181,63 @@ export interface ColRanges {
   paint: [number, number];
 }
 
-/** Measure column x-ranges from the header row of the given page's words. Null if absent. */
+/**
+ * The CCC line-item header, one token per column. Matched case-insensitively
+ * by prefix so a producer's variant reads the same as the reference print:
+ * "QTY" / "Qty.", "Extended" split from its "Price $" baseline or glued to it
+ * ("ExtendedPrice$"), "LABOR", "PAINT". A print that drops "Extended" and
+ * heads the column "Price" still measures.
+ */
+const HEADER_TOKENS: Record<keyof ColRanges, RegExp> = {
+  qty: /^qty\.?$/i,
+  price: /^(?:extended|ext\.?$|price\$?)/i,
+  labor: /^labor$/i,
+  paint: /^paint$/i,
+};
+/** The reference print's header sits well inside the top band of the page. */
+const HEADER_TOP_PREFERRED = 220;
+
+/**
+ * Measure column x-ranges from the header row of the given page's words.
+ * Null if absent.
+ *
+ * RO 22084 (hybrid PDF: full-page raster of the rule lines under a real,
+ * positioned text layer) parsed to ZERO rows because this looked for four
+ * exact, case-sensitive tokens above y=220 and the producer printed the
+ * header lower and in capitals. A page whose header cannot be measured is
+ * skipped, and with every page skipped the engine has no rows, resolves no
+ * totals, and R24 refuses the run. The header is now found by baseline: the
+ * topmost row carrying all four column tokens, wherever it prints, with the
+ * reference position preferred when more than one row qualifies (a totals
+ * page repeats "Labor"/"Paint" as category words, never on one baseline
+ * together with "Qty" and a price header).
+ */
 export function measureColumns(words: Word[]): ColRanges | null {
-  const find = (text: string) => words.find((word) => word.text === text && word.top < 220);
-  const qty = find("Qty");
-  const extended = find("Extended");
-  const labor = find("Labor");
-  const paint = find("Paint");
-  if (!qty || !extended || !labor || !paint) return null;
+  const candidates: Array<{ top: number; found: Record<keyof ColRanges, Word> }> = [];
+  for (const row of clusterRows(words)) {
+    const found: Partial<Record<keyof ColRanges, Word>> = {};
+    for (const word of row) {
+      for (const key of Object.keys(HEADER_TOKENS) as Array<keyof ColRanges>) {
+        if (!found[key] && HEADER_TOKENS[key].test(word.text)) found[key] = word;
+      }
+    }
+    if (found.qty && found.price && found.labor && found.paint) {
+      candidates.push({ top: row[0].top, found: found as Record<keyof ColRanges, Word> });
+    }
+  }
+  if (candidates.length === 0) return null;
+  // Column order is a structural fact of the form: qty sits left of price,
+  // price left of labor, labor left of paint. A row whose tokens sit in any
+  // other order is prose that happens to contain the words.
+  const ordered = candidates.filter(
+    ({ found }) => found.qty.x0 < found.price.x0 && found.price.x0 < found.labor.x0 && found.labor.x0 < found.paint.x0
+  );
+  if (ordered.length === 0) return null;
+  const chosen = ordered.find((candidate) => candidate.top < HEADER_TOP_PREFERRED) ?? ordered[0];
+  const { qty, price, labor, paint } = chosen.found;
   return {
     qty: [qty.x0 - COL_PAD.qty[0], qty.x1 + COL_PAD.qty[1]],
-    price: [extended.x0 - COL_PAD.price[0], extended.x1 + COL_PAD.price[1]],
+    price: [price.x0 - COL_PAD.price[0], price.x1 + COL_PAD.price[1]],
     labor: [labor.x0 - COL_PAD.labor[0], labor.x1 + COL_PAD.labor[1]],
     paint: [paint.x0 - COL_PAD.paint[0], paint.x1 + COL_PAD.paint[1]],
   };
@@ -723,6 +769,101 @@ export interface SubtotalsRow {
   price: number | null;
   labor: number | null;
   paint: number | null;
+}
+
+export interface GrandTotalFromWords {
+  value: number;
+  /** The label as the form prints it, e.g. "NET COST OF REPAIRS". */
+  label: string;
+  page: number;
+  top: number;
+  /** Gross figures reconcile against subtotal + tax; a net figure is what
+   *  remains after the deductible and adjustments. */
+  basis: "gross" | "net";
+  form: "ccc-estimate" | "ccc-supplement" | "mitchell";
+}
+
+/**
+ * The labels a document total prints under, across CCC estimate, CCC
+ * supplement and Mitchell forms. Token sequences are matched by prefix,
+ * case-insensitively, so "Grand Total:" and "GRAND TOTAL" read the same and
+ * "Total Cost of Repairs" never matches "Total Supplement Amount" — the
+ * per-supplement figure is never the document total.
+ */
+const GRAND_TOTAL_LABELS: Array<{
+  tokens: string[];
+  basis: GrandTotalFromWords["basis"];
+  form: GrandTotalFromWords["form"];
+}> = [
+  { tokens: ["grand", "total"], basis: "gross", form: "ccc-estimate" },
+  { tokens: ["total", "cost", "of", "repairs"], basis: "gross", form: "ccc-estimate" },
+  { tokens: ["workfile", "total"], basis: "gross", form: "ccc-supplement" },
+  { tokens: ["gross", "total"], basis: "gross", form: "mitchell" },
+  { tokens: ["net", "cost", "of", "repairs"], basis: "net", form: "ccc-supplement" },
+  { tokens: ["net", "total"], basis: "net", form: "mitchell" },
+];
+const MONEY_TOKEN = /^\$?\(?-?\d{1,3}(?:,\d{3})*\.\d{2}\)?$/;
+
+function labelStartsAt(row: Word[], index: number, tokens: string[]): boolean {
+  if (index + tokens.length > row.length) return false;
+  for (let offset = 0; offset < tokens.length; offset += 1) {
+    const text = row[index + offset].text.toLowerCase().replace(/[^a-z$]/g, "");
+    if (!text.startsWith(tokens[offset])) return false;
+  }
+  return true;
+}
+
+/**
+ * Resolve the document's grand total from the positioned word layer.
+ *
+ * The text-lane totals readers need the ESTIMATE TOTALS heading and a label
+ * at the start of a reflowed line. A hybrid PDF whose text reached the
+ * matcher as OCR output, or a supplement whose cumulative summary prints
+ * under a different heading, leaves them with no grand total, and R24 then
+ * refuses the run over a figure that is printed plainly on the page. This
+ * reads the same figure by baseline: the label's tokens on one row, the
+ * rightmost money token to the right of the label on that row.
+ *
+ * Precedence: the LAST occurrence in the document wins, because a supplement
+ * print repeats each earlier stage's totals and the cumulative summary sits
+ * last (RO 22084: "NET COST OF REPAIRS" on page 8 outranks a per-stage
+ * "Total Cost of Repairs" on page 6). Within one page a gross label outranks
+ * a net one, because the reconciliation checks subtotal + tax against the
+ * gross figure and states the deductible separately.
+ */
+export function parseGrandTotalFromWords(wordsByPage: Map<number, Word[]>): GrandTotalFromWords | null {
+  const candidates: GrandTotalFromWords[] = [];
+  for (const [page, rawWords] of [...wordsByPage.entries()].sort((a, b) => a[0] - b[0])) {
+    const words = tokenizeWords(rawWords);
+    for (const row of clusterRows(words)) {
+      for (const spec of GRAND_TOTAL_LABELS) {
+        for (let index = 0; index < row.length; index += 1) {
+          if (!labelStartsAt(row, index, spec.tokens)) continue;
+          const labelEnd = row[index + spec.tokens.length - 1].x1;
+          const money = row
+            .filter((word) => word.x0 >= labelEnd - 1 && MONEY_TOKEN.test(word.text))
+            .sort((a, b) => b.x0 - a.x0)[0];
+          if (!money) break;
+          const negative = /\(|-/.test(money.text);
+          const value = parseFloat(money.text.replace(/[^\d.]/g, ""));
+          if (!Number.isFinite(value)) break;
+          candidates.push({
+            value: negative ? -value : value,
+            label: row.slice(index, index + spec.tokens.length).map((word) => word.text).join(" "),
+            page,
+            top: row[0].top,
+            basis: spec.basis,
+            form: spec.form,
+          });
+          break;
+        }
+      }
+    }
+  }
+  if (candidates.length === 0) return null;
+  const basisRank = (candidate: GrandTotalFromWords) => (candidate.basis === "gross" ? 0 : 1);
+  candidates.sort((a, b) => b.page - a.page || basisRank(a) - basisRank(b) || b.top - a.top);
+  return candidates[0];
 }
 
 /** Parse the line-items SUBTOTALS row (price, labor hours, paint hours) so the

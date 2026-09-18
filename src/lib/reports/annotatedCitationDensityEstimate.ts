@@ -193,6 +193,7 @@ import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMen
 import {
   emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
+  parseGrandTotalFromWords as parseDeltaEngineGrandTotal,
   parseSubtotalsFromWords as parseDeltaEngineSubtotals,
   parseTotalsFromWords as parseDeltaEngineTotals,
   type EstimateRow as DeltaEngineRow,
@@ -5016,17 +5017,53 @@ function matchStructuredLineItemDeltas(
   // word-lane merge is a CCC-grid refinement and is skipped for a Mitchell
   // document, whose block prints no "hrs @ rate" basis for it to read.
   const subjectPlatform = detectEstimatePlatform(context.sourceText ?? "");
-  const higherTotals = mergeTotalsWithWordCategories(
-    parseEstimateTotalsForPlatform(context.sourceText ?? ""),
-    subjectWordPages.size > 0 && subjectPlatform !== "mitchell" ? subjectWordPages : null
+  // The grand total is the one figure R24 cannot ship without. When the text
+  // lane read none — OCR output standing in for a hybrid PDF's text layer, or
+  // a cumulative summary printed under a heading the text reader does not
+  // key on — the positioned word layer resolves it by baseline (RO 22084).
+  // Fallback only: a grand total the text reader found stands as read.
+  const withWordLaneGrandTotal = (
+    totals: ReturnType<typeof parseCccEstimateTotals>,
+    wordPages: Map<number, DeltaEngineWord[]> | null,
+    side: "subject" | "comparison"
+  ): ReturnType<typeof parseCccEstimateTotals> => {
+    if (!wordPages || wordPages.size === 0 || (totals && totals.grandTotal !== null)) return totals;
+    const resolved = parseDeltaEngineGrandTotal(wordPages);
+    if (!resolved) return totals;
+    console.info("[citation-density] grand total resolved from the word layer", {
+      side,
+      label: resolved.label,
+      page: resolved.page,
+      basis: resolved.basis,
+      value: resolved.value,
+    });
+    return {
+      categories: totals?.categories ?? [],
+      subtotal: totals?.subtotal ?? null,
+      salesTax: totals?.salesTax ?? null,
+      taxLanes: totals?.taxLanes ?? [],
+      deductible: totals?.deductible ?? null,
+      grandTotal: resolved.value,
+    };
+  };
+  const comparisonWordPages = comparisonWordSet ? pdfWordsToEnginePages(comparisonWordSet.words) : null;
+  const higherTotals = withWordLaneGrandTotal(
+    mergeTotalsWithWordCategories(
+      parseEstimateTotalsForPlatform(context.sourceText ?? ""),
+      subjectWordPages.size > 0 && subjectPlatform !== "mitchell" ? subjectWordPages : null
+    ),
+    subjectWordPages,
+    "subject"
   );
-  const lowerTotals = mergeTotalsWithWordCategories(
-    comparison
-      .map((item) => parseEstimateTotalsForPlatform(item.text))
-      .find((totals) => totals !== null) ?? null,
-    comparisonWordSet && comparisonPlatform !== "mitchell"
-      ? pdfWordsToEnginePages(comparisonWordSet.words)
-      : null
+  const lowerTotals = withWordLaneGrandTotal(
+    mergeTotalsWithWordCategories(
+      comparison
+        .map((item) => parseEstimateTotalsForPlatform(item.text))
+        .find((totals) => totals !== null) ?? null,
+      comparisonWordPages && comparisonPlatform !== "mitchell" ? comparisonWordPages : null
+    ),
+    comparisonWordPages,
+    "comparison"
   );
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
   const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
