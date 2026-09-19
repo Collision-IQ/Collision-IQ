@@ -420,7 +420,7 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
         { header: "Bucket", weight: 16 },
         { header: "Ours", weight: 15, align: "right" },
         { header: "Theirs", weight: 15, align: "right" },
-        { header: "Gap", weight: 12, align: "right" },
+        { header: "Gap (ours − theirs)", weight: 12, align: "right" },
         { header: "What that means in plain words", weight: 42 },
       ],
       rows: bucketRows,

@@ -594,7 +594,10 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
       { header: "Component", width: 0.3 },
       { header: "Document A", width: 0.24, align: "right" },
       { header: "Document B", width: 0.24, align: "right" },
-      { header: "Difference", width: 0.22, align: "right" },
+      // The formula is in the header: this table's sign is B − A, the
+      // Appraisal Dispute Report's gap is ours − theirs, and staff read the
+      // two side by side (RO 20792 review).
+      { header: "Difference (B − A)", width: 0.22, align: "right" },
     ],
     rows: [
       ...input.reconciliation.rows.map((row) => [

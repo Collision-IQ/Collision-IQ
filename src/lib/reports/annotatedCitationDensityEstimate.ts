@@ -118,6 +118,7 @@ import {
   isSectionHeader,
   laborTypeNoun,
   matchEstimateLineItems,
+  reconcileMissingClaimsAgainstTotals,
   parseCccEstimateTotals,
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
@@ -4898,6 +4899,11 @@ function matchStructuredLineItemDeltas(
         lowerRows,
         higherRows: dedupedHigherRows,
         lowerIsOcr: lowerIsOcr || lowerParseSuspect,
+        // The wording of an unverified absence names the ACTUAL limit: OCR
+        // for a scan, an unreliable text layer for broken font encoding, and
+        // nothing at all for a clean read (RO 20792 told the reader to
+        // re-scan a native Mitchell export).
+        lowerProvenance: lowerIsOcr ? "ocr" : lowerParseSuspect ? "unreliable_text" : "clean",
         lowerCategoryText,
       });
   // P0-1: NEVER PUBLISH A DOCUMENT THAT CONTRADICTS ITSELF.
@@ -5125,6 +5131,14 @@ function matchStructuredLineItemDeltas(
     "comparison"
   );
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
+  // Sanity check before publishing: line-level "not present" claims in a
+  // category may not exceed the gap the two totals blocks state for it.
+  const categoryGapCheck = reconcileMissingClaimsAgainstTotals({
+    deltas: orderedDeltas,
+    higher: higherTotals,
+    lower: lowerTotals,
+  });
+  if (categoryGapCheck.notes.length > 0) contradictionNotes.push(...categoryGapCheck.notes);
   const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
 
   // Arbitrary materials cap (runbook Step 6): lower estimate pays a materials

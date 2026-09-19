@@ -24,6 +24,7 @@ import {
   looksLikeMitchellLayout,
   parseMitchellEstimateTotals,
   readMitchellEstimate,
+  resolveMitchellOperationCode,
 } from "@/lib/rekey/mitchellEstimateReader";
 import {
   parseCccEstimateRows,
@@ -140,7 +141,12 @@ export function parseEstimateRowsForPlatform(
   if (platform === "mitchell") {
     const read = readMitchellEstimate(text);
     const { rows, reclassified } = reclassifyMitchellSubletsBookedAsParts(read.rows, read.notes);
-    return { platform, rows, notes: read.notes, subletsBookedAsParts: reclassified };
+    // The matcher keys on opCode ("Rpr" + "Refn" twins fold into one
+    // operation; Repl vs R&I is a coding difference, not a scope change).
+    // The reader leaves it null for the rekey ledger's sake; the delta
+    // pipeline stamps it here from the description head (RO 20792).
+    const coded = rows.map((row) => (row.opCode ? row : { ...row, opCode: resolveMitchellOperationCode(row.description) }));
+    return { platform, rows: coded, notes: read.notes, subletsBookedAsParts: reclassified };
   }
   return {
     platform,

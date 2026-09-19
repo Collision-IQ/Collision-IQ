@@ -26,7 +26,7 @@
  * vocabularies already carried in data/rekeyVocabulary.json.
  */
 
-import type { EstimateDeltaRow } from "@/lib/reports/estimateDeltaMatcher";
+import { tokenizeDescription, type EstimateDeltaRow } from "@/lib/reports/estimateDeltaMatcher";
 import { normalizeOverprintText } from "@/lib/reports/overprintNormalize";
 import VOCABULARY from "./data/rekeyVocabulary.json";
 import { normalizeVocabularyText, resolveLaborType, resolveSectionGroup } from "./rekeyVocabulary";
@@ -119,6 +119,29 @@ const OPERATION_PHRASES: string[] = (VOCABULARY.operations as Array<{ aliases: s
   .map(normalizeVocabularyText)
   .filter((alias) => alias.split(" ").length >= 1)
   .sort((a, b) => b.length - a.length);
+
+/**
+ * The CCC operation code each Mitchell operation phrase stands for, from the
+ * shared vocabulary ("Remove Replace" → Repl, "Remove Install" → R&I). The
+ * delta matcher keys on opCode and on description TOKENS; a Mitchell row
+ * used to ship neither, so against a Mitchell comparison no description could
+ * ever pair and every part-less line read as "not present" (RO 20792).
+ * "Manual" (Additional Labor / Manual Entry) is a print category, not an
+ * operation, and is carried as no code — the same as a CCC manual-entry line.
+ *
+ * The rows this reader returns keep opCode NULL: the rekey ledger reads a
+ * Mitchell operation from the description head by contract (resolveOperation)
+ * and a stamped code would stop it stripping the words. The delta pipeline's
+ * platform adapter stamps the code with resolveMitchellOperationCode.
+ */
+const OPERATION_CODE_BY_PHRASE = new Map<string, string | null>(
+  (VOCABULARY.operations as Array<{ aliases: string[]; ccc?: string | null }>).flatMap((entry) =>
+    entry.aliases.map((alias): [string, string | null] => [
+      normalizeVocabularyText(alias),
+      entry.ccc && entry.ccc !== "Manual" ? entry.ccc : null,
+    ])
+  )
+);
 
 const PART_TYPE_PHRASES: string[] = (VOCABULARY.partTypes as Array<{ aliases: string[] }>)
   .flatMap((entry) => entry.aliases)
@@ -405,6 +428,19 @@ function isLaborTypeWord(token: string | undefined): boolean {
  * any does the first one stand in, which is what a row billing no time
  * ("Additional Cost / Paint Materials") looks like.
  */
+/**
+ * The CCC operation code the head of a Mitchell description spells, or null
+ * when it spells none (a manual-entry line, or prose). For the delta
+ * pipeline only — see OPERATION_CODE_BY_PHRASE.
+ */
+export function resolveMitchellOperationCode(description: string | null | undefined): string | null {
+  const tokens = normalizeVocabularyText(description ?? "").split(" ").filter(Boolean);
+  if (tokens.length === 0) return null;
+  const head = findPhrase(tokens, OPERATION_PHRASES, 0);
+  if (!head || head.start !== 0) return null;
+  return OPERATION_CODE_BY_PHRASE.get(head.phrase) ?? null;
+}
+
 function findOperation(
   tokens: string[],
   raw: string[]
@@ -700,7 +736,10 @@ function parseBlock(
     description: operation
       ? `${raw.slice(operation.start, operation.end).join(" ")} ${description}`
       : description,
-    descriptionTokens: [],
+    // Matching tokens come from the description ALONE: "Additional Labor
+    // Tint" shares one word with CCC's "Tint color" while "Tint" shares all
+    // of it. The operation is the opCode's job.
+    descriptionTokens: tokenizeDescription(description),
     partNumber: band.partNumber,
     section,
     qty: band.qty,
@@ -913,6 +952,10 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
   let supplementTags: string[] = [];
   // A cost label that wrapped onto its own line(s) ahead of its values.
   let pendingLabel: string | null = null;
+  // The "Taxable Parts / Labor / Materials" line that precedes each tax
+  // line names the bucket that tax applies to; without it three "Tax
+  // 6.0000%" lanes print identically and read as duplicates (RO 20792).
+  let lastTaxableBucket: string | null = null;
 
   for (const line of lines) {
     if (/^estimatetotals/i.test(line)) {
@@ -956,6 +999,16 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
       pendingLabel = null;
       continue;
     }
+    {
+      const taxableBucket = /^taxable([a-z]+)\$/i.exec(line);
+      if (taxableBucket) {
+        const word = taxableBucket[1].toLowerCase();
+        lastTaxableBucket =
+          word === "paintmaterials" ? "Paint Materials" : word.charAt(0).toUpperCase() + word.slice(1);
+      } else if (/^taxable\$/i.test(line)) {
+        lastTaxableBucket = null;
+      }
+    }
     if (/^taxableparts/i.test(line) && values.length > 0) {
       totals.categories.push({ category: "Parts", hours: null, rate: null, cost: money(values[0]) });
       continue;
@@ -995,7 +1048,11 @@ export function parseMitchellEstimateTotals(text: string): MitchellTotals | null
       const amount = money(values[0]);
       if (amount > 0) {
         totals.tax = round2((totals.tax ?? 0) + amount);
-        totals.taxLanes.push({ label: `Tax ${tax[1]}%`, amount });
+        totals.taxLanes.push({
+          label: lastTaxableBucket ? `Tax ${tax[1]}% (${lastTaxableBucket})` : `Tax ${tax[1]}%`,
+          amount,
+        });
+        lastTaxableBucket = null;
       }
       continue;
     }

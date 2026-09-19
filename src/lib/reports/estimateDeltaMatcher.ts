@@ -202,6 +202,20 @@ export const OCR_UNCERTAIN_STATUS_LABELS = [
   "VERIFY_AGAINST_SOURCE",
 ] as const;
 
+/** The comparison's text layer read unreliably (broken font encoding, glyph
+ * repair) — a real text read, never a scan. RO 20792 labelled every
+ * unmatched line against a native Mitchell export "image-only PDF, OCR
+ * uncertain", sending the reader to re-scan a document that was never
+ * scanned; the honest label names the actual limit. */
+export const TEXT_LAYER_UNCERTAIN_STATUS_LABELS = [
+  "LOWER_ESTIMATE_TEXT_LAYER_LIMITATION",
+  "ABSENCE_NOT_ESTABLISHED",
+  "VERIFY_AGAINST_SOURCE",
+] as const;
+
+/** How the comparison document's text reached the matcher. */
+export type LowerEstimateProvenance = "ocr" | "unreliable_text" | "clean";
+
 export interface EstimateLineItemDelta {
   kind: EstimateDeltaKind;
   /** Row from the lower estimate, when one was matched. */
@@ -244,6 +258,13 @@ export interface EstimateLineItemDelta {
    * potential bundled-equivalent difference, NOT confirmed missing scope.
    */
   bundledEquivalentCandidate?: boolean;
+  /**
+   * True when this "missing" claim, summed with the others in its labor or
+   * parts category, exceeds the gap the two ESTIMATE TOTALS blocks state for
+   * that category — so some of these lines are paid under other wording, and
+   * this one is a verify item, never a confirmed omission.
+   */
+  exceedsCategoryGap?: boolean;
   /**
    * Whether this delta should be drawn in the PRIMARY highlight layer. False for
    * OCR-uncertain lines whose description is already present in the OCR'd lower
@@ -319,7 +340,7 @@ export interface EstimateDeltaMatchResult {
   lowerRowReconciliation: Array<{
     lineNumber: number | null;
     description: string;
-    matchedAs: "direct" | "semantic" | "group" | "bundle" | "duplicate";
+    matchedAs: "direct" | "semantic" | "group" | "bundle" | "duplicate" | "combined";
   }>;
 }
 
@@ -546,7 +567,7 @@ function isProtectionCoverAlias(row: EstimateDeltaRow): boolean {
   return PROTECTION_COVER_ALIASES.has(normalizeCategoryText(row.description));
 }
 
-function tokenizeDescription(description: string): string[] {
+export function tokenizeDescription(description: string): string[] {
   return description
     // Fragmented/glued extractions weld words together with only the case
     // boundary surviving ("WindshieldTesla", "BindHood", "SOISet", "RTTail").
@@ -1190,6 +1211,39 @@ function extractTrailingColumns(body: string): {
 }
 
 /** One shape rule, shared with the typed engine — see looksLikePartNumber. */
+/**
+ * Part-number identity across platforms: Mitchell prints Tesla numbers with
+ * their dashes ("1493770-00-C"), CCC prints them flat ("149377000C"). The
+ * digits are the identity; the punctuation is the platform. RO 20792 reported
+ * seven identically priced parts "not present" over exactly this.
+ */
+export function normalizePartKey(value: string | null | undefined): string {
+  return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Same part on both sides? Equal keys, or the longer key is the shorter one
+ * with print glue on it: a no-delimiter CCC print welds the quantity onto the
+ * part number's tail ("100652100A4" for part 100652100A × 4) and welds a
+ * digit that ends the description onto its head ("Lower grille type 1" +
+ * 149375900A reads "1149375900A"). The shorter key must be a full number —
+ * eight-plus characters ending in a revision letter — so a short code can
+ * never claim a longer one on a shared digit run.
+ */
+export function partKeysMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const keyA = normalizePartKey(a);
+  const keyB = normalizePartKey(b);
+  if (!keyA || !keyB) return false;
+  if (keyA === keyB) return true;
+  const [shorter, longer] = keyA.length <= keyB.length ? [keyA, keyB] : [keyB, keyA];
+  if (shorter.length < 8 || !/[A-Z]$/.test(shorter)) return false;
+  const at = longer.indexOf(shorter);
+  if (at === -1) return false;
+  const head = longer.slice(0, at);
+  const tail = longer.slice(at + shorter.length);
+  return /^\d?$/.test(head) && /^\d{0,2}$/.test(tail);
+}
+
 function isPartNumberToken(token: string): boolean {
   return looksLikePartNumber(token);
 }
@@ -1812,8 +1866,108 @@ function boundedEditDistance(a: string, b: string, max: number): number {
  */
 function isFuzzyTokenMatch(a: string, b: string): boolean {
   if (a.length < 5 || b.length < 5) return false;
+  // CCC abbreviates by truncation ("Storage compart", "Bumper reinf") where
+  // Mitchell spells the word out ("Storage Compartment"): a five-plus-letter
+  // token that is the head of the other is the same word.
+  if (a.startsWith(b) || b.startsWith(a)) return true;
   if (a[0] !== b[0] && a.slice(-3) !== b.slice(-3)) return false;
   return boundedEditDistance(a, b, 2) <= 2;
+}
+
+/**
+ * Evidence that two part-less rows describe the same operation, for the
+ * combined-line passes: the description matcher's own verdict, OR two shared
+ * content words of three-plus letters ("service" + "mode", "research" +
+ * "dtc"), OR one canonical operation key. Directional conflicts (LT vs RT)
+ * veto as everywhere else.
+ */
+function sharesTwoContentTokens(a: EstimateDeltaRow, b: EstimateDeltaRow): boolean {
+  if (hasDirectionalConflict(a.descriptionTokens, b.descriptionTokens)) return false;
+  const overlap = tokenOverlap(a.descriptionTokens, b.descriptionTokens);
+  if (isDescriptionMatch(overlap)) return true;
+  const setB = new Set(b.descriptionTokens);
+  const bigramsB = tokenSetWithBigrams(b.descriptionTokens);
+  const shared = [...new Set(a.descriptionTokens)]
+    .filter((token) => token.length >= 3 && !DIRECTIONAL_TOKENS.has(token) && !/^\d+$/.test(token))
+    .filter((token) => setB.has(token) || bigramsB.has(token) || [...setB].some((other) => isFuzzyTokenMatch(token, other)));
+  if (shared.length >= 2) return true;
+  const canon = canonicalOperationKey(a.description);
+  return canon !== null && canon === canonicalOperationKey(b.description);
+}
+
+const near = (a: number | null, b: number | null, tolerance: number) => Math.abs((a ?? 0) - (b ?? 0)) <= tolerance;
+
+/** Do these rows, summed, state the same labor, paint and price as `target`?
+ *  At least one of the three must be stated on both sides — two empty rows
+ *  agree about nothing. */
+function rowsSumTo(rows: EstimateDeltaRow[], target: EstimateDeltaRow): boolean {
+  const total = (pick: (row: EstimateDeltaRow) => number | null) => {
+    const values = rows.map(pick).filter((value): value is number => value !== null);
+    return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) * 100) / 100 : null;
+  };
+  const labor = total((row) => row.labor);
+  const paint = total((row) => row.paint);
+  const price = total((row) => row.price);
+  const stated =
+    (labor !== null && target.labor !== null) ||
+    (paint !== null && target.paint !== null) ||
+    (price !== null && target.price !== null);
+  return stated && near(labor, target.labor, 0.051) && near(paint, target.paint, 0.051) && near(price, target.price, 0.51);
+}
+
+/**
+ * Mitchell prints a repaired-and-refinished panel as TWO lines — "Repair LT
+ * Fender" (body units) and "Refinish LT Fender" (refinish units) — where CCC
+ * prints one "Rpr LT Fender" row carrying both columns. Compared line to
+ * line, the CCC row pairs with the Repair twin and its paint hours read as
+ * unfunded (RO 20792 finding 17). The twins are one operation: fold them
+ * before pairing. Only the Rpr/Refn pair with an identical description and
+ * complementary columns qualifies — an R&I and a Blnd on the same panel are
+ * two operations and stay apart.
+ */
+export function mergeRepairRefinishTwins(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
+  const isRepair = (row: EstimateDeltaRow) => normalizeOpCode(row.opCode ?? "") === "Rpr";
+  const isRefinish = (row: EstimateDeltaRow) => normalizeOpCode(row.opCode ?? "") === "Refn";
+  const key = (row: EstimateDeltaRow) => `${normalizeCategoryText(row.section ?? "")}|${[...new Set(row.descriptionTokens)].sort().join(" ")}`;
+  const consumed = new Set<number>();
+  const merged: EstimateDeltaRow[] = [];
+  rows.forEach((row, index) => {
+    if (consumed.has(index)) return;
+    if (row.partNumber || row.descriptionTokens.length === 0 || !(isRepair(row) || isRefinish(row))) {
+      merged.push(row);
+      return;
+    }
+    const wantRefinish = isRepair(row);
+    const laborOnly = (candidate: EstimateDeltaRow) => candidate.labor !== null && candidate.paint === null;
+    const paintOnly = (candidate: EstimateDeltaRow) => candidate.paint !== null && candidate.labor === null;
+    if (!(wantRefinish ? laborOnly(row) : paintOnly(row))) {
+      merged.push(row);
+      return;
+    }
+    const twinIndex = rows.findIndex(
+      (candidate, candidateIndex) =>
+        candidateIndex !== index &&
+        !consumed.has(candidateIndex) &&
+        !candidate.partNumber &&
+        (wantRefinish ? isRefinish(candidate) && paintOnly(candidate) : isRepair(candidate) && laborOnly(candidate)) &&
+        key(candidate) === key(row)
+    );
+    if (twinIndex === -1) {
+      merged.push(row);
+      return;
+    }
+    consumed.add(twinIndex);
+    const twin = rows[twinIndex];
+    const repair = wantRefinish ? row : twin;
+    const refinish = wantRefinish ? twin : row;
+    merged.push({
+      ...repair,
+      paint: refinish.paint,
+      paintIncluded: refinish.paintIncluded,
+      rawText: `${repair.rawText} + ${refinish.rawText} [repair and refinish printed as two lines; read as one operation]`,
+    });
+  });
+  return merged;
 }
 
 function tokenOverlap(
@@ -1995,7 +2149,7 @@ function findBestLowerMatch(
     if (
       higherRow.partNumber &&
       lowerRow.partNumber &&
-      higherRow.partNumber === lowerRow.partNumber
+      partKeysMatch(higherRow.partNumber, lowerRow.partNumber)
     ) {
       // Same part on OPPOSING sides is still a different line — "RT Tail lamp
       // gasket" and "LT Tail lamp gasket" share one part number, and pairing
@@ -2094,6 +2248,13 @@ export function matchEstimateLineItems(params: {
    */
   lowerIsOcr?: boolean;
   /**
+   * How the lower estimate's text reached this pass. Decides the WORDING and
+   * labels of an unverified absence: an OCR read is described as OCR, an
+   * unreliable text layer as an unreliable text layer, and a clean read that
+   * simply did not match says so. Defaults from lowerIsOcr.
+   */
+  lowerProvenance?: LowerEstimateProvenance;
+  /**
    * Section-level gate (point 2). Return false when the counterpart's matching
    * section produced no rows AND the document did not read well enough for that
    * emptiness to be informative — the absence claim is then downgraded to a
@@ -2110,7 +2271,17 @@ export function matchEstimateLineItems(params: {
    */
   lowerCategoryText?: string;
 }): EstimateDeltaMatchResult {
-  const { lowerRows, higherRows, lowerIsOcr = false, lowerCategoryText } = params;
+  const { higherRows, lowerIsOcr = false, lowerCategoryText } = params;
+  // Repair + Refinish twins on the lower side are one operation (see
+  // mergeRepairRefinishTwins) — folded before any index is handed out.
+  const lowerRows = mergeRepairRefinishTwins(params.lowerRows);
+  const provenance: LowerEstimateProvenance = params.lowerProvenance ?? (lowerIsOcr ? "ocr" : "clean");
+  const uncertainLabels: readonly string[] =
+    provenance === "unreliable_text" ? TEXT_LAYER_UNCERTAIN_STATUS_LABELS : OCR_UNCERTAIN_STATUS_LABELS;
+  const uncertainExpandedLabels: string[] =
+    provenance === "unreliable_text"
+      ? ["LOWER_ESTIMATE_TEXT_LAYER_LIMITATION", "VERIFY_AGAINST_SOURCE"]
+      : ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"];
   const used = new Set<number>();
   const deltas: EstimateLineItemDelta[] = [];
   // Reconciliation ledger: every consumed lower row records HOW it was
@@ -2262,6 +2433,42 @@ export function matchEstimateLineItems(params: {
     return sectionA.length > 0 && sectionA === sectionB;
   };
   const preclaimed = new Map<number, ScoredMatch>();
+  // COMBINED-LINE RECONCILIATION, pass A — identical lines split on the
+  // higher side, one line on the lower side. CCC writes "Research DTC's" as
+  // two 0.5 h lines (pre- and post-repair); Mitchell writes "Research DTC's
+  // Pre and Post" once at 1.0 h. Paired line to line, the first CCC row
+  // takes the Mitchell row and the second becomes a quantity shortfall —
+  // "paid only once" — when the carrier paid the whole hour (RO 20792
+  // finding 20). A group of token-identical part-less rows whose SUM equals
+  // one lower row is that row, and claims it before any 1:1 pass can.
+  const combinedHigherIndexes = new Set<number>();
+  const combinedPairsPending: EstimateDeltaMatchResult["matchedPairs"] = [];
+  {
+    const groups = new Map<string, number[]>();
+    higherRows.forEach((row, index) => {
+      if (row.partNumber || row.descriptionTokens.length === 0) return;
+      const key = `${normalizeCategoryText(row.section ?? "")}|${[...new Set(row.descriptionTokens)].sort().join(" ")}`;
+      groups.set(key, [...(groups.get(key) ?? []), index]);
+    });
+    for (const indexes of groups.values()) {
+      if (indexes.length < 2) continue;
+      const members = indexes.map((index) => higherRows[index]);
+      for (let lowerIndex = 0; lowerIndex < lowerRows.length; lowerIndex += 1) {
+        if (used.has(lowerIndex)) continue;
+        const lowerRow = lowerRows[lowerIndex];
+        if (lowerRow.partNumber || !sharesTwoContentTokens(members[0], lowerRow)) continue;
+        if (!rowsSumTo(members, lowerRow)) continue;
+        used.add(lowerIndex);
+        recordLowerConsumption(lowerIndex, "combined");
+        for (const index of indexes) {
+          combinedHigherIndexes.add(index);
+          matchedPairCount += 1;
+          combinedPairsPending.push({ higherRow: higherRows[index], lowerRow, basis: "description" });
+        }
+        break;
+      }
+    }
+  }
   const preclaimStages: Array<(higherRow: EstimateDeltaRow, lowerRow: EstimateDeltaRow) => boolean> = [
     (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow) && rowSectionsEqual(higherRow, lowerRow),
     (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow),
@@ -2399,9 +2606,9 @@ export function matchEstimateLineItems(params: {
         laborDelta: higherRow.labor,
         paintDelta: higherRow.paint,
         priceDelta: higherRow.price,
-        summary: buildMissingSummary(higherRow, true),
+        summary: buildMissingSummary(higherRow, provenance),
         ocrUncertain: true,
-        statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS],
+        statusLabels: [...uncertainLabels],
         annotate: false,
       });
       return;
@@ -2444,9 +2651,9 @@ export function matchEstimateLineItems(params: {
         laborDelta: higherRow.labor,
         paintDelta: higherRow.paint,
         priceDelta: higherRow.price,
-        summary: buildExpandedScopeSummary(higherRow, lowerIsOcr),
+        summary: buildExpandedScopeSummary(higherRow, lowerIsOcr ? provenance : "clean"),
         annotate: true,
-        ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
+        ...(lowerIsOcr ? { statusLabels: [...uncertainExpandedLabels] } : {}),
       });
     } else {
       // SECTION-LEVEL GATE. An absence claim about a section the counterpart
@@ -2464,21 +2671,21 @@ export function matchEstimateLineItems(params: {
         laborDelta: higherRow.labor,
         paintDelta: higherRow.paint,
         priceDelta: higherRow.price,
-        summary: buildMissingSummary(higherRow, lowerIsOcr),
+        summary: buildMissingSummary(higherRow, lowerIsOcr ? provenance : "clean"),
         annotate: true,
         ...(sectionReadable
           ? {}
           : { ocrUncertain: true, statusLabels: [...SECTION_UNREAD_STATUS_LABELS] }),
-        // OCR confidence: even a genuinely-added line (part# absent) stays a
-        // verify item against an OCR-derived lower estimate.
+        // Read confidence: even a genuinely-added line (part# absent) stays a
+        // verify item against an OCR-derived or unreliably-read lower estimate.
         ...(lowerIsOcr
-          ? { ocrUncertain: true, statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS] }
+          ? { ocrUncertain: true, statusLabels: [...uncertainLabels] }
           : {}),
       });
     }
   };
 
-  const matchedPairs: EstimateDeltaMatchResult["matchedPairs"] = [];
+  const matchedPairs: EstimateDeltaMatchResult["matchedPairs"] = [...combinedPairsPending];
   const classifyMatchedPair = (
     higherRow: EstimateDeltaRow,
     lowerRow: EstimateDeltaRow,
@@ -2616,6 +2823,7 @@ export function matchEstimateLineItems(params: {
   const unmatchedHigherRows: EstimateDeltaRow[] = [];
   for (let higherIndex = 0; higherIndex < higherRows.length; higherIndex += 1) {
     const higherRow = higherRows[higherIndex];
+    if (combinedHigherIndexes.has(higherIndex)) continue;
     const match = preclaimed.get(higherIndex) ?? findBestLowerMatch(higherRow, lowerRows, used);
     if (!match) {
       unmatchedHigherRows.push(higherRow);
@@ -2652,6 +2860,55 @@ export function matchEstimateLineItems(params: {
   for (const row of higherRows) {
     const key = operationGroupKey(row);
     if (key) higherGroupCounts.set(key, (higherGroupCounts.get(key) ?? 0) + 1);
+  }
+
+  // COMBINED-LINE RECONCILIATION, pass B — after every 1:1 pass, over what
+  // is still unmatched on both sides. Many-to-one: several higher rows that
+  // each share two content words with one lower row and sum to its values
+  // ("Place vehicle in Service Mode" 0.1 + "Remove vehicle from Service
+  // Mode" 0.1 against "Enable and Disable Service mode" 0.2). One-to-many:
+  // the reverse split. Either way the operation is paid; it is not missing.
+  {
+    const unmatchedPartless = () => unmatchedHigherRows.filter((row) => !row.partNumber && row.descriptionTokens.length > 0);
+    const retire = (rows: EstimateDeltaRow[]) => {
+      for (const row of rows) {
+        const at = unmatchedHigherRows.indexOf(row);
+        if (at !== -1) unmatchedHigherRows.splice(at, 1);
+      }
+    };
+    for (let lowerIndex = 0; lowerIndex < lowerRows.length; lowerIndex += 1) {
+      if (used.has(lowerIndex)) continue;
+      const lowerRow = lowerRows[lowerIndex];
+      if (lowerRow.partNumber || lowerRow.descriptionTokens.length === 0) continue;
+      const group = unmatchedPartless().filter((row) => sharesTwoContentTokens(row, lowerRow));
+      if (group.length < 2 || !rowsSumTo(group, lowerRow)) continue;
+      used.add(lowerIndex);
+      recordLowerConsumption(lowerIndex, "combined");
+      for (const row of group) {
+        matchedPairCount += 1;
+        matchedPairs.push({ higherRow: row, lowerRow, basis: "description" });
+      }
+      retire(group);
+    }
+    for (const higherRow of unmatchedPartless()) {
+      const candidates: number[] = [];
+      for (let lowerIndex = 0; lowerIndex < lowerRows.length; lowerIndex += 1) {
+        if (used.has(lowerIndex)) continue;
+        const lowerRow = lowerRows[lowerIndex];
+        if (lowerRow.partNumber || lowerRow.descriptionTokens.length === 0) continue;
+        if (sharesTwoContentTokens(higherRow, lowerRow)) candidates.push(lowerIndex);
+      }
+      if (candidates.length < 2) continue;
+      const rows = candidates.map((index) => lowerRows[index]);
+      if (!rowsSumTo(rows, higherRow)) continue;
+      for (const index of candidates) {
+        used.add(index);
+        recordLowerConsumption(index, "combined");
+      }
+      matchedPairCount += 1;
+      matchedPairs.push({ higherRow, lowerRow: rows[0], basis: "description" });
+      retire([higherRow]);
+    }
   }
 
   // Amount-unique fallback: a differently-worded misc/sublet counterpart
@@ -3780,11 +4037,14 @@ function costFragment(row: EstimateDeltaRow): string {
   return cost.length ? ` (${cost.join(", ")})` : "";
 }
 
-function buildMissingSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): string {
+function buildMissingSummary(higherRow: EstimateDeltaRow, provenance: LowerEstimateProvenance = "clean"): string {
   const label = describeRow(higherRow);
-  const tail = lowerIsOcr
-    ? "this line is not located on the lower estimate as read. The lower estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it — treat this as unverified, NOT a confirmed omission, and VERIFY_AGAINST_SOURCE before relying on it."
-    : "this operation is not present on the lower estimate.";
+  const tail =
+    provenance === "ocr"
+      ? "this line is not located on the lower estimate as read. The lower estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it — treat this as unverified, NOT a confirmed omission, and VERIFY_AGAINST_SOURCE before relying on it."
+      : provenance === "unreliable_text"
+        ? "this line is not located on the lower estimate as read. The lower estimate's text layer read unreliably (LOWER_ESTIMATE_TEXT_LAYER_LIMITATION — a font-encoding limit, not a scan), so exact line matching is limited — treat this as unverified, NOT a confirmed omission, and VERIFY_AGAINST_SOURCE before relying on it."
+        : "this operation is not present on the lower estimate.";
   return `Higher estimate documents "${label}"${costFragment(higherRow)} in the ${higherRow.section ?? "estimate"}; ${tail}`;
 }
 
@@ -3807,12 +4067,15 @@ function buildOperationChangeSummary(
   return `"${label}": same line is present on both estimates but changed — ${parts.join("; ")}. Verify the operation/part change against OEM procedure and repair records.`;
 }
 
-function buildExpandedScopeSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): string {
+function buildExpandedScopeSummary(higherRow: EstimateDeltaRow, provenance: LowerEstimateProvenance = "clean"): string {
   const label = describeRow(higherRow);
   const section = higherRow.section ?? "this category";
-  const ocrNote = lowerIsOcr
-    ? " (lower estimate is OCR-extracted, so exact line matching is limited)"
-    : "";
+  const ocrNote =
+    provenance === "ocr"
+      ? " (lower estimate is OCR-extracted, so exact line matching is limited)"
+      : provenance === "unreliable_text"
+        ? " (the lower estimate's text layer read unreliably, so exact line matching is limited)"
+        : "";
   return `"${label}"${costFragment(higherRow)}: the ${section} category is already present on the lower estimate, so this reads as expanded/added scope within an existing category${ocrNote} — not a brand-new operation. Verify whether it is a teardown addition, a changed part/labor line, or supporting material against the lower estimate's ${section} lines.`;
 }
 
@@ -3847,4 +4110,96 @@ function buildPriceSummary(
 function describeRow(row: EstimateDeltaRow): string {
   const op = row.opCode ? `${row.opCode} ` : "";
   return `${op}${row.description}`.trim();
+}
+
+
+/**
+ * SANITY CHECK BEFORE PUBLISHING (RO 20792, item 6): the "missing" lines
+ * claimed in a category may not add up to more than the gap the two
+ * ESTIMATE TOTALS blocks state for that category. Section 4 of the forensic
+ * report reconciles to the cent; when the line-level absence claims under
+ * it exceed the category's own gap, some of those lines are paid under
+ * other wording, and every claim in that category becomes a verify item.
+ *
+ * Categories: body-labor hours (rows with no labor-type letter), paint hours
+ * and parts dollars (priced rows carrying a part number). Other labor types
+ * are skipped — their category names vary by shop.
+ */
+export function reconcileMissingClaimsAgainstTotals(params: {
+  deltas: EstimateLineItemDelta[];
+  higher: EstimateTotalsSummary | null;
+  lower: EstimateTotalsSummary | null;
+}): { flagged: number; notes: string[] } {
+  const notes: string[] = [];
+  if (!params.higher || !params.lower) return { flagged: 0, notes };
+  const find = (summary: EstimateTotalsSummary, key: string) =>
+    summary.categories.find((category) => normalizeTotalsCategoryKey(category.category) === key) ?? null;
+  const gapFor = (key: string, pick: (category: { hours: number | null; cost: number | null }) => number | null): number | null => {
+    const higher = find(params.higher!, key);
+    const lower = find(params.lower!, key);
+    if (!higher || !lower) return null;
+    const a = pick(higher);
+    const b = pick(lower);
+    if (a === null || b === null) return null;
+    return Math.round((a - b) * 100) / 100;
+  };
+  const claims = params.deltas.filter(
+    (delta) => delta.kind === "missing_operation" && delta.annotate && !delta.ocrUncertain && !delta.exceedsCategoryGap
+  );
+  const isBodyLabor = (delta: EstimateLineItemDelta) => {
+    const type = (delta.higherRow.laborType ?? "").trim().toUpperCase();
+    return delta.higherRow.labor !== null && (type === "" || type === "B");
+  };
+  const lanes: Array<{
+    label: string;
+    unit: string;
+    gap: number | null;
+    tolerance: number;
+    members: EstimateLineItemDelta[];
+    value: (delta: EstimateLineItemDelta) => number;
+  }> = [
+    {
+      label: "Body labor",
+      unit: "h",
+      gap: gapFor(normalizeTotalsCategoryKey("Body Labor"), (category) => category.hours),
+      tolerance: 0.35,
+      members: claims.filter(isBodyLabor),
+      value: (delta) => delta.higherRow.labor ?? 0,
+    },
+    {
+      label: "Paint labor",
+      unit: "h",
+      gap: gapFor(normalizeTotalsCategoryKey("Paint Labor"), (category) => category.hours),
+      tolerance: 0.35,
+      members: claims.filter((delta) => delta.higherRow.paint !== null),
+      value: (delta) => delta.higherRow.paint ?? 0,
+    },
+    {
+      label: "Parts",
+      unit: "$",
+      gap: gapFor(normalizeTotalsCategoryKey("Parts"), (category) => category.cost),
+      tolerance: 25,
+      members: claims.filter((delta) => Boolean(delta.higherRow.partNumber) && (delta.higherRow.price ?? 0) > 0),
+      value: (delta) => (delta.higherRow.price ?? 0) * Math.max(1, delta.higherRow.qty ?? 1),
+    },
+  ];
+  let flagged = 0;
+  for (const lane of lanes) {
+    if (lane.gap === null || lane.members.length === 0) continue;
+    const claimed = Math.round(lane.members.reduce((sum, delta) => sum + lane.value(delta), 0) * 100) / 100;
+    if (claimed <= lane.gap + lane.tolerance) continue;
+    const fmt = (value: number) => (lane.unit === "$" ? `$${value.toFixed(2)}` : `${value.toFixed(1)} h`);
+    notes.push(
+      `${lane.label}: the line-level "not present" claims total ${fmt(claimed)}, but the two totals blocks put the ${lane.label.toLowerCase()} gap at ${fmt(Math.max(lane.gap, 0))}. ` +
+        `Some of these operations are paid on the comparison estimate under other wording; each is marked a verify item, not a confirmed omission.`
+    );
+    for (const delta of lane.members) {
+      delta.exceedsCategoryGap = true;
+      delta.ocrUncertain = true;
+      delta.statusLabels = [...new Set([...(delta.statusLabels ?? []), "EXCEEDS_CATEGORY_GAP", "ABSENCE_NOT_ESTABLISHED", "VERIFY_AGAINST_SOURCE"])];
+      delta.summary = `${delta.summary} The "not present" claims in this category exceed the category gap stated by the two totals blocks (${fmt(claimed)} claimed against ${fmt(Math.max(lane.gap, 0))}), so this line is a verify item, not a confirmed omission.`;
+      flagged += 1;
+    }
+  }
+  return { flagged, notes };
 }
