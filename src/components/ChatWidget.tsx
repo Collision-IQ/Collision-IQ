@@ -59,6 +59,13 @@ import {
   isSystemStatusMessage,
   type ChatMessage as Message,
 } from "@/components/chatWidget/messageUtils";
+import {
+  DRAFT_CHAT_SESSION_KEY,
+  clearEndedChatSessionStorage,
+  getChatSessionStorageKey,
+  readStoredChatMessages,
+  writeStoredChatMessages,
+} from "@/components/chatWidget/sessionStorageUtils";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
@@ -522,8 +529,6 @@ const INITIAL_MESSAGE: Message = {
 
 const TTS_ALLOW_BROWSER_FALLBACK =
   process.env.NEXT_PUBLIC_TTS_ALLOW_BROWSER_FALLBACK === "true";
-const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
-const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
 type ServerTtsVoiceOptionId = TtsVoiceSymbol;
@@ -714,56 +719,8 @@ function mergeExcludedFromReviewFiles(
   });
 }
 
-function getChatSessionStorageKey(activeCaseId: string | null | undefined) {
-  const normalized = activeCaseId?.trim();
-  return normalized
-    ? `${CHAT_SESSION_STORAGE_PREFIX}:case:${normalized}`
-    : DRAFT_CHAT_SESSION_KEY;
-}
-
 function isInitialOnlyMessages(messages: Message[]) {
   return messages.length === 1 && messages[0]?.id === INITIAL_MESSAGE.id;
-}
-
-function readStoredChatMessages(storageKey: string): Message[] | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const messages = parsed.filter((item): item is Message => {
-      if (!item || typeof item !== "object") return false;
-      const candidate = item as Partial<Message>;
-      return (
-        typeof candidate.id === "string" &&
-        (candidate.role === "user" || candidate.role === "assistant") &&
-        typeof candidate.content === "string"
-      );
-    });
-    return messages.length ? messages : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredChatMessages(storageKey: string, messages: Message[]) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.sessionStorage.setItem(storageKey, JSON.stringify(messages));
-  } catch {
-    // Session persistence is a best-effort remount guard.
-  }
-}
-
-function removeStoredChatMessages(storageKey: string) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.sessionStorage.removeItem(storageKey);
-  } catch {
-    // Ignore storage cleanup failures.
-  }
 }
 
 function readIntroDismissedForSession() {
@@ -1090,7 +1047,7 @@ export default function ChatWidget({
     getChatSessionStorageKey(activeCaseId)
   );
   const [messages, setMessages] = useState<Message[]>(() => {
-    const stored = readStoredChatMessages(getChatSessionStorageKey(activeCaseId));
+    const stored = readStoredChatMessages<Message>(getChatSessionStorageKey(activeCaseId));
     return stored ?? [INITIAL_MESSAGE];
   });
   const [input, setInput] = useState("");
@@ -1716,7 +1673,7 @@ export default function ChatWidget({
     if (chatSessionStorageKeyRef.current === nextStorageKey) return;
 
     const previousStorageKey = chatSessionStorageKeyRef.current;
-    const storedMessages = readStoredChatMessages(nextStorageKey);
+    const storedMessages = readStoredChatMessages<Message>(nextStorageKey);
 
     setMessages((current) => {
       if (storedMessages) return storedMessages;
@@ -2595,12 +2552,14 @@ export default function ChatWidget({
     // The ended chat stays saved in history; the next conversation starts a
     // fresh saved thread.
     chatThreadIdRef.current = null;
-    removeStoredChatMessages(chatSessionStorageKeyRef.current);
-    if (analysisReportIdRef.current) {
-      removeStoredChatMessages(getChatSessionStorageKey(analysisReportIdRef.current));
-    } else {
-      removeStoredChatMessages(DRAFT_CHAT_SESSION_KEY);
-    }
+    // Clears the case key AND the draft key. The draft key still holds the
+    // pre-case slice of this transcript; leaving it behind let the key-switch
+    // effect restore it once activeCaseId dropped to null, so the "ended"
+    // chat came back until End was pressed a second time.
+    clearEndedChatSessionStorage({
+      currentStorageKey: chatSessionStorageKeyRef.current,
+      activeCaseId: analysisReportIdRef.current,
+    });
     const caseIdToClose = analysisReportIdRef.current;
     if (caseIdToClose) {
       void fetch(`/api/cases/${encodeURIComponent(caseIdToClose)}/close`, {
