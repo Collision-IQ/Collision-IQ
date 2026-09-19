@@ -249,6 +249,9 @@ const NUM = /^-?[\d,]+\.?\d*$/;
 // Real labor-class letters are M/D/E/F/G/S (plus user-defined digits 1-4).
 const SUFFIX = new Set(["M", "D", "E", "F", "G", "S", "T", "X", "P", "INCL.", "INCL"]);
 const LABOR_CLASS = /^[MDEFGS1-4]$/;
+/** A user-defined CCC labor class prints as a bare digit 1-4 beside the hours
+ * cell; hours themselves always print with one decimal ("1.0"). */
+const isBareLaborClassDigit = (text: string) => /^[1-4]$/.test(text);
 
 export interface RowParseState {
   section: string;
@@ -295,6 +298,17 @@ function absorbRowTokens(row: EstimateRow, tokens: Word[], cols: ColRanges): str
       const mid = (word.x0 + word.x1) / 2;
       const box: CellBox = { x0: word.x0, x1: word.x1, top: word.top, bottom: word.bottom };
       const inCol = (range: [number, number]) => mid >= range[0] && mid <= range[1];
+      // The same class digit with the hours cell BLANK: a shop-defined
+      // labor category (RO 20766 bills its calibration operations to class
+      // "3") prints the class alone in the labor/paint band. CCC prints
+      // hours with one decimal, always, so a bare integer measured in an
+      // hours column is never hours. Read as 3.0 h on twelve rows, it put
+      // the extract 36 h over its own SUBTOTALS and the reconciliation
+      // guard withheld the whole comparison.
+      if (isBareLaborClassDigit(word.text) && (inCol(cols.labor) || inCol(cols.paint))) {
+        if (!row.laborClass) row.laborClass = word.text;
+        continue;
+      }
       if (inCol(cols.qty)) {
         row.qty = value;
         row.cells.qty = box;
@@ -330,6 +344,11 @@ function absorbContinuationTokens(row: EstimateRow, tokens: Word[], cols: ColRan
     const inCol = (range: [number, number]) => mid >= range[0] && mid <= range[1];
     const box: CellBox = { x0: word.x0, x1: word.x1, top: word.top, bottom: word.bottom };
     if (NUM.test(word.text)) {
+      // Bare class digit in an hours column (see absorbRowTokens): never a cell.
+      if (isBareLaborClassDigit(word.text) && (inCol(cols.labor) || inCol(cols.paint))) {
+        if (!row.laborClass) row.laborClass = word.text;
+        continue;
+      }
       const value = parseFloat(word.text.replace(/,/g, ""));
       if (inCol(cols.qty) && row.qty === null) {
         row.qty = value;

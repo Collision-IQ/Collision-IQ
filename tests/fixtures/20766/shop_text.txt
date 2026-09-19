@@ -1,0 +1,318 @@
+
+
+conestogacollision.com
+Workfile ID:
+Federal ID:
+00000000
+27-0822500
+961 Lancaster Avenue, Berwyn, PA 19312
+Phone: (610) 644-1000
+FAX: (610) 644-1007
+Preliminary Estimate
+RO Number: 20766
+Written By: ESTIMATOR, REDACTED, 739698
+Insured:OWNER, REDACTEDPolicy #:Claim #:000000000000000000000
+Type of Loss:Date of Loss:Days to Repair:0
+Point of Impact: 11 Left Front
+Owner:Inspection Location:Insurance Company:
+OWNER, REDACTEDconestogacollision.comUSAA
+ADDRESS REDACTED961 Lancaster Avenue
+CITY, ST 00000Berwyn, PA 19312
+(000) 000-0000 CellRepair Facility
+(610) 644-1000 Business
+VEHICLE
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+VIN:    5YJ3E1EB6XXXXXXXXInterior Color:BLACKMileage In:  61,573Vehicle Out:  7/18/2025
+License:  XXX0000Exterior Color:GRAYMileage Out:
+State:   PAProduction Date:   9/2018Condition:Job #:
+TRANSMISSIONWood Interior TrimHome LinkROOF
+Automatic TransmissionCONVENIENCERADIOSkyview Roof
+4 Wheel DriveAir ConditioningAM RadioSEATS
+POWERIntermittent WipersFM RadioBucket Seats
+Power SteeringTilt WheelStereoLeather Seats
+Power BrakesCruise ControlSearch/SeekHeated Seats
+Power WindowsRear DefoggerAuxiliary Audio ConnectionRear Heated Seats
+Power LocksKeyless EntrySAFETYWHEELS
+Power MirrorsAlarmDrivers Side Air BagWheel Covers
+Heated MirrorsMessage CenterPassenger Air BagPAINT
+Power Driver SeatSteering Wheel Touch ControlsAnti-Lock Brakes (4)Clear Coat Paint
+Power Passenger SeatTelescopic Wheel4 Wheel Disc BrakesOTHER
+Memory PackageClimate ControlFront Side Impact Air BagsFog Lamps
+DECORNavigation SystemHead/Curtain Air BagsTraction Control
+Dual MirrorsRemote StarterHands Free DeviceStability Control
+Tinted GlassBackup CameraBlind Spot DetectionXenon or L.E.D. Headlamps
+Console/StorageParking SensorsLane Departure WarningPower Trunk/Liftgate
+Get live updates at www.carwise.com/e/574vTg
+8/11/2025 10:22:01 AM300060Page 1
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+LineOperDescriptionPart NumberQty   Extended
+Price $
+LaborPaint
+1MODEL IDENTIFICATION
+2   #** Procedure research &
+documentation **
+1
+Note: OE docs available upon request and via this
+link:https://collisionacademy.egnyte.com/fl/JPDpwp49mVDF/17'_-_23'_Tesla_Model_3_procedures_
+3UPDATE NOTES
+4   #****Work Authorization
+Secured****
+1
+5FRONT BUMPER & GRILLE
+6O/H front bumper2.9
+7   *Repl  Bumper cover unpainted1916697S0A1820.00Incl.3.0
+8Add for Clear Coat1.2
+9Add for park sensorm0.6E
+10*Repl  LT Upper bracket108418100B17.000.2
+11Repl LT Inner bracket108417100E18.800.2
+12Refn Tow brkt cover0.2
+13Add for Clear Coat0.1
+14Repl Absorber110466900F177.00Incl.
+15*Repl  Impact bar (ALU)110466700D1435.990.6
+16Repl Tape145592100A10.59
+17Repl Prep unprimed bumper10.7
+18#Flex additive (Per flexible panel)112.00T
+19#Raw plastic primer (Per raw
+plastic panel)
+115.00T
+20#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+21#Test fit-Front bumper11.01
+Note: Required procedure to ensure all mounting locations are in-line prior to final refinish to keep from
+damaging new paint
+22FRONT LAMPS
+23Repl LT Headlamp assy w/up-level208574900A11,562.550.4
+24Aim headlamps0.5
+25Repl Aim fog lamps10.5
+26*R&I  LT Repeater lampm0.2E
+27#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+28#Test fit-LT Headlamp10.51
+Note: Required to ensure all mounting points are undamaged and headlamp fits without damaing new paint
+29HOOD
+30*Blnd  Hood (ALU)2.6
+Note: CCC recognition of SCRS Blend vs Refinish study.pdf
+https://collisionacademy.egnyte.com/dl/MDW39dfHjJqd/CCC_recognition_of_SCRS_Blend_vs_Refinish_study.pdf_
+31*Repl  Emblem109848900C158.300.2
+32R&I  Storage compart1.2
+8/11/2025 10:22:01 AM300060Page 2
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+33#Clean adhesive13.00T0.3
+34FENDER
+35Repl LT Fender E-coated1081401E0D1795.002.51.8
+36Add for Clear Coat0.7
+37Add for Edging0.5
+38Add for Clear Coat0.1
+39R&I  RT Fender liner0.4
+Note: R&I for access to front bumper mount hardware. Please see OEM Doc's to support
+40R&I  LT Fender linerIncl.
+41#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.13T0.2
+42#Test fit-LT Fender11.01
+43ELECTRICAL
+44*Rpr  Batterym0.3E
+Note: D&R 12 Volt
+45#Reset electrical components10.3M
+46WINDSHIELD
+47*Rpr  Windshield TESLA0.5
+Note: Mask for refinishing
+48#Trim Masking Tape-3M 06347-Per
+3 Ft
+17.04T
+49COWL
+50R&I  Cowl grille0.6
+51ROOF
+52#Blnd  LT Roof rail2.0
+53#Refinish deduction for cc blend
+within panel
+1
+Note: Roof rack cannot be removed due to missing key as per the VO
+54*Rpr  Front glass0.5
+Note: Mask for refinishing
+55#Trim Masking Tape-3M 06347-Per
+3 Ft
+321.12T
+56PILLARS, ROCKER & FLOOR
+57R&I  LT Applique0.3
+Note: R&I required for access to upper molding. Please see OE Docs for support
+58R&I  LT Applique cap0.2
+Note: R&I required for access to applique hardware. Please see OE Docs for support
+59R&I  LT W'strip on body front door0.4
+Note: R&I required for access to upper molding. Please see OE Docs for support
+60R&I  LT W'strip on body rear door0.4
+Note: R&I required for access to upper molding. Please see OE Docs for support
+61R&I  LT Upper molding chrome0.4
+Note: PARTS: Part has related component that cannot be reused/reinstalled; grommet.
+62Repl LT Upper molding grommet110682700C1214.28
+Note: 12 of these are required.
+63FRONT DOOR
+8/11/2025 10:22:01 AM300060Page 3
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+64*Blnd  LT Door shell (ALU)2.0
+Note: On 08-22, SCRS conducted a blend study to compare the time needed for full panel refinishing versus
+blending on exterior panels. Findings showed blending took 31.59% more time on average.
+65R&I  LT Water shield0.6
+66R&I  LT Belt molding chrome0.2
+67R&I  LT R&I mirror0.3
+68R&I  LT Door glass TESLA0.5
+69R&I  LT Window guide0.3
+70R&I  LT Handle, outside chrome0.4
+71R&I  LT Belt w'strip0.2
+72R&I  LT R&I trim panel0.5
+73VEHICLE DIAGNOSTICS
+74#Rpr  Pre repair scan1.03
+75#Rpr  Research DTC's3
+76#Rpr  Place vehicle in "Service Mode"3
+77#Rpr  Download & redeploy firmware3
+78#Rpr  Seat belt check3
+79#Rpr  In-Proc repair scan1.03
+80#Rpr  Confirm new headlamp is
+operational post firmware
+redeploy
+3
+81#Rpr  Set up & initiate camera
+calibration procedure
+3
+82#Rpr  Capture image & adjust cameras3
+83#Rpr  Capture image to confirm
+adjustments were made correctly
+3
+84#Rpr  Drive time for camera calibration
+procedure
+3
+85#Rpr  Post-repair scan1.03
+86#Rpr  Research DTC's3
+87#Rpr  Final road test for safety & quality
+check
+3
+88#Rpr  Remove vehicle from "Service
+Mode"
+3
+89MISCELLANEOUS OPERATIONS
+90#Pre wash vehicle15.00T0.5
+91#Repl  Interior Protection kit13.220.1
+92#Mask for refinishing110.00T0.5
+93#Mask jambs (0.3 Hours and $3.00
+per panel)
+120.00T2.0
+94#Tint color10.5
+95#Finish sand & polish (0.5 Refinish
+per panel)
+12.5
+96#Clean vehicle for delivery15.00T0.5
+97#Maintain HV battery state of
+charge
+15.00T0.5
+98#Hazardous waste removal15.00T
+8/11/2025 10:22:01 AM300060Page 4
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+99#Solid waste removal15.00T
+SUBTOTALS3,916.0228.017.9
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts3,782.73
+Body Labor21.1 hrs@$ 95.00 /hr2,004.50
+Paint Labor17.9 hrs@$ 95.00 /hr1,700.50
+Mechanical Labor0.3 hrs@$ 185.00 /hr55.50
+Electrical Labor1.1 hrs@$ 185.00 /hr203.50
+Aluminum Or Steel Repair2.5 hrs@$ 135.00 /hr337.50
+Calibration/Reset3.0 hrs@$ 185.00 /hr555.00
+Paint Supplies17.9 hrs@$ 60.00 /hr1,074.00
+Miscellaneous133.29
+Subtotal9,846.52
+Sales Tax$ 9,846.52@6.0000 %590.79
+Grand Total10,437.31
+This estimate is based on our initial visual inspection. Ocassionally, addtional worn and/or damaged parts are
+discovered upon commencement of repairs. This estimate cannot allow for such contingencies. All part prices are
+subject to invoice. All damaged parts will discarded unless we are otherwise notified prior to disposal.
+8/11/2025 10:22:01 AM300060Page 5
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+ANY PERSON WHO KNOWINGLY AND WITH INTENT TO DEFRAUD ANY INSURANCE COMPANY OR OTHER PERSON
+FILES AN APPLICATION FOR INSURANCE OR STATEMENT OF CLAIM CONTAINING ANY MATERIALLY FALSE
+INFORMATION OR CONCEALS FOR THE PURPOSE OF MISLEADING, INFORMATION CONCERNING ANY FACT
+MATERIAL THERETO COMMITS A FRAUDULENT INSURANCE ACT, WHICH IS A CRIME AND SUBJECTS SUCH PERSON
+TO CRIMINAL AND CIVIL PENALTIES.
+THE FOLLOWING IS A LIST OF ABBREVIATIONS OR SYMBOLS THAT MAY BE USED TO DESCRIBE WORK TO BE
+DONE OR PARTS TO BE REPAIRED OR REPLACED:D=DISCONTINUED PART A=APPROXIMATE PRICE B=BODY
+LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL
+T=TAXED MISCELLANEOUS X=NON TAXED MISCELLANEOUS ADJ=ADJACENT ALGN=ALIGN  A/M=AFTERMARKET
+BLND=BLEND CAPA=CERTIFIED AUTOMOTIVE PARTS ASSOCIATION  D&R=DISCONNECT AND RECONNECT
+EST=ESTIMATE EXT. PRICE=UNIT PRICE MULTIPLIED BY THE QUANTITY INCL=INCLUDED MISC=MISCELLANEOUS
+NON-ADJ=NON ADJACENT O/H=OVERHAUL OP=OPERATION NO=LINE NUMBER QTY=QUANTITY
+RECOND=RECONDITION REFN=REFINISH REPL=REPLACE R&I=REMOVE AND INSTALL R&R=REMOVE AND
+REPLACE RPR=REPAIR RT=RIGHT SECT=SECTION SUBL=SUBLET LT=LEFT W/O=WITHOUT W/_=WITH/_
+#=MANUAL LINE ENTRY *=OTHER [IE..MOTORS DATABASE INFORMATION WAS CHANGED]. **=DATABASE LINE
+WITH AFTERMARKET N=NOTES ATTACHED TO LINE NAGS=NATIONAL AUTO GLASS SPECIFICATIONS. OPT
+OEM=ORIGINAL EQUIPMENT MANUFACTURER PARTS EITHER OPTIONALLY SOURCED OR OTHERWISE PROVIDED
+WITH SOME UNIQUE PRICING OR DISCOUNT.
+THE ATTACHED ESTIMATE REPRESENTS AN APPRAISAL OF THE COST OF REPAIR FOR THE VISIBLE DAMAGE TO
+THE VEHICLE NOTED AT THE TIME OF INSPECTION NECESSARY TO RETURN THE VEHICLE TO ITS PREDAMAGED
+CONDITION.  COSTS ABOVE THE APPRAISED AMOUNT MAY BE THE RESPONSIBILITY OF THE VEHICLE OWNER.
+THERE IS NO REQUIREMENT THAT THE VEHICLE OWNER USE ANY SPECIFIED REPAIR SHOP. INFORMATION
+REGARDING REPAIR FACILITIES WHICH WILL BE ABLE TO REPAIR THE VEHICLE FOR THE APPRAISED AMOUNT IS
+AVAILABLE FROM THE INSURANCE COMPANY. IF USED PARTS ARE SPECIFIED, THEY ARE REQUIRED TO BE OF
+LIKE KIND AND QUALITY TO THOSE BEING REPLACED. INCIDENTAL CHARGES SUCH AS TOWING, PROTECTIVE
+CARE, CUSTODY, STORAGE, DEPRECIATION, BATTERY AND TIRE REPLACEMENT ARE NOTED WHEN APPLICABLE.
+8/11/2025 10:22:01 AM300060Page 6
+
+Preliminary Estimate
+RO Number: 20766
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric GRAY
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide DR7QA18, CCC Data Date 08/01/2025, and potentially
+other third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for
+the vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM
+parts are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM
+(Alternative OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM
+vehicle dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or
+labor data provided by third party sources of data may have been modified or may have come from an alternate data
+source.  Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category.
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category.
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel.
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part.
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet.
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+8/11/2025 10:22:01 AM300060Page 7

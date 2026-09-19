@@ -658,6 +658,10 @@ export type AnnotatedEstimateGeneratedFindings = {
     higherLineCount: number | null;
     lowerLineCount: number | null;
     noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
+    /** Non-null when the line-item comparison was withheld (typed columns
+     *  failed SUBTOTALS reconciliation): the totals table stands, and the
+     *  report must say why it lists no line-level differences. */
+    lineItemComparisonWithheld?: string | null;
   };
 };
 
@@ -2964,7 +2968,13 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       noCounterpartRows: forensicInput.noCounterpartRows,
       vehicleLabel: claimContext.vehicle ?? params.vehicleMake ?? null,
       identity,
-      limitations: textLayerNotes,
+      // A withheld line-item comparison leads the limitations: the totals
+      // table below is complete, and the absence of line-level differences
+      // is a parsing limit, never a finding of "no differences".
+      limitations: [
+        ...(forensicInput.lineItemComparisonWithheld ? [forensicInput.lineItemComparisonWithheld] : []),
+        ...textLayerNotes,
+      ],
       redactionScope,
       findingNumbers: findingNumberById,
       authorities: reliedUponAuthorities,
@@ -3009,7 +3019,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // deliverable the run depends on: a failure here is a warning on the
     // run, and the two documents above still ship.
     const comparisonRole = params.comparisonEstimateTexts?.[0]?.estimateRole;
-    if (sourceDocumentRole === "shop" && comparisonRole === "carrier") {
+    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
+      // The summary's fixed copy counts "our lines with no match on their
+      // sheet"; with the line-item comparison withheld that count is not
+      // zero, it is unknown, and a sentence saying zero would be false.
+      warnings.push(
+        "Appraisal Dispute Report not produced: the line-item comparison was withheld for this run, so its line counts would be unknown rather than zero. The annotated estimate and the Forensic Estimate Analysis carry the totals-level findings."
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier") {
       try {
         const adapted = adaptForensicToPlainSummary({
           reconciliation: forensicInput.reconciliation,
@@ -4102,8 +4119,17 @@ export function buildRequiredEstimatorDeltaFindings(
         higherTotals: deltaMatch?.higherTotalsSummary ?? null,
         lowerTotals: deltaMatch?.lowerTotalsSummary ?? null,
       }),
-      higherLineCount: deltaMatch ? deltaMatch.matchedPairCount + deltaMatch.missingOperationCount : null,
-      lowerLineCount: deltaMatch ? deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length : null,
+      higherLineCount: deltaMatch
+        ? deltaMatch.lineItemsWithheld
+          ? deltaMatch.higherRowsRead
+          : deltaMatch.matchedPairCount + deltaMatch.missingOperationCount
+        : null,
+      lowerLineCount: deltaMatch
+        ? deltaMatch.lineItemsWithheld
+          ? deltaMatch.lowerRowsRead
+          : deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
+        : null,
+      lineItemComparisonWithheld: deltaMatch?.lineItemsWithheld ?? null,
       // Only confirmed omissions. An OCR-unverified line is not evidence the
       // comparison lacks the operation, so it must not be listed as one.
       //
@@ -4443,6 +4469,14 @@ type StructuredLineItemDeltaMatch = {
     comparisonAddHours: number;
     anchorId?: string;
   } | null;
+  /** The reader-facing note when the typed-cell lane failed its SUBTOTALS
+   * reconciliation and the line-item comparison was withheld. The totals
+   * summaries above stay populated; every line-level field is empty. */
+  lineItemsWithheld: string | null;
+  /** Operation rows each side yielded to the reader, independent of pairing —
+   * what "rows read" means once the pairing itself has been withheld. */
+  higherRowsRead: number;
+  lowerRowsRead: number;
   /** P0-1: operations withdrawn because the pack asserted both that the
    * comparison omitted them and that only the comparison carried them. */
   contradictionNotes: string[];
@@ -4545,6 +4579,14 @@ function matchStructuredLineItemDeltas(
     ) ?? (context.comparisonEstimateWords ?? [])[0];
   const carrierMismatchNotes: StructuredLineItemDeltaMatch["carrierMismatchNotes"] = [];
   let engineMatch: ReturnType<typeof engineResultToLineItemDeltas> | null = null;
+  // Set when the typed-cell lane fails its SUBTOTALS reconciliation: the
+  // line-item comparison is withheld, the totals blocks are NOT. Returning
+  // null here (RO 20766) threw away both ESTIMATE TOTALS the text lane had
+  // already read, and the release gate then refused the run as one that
+  // "read neither totals block" — a diagnosis that pointed at the wrong
+  // parser. The sentence is the reader-facing note carried to the legend
+  // and the forensic report's limitations.
+  let lineItemsWithheld: string | null = null;
   // The typed engine parses the CCC column grid. A Mitchell comparison prints
   // welded columns and no SUBTOTALS row, so its word layer yields fragments
   // the reconciliation guard cannot reject (nothing to reconcile against) —
@@ -4599,11 +4641,10 @@ function matchStructuredLineItemDeltas(
             ? "both estimates"
             : "this estimate"
           : "the comparison estimate";
-        context.extractionWarnings?.push(
-          `Line-item comparison was withheld: the typed columns of ${failedSide} do not reconcile to that document's own printed SUBTOTALS, so any line-level difference could be an extraction error rather than a real one. Totals-level findings are unaffected.`
-        );
-        return null;
+        lineItemsWithheld = `Line-item comparison was withheld: the typed columns of ${failedSide} do not reconcile to that document's own printed SUBTOTALS, so any line-level difference could be an extraction error rather than a real one. Totals-level findings are unaffected.`;
+        context.extractionWarnings?.push(lineItemsWithheld);
       }
+      if (!lineItemsWithheld) {
       // Anchor resolution for the engine path validates every line-number
       // candidate against the ENGINE row's own text: a leading integer in
       // prose (a "4 Wheel Drive…" options paragraph, a street number, a year)
@@ -4718,6 +4759,7 @@ function matchStructuredLineItemDeltas(
             });
           }
         }
+      }
       }
     }
   }
@@ -5115,25 +5157,31 @@ function matchStructuredLineItemDeltas(
         }
       : null;
 
+  // A withheld run keeps everything the totals blocks say and asserts
+  // nothing at line level: no delta, no missing operation, no lower-only
+  // row, no paint-system finding built from row text.
   return {
-    orderedDeltas,
+    orderedDeltas: lineItemsWithheld ? [] : orderedDeltas,
     anchorById,
     primaryAnchors,
     comparisonName: comparison[0]?.fileName || "the comparison estimate",
-    matchedPairCount: match.matchedPairCount,
-    missingOperationCount: match.missingOperationCount,
+    matchedPairCount: lineItemsWithheld ? 0 : match.matchedPairCount,
+    missingOperationCount: lineItemsWithheld ? 0 : match.missingOperationCount,
     totalsDeltas,
     totalsAnchors,
-    lowerOnlyRows: match.lowerOnlyRows,
+    lowerOnlyRows: lineItemsWithheld ? [] : match.lowerOnlyRows,
     comparisonPlatform,
     subletsBookedAsParts,
     contradictionNotes,
     lowerTotalsSummary: lowerTotals,
     higherTotalsSummary: higherTotals,
     carrierMismatchNotes,
-    paintSystemMismatch,
-    potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
+    paintSystemMismatch: lineItemsWithheld ? null : paintSystemMismatch,
+    potentialDuplicateLowerRows: lineItemsWithheld ? [] : match.potentialDuplicateLowerRows,
     pmCapFlag,
+    lineItemsWithheld,
+    higherRowsRead: dedupedHigherRows.length,
+    lowerRowsRead: lowerRows.length,
     // The subject row count and the comparison's own printed total are what
     // let the assessment recognise a document that was not read AT ALL, as
     // opposed to one read with holes — see assessComparisonExtraction.

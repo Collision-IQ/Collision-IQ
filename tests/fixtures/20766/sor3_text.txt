@@ -1,0 +1,629 @@
+
+
+USAA CASUALTY INSURANCE COMPANY
+USAA 1007 - PA
+Please Visit Us at USAA.com
+P.O. Box 33490
+San Antonio, TX 78265
+Phone:  (800) 531-8722
+Claim #:
+Workfile ID:
+000000000000000000000
+00000000
+Supplement of Record 3 with Summary
+Written By: APPRAISER, REDACTED, License Number: 869574, 7/9/2025 1:43:54 PM
+Insured:OWNER, REDACTEDOwner Policy #:   000000000Claim #:000000000000000000000
+Type of Loss:CollisionDate of Loss:06/12/2025 04:30 PMDays to Repair:5
+Point of Impact:   11 Left FrontDeductible:500.00
+Owner (Insured):Inspection Location:Appraiser Information:Repair Facility:
+OWNER, REDACTED
+1652 REDACTED CIR
+CITY, ST 00000
+owner@example.com
+OWNER, REDACTED
+1652 REDACTED CIR
+CITY, ST 00000
+Home
+appraiser@example.comCONESTOGA COLLISION
+961 LANCASTER AVE
+BERWYN, PA 19312
+(610) 644-1000 Business
+270822500 Federal ID
+VEHICLE
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+VIN:5YJ3E1EB6XXXXXXXXProduction Date:05/2018Interior Color:
+License:XXX0000Odometer:61384Exterior Color:PMNG Midnight
+Silver
+State:PACondition:Good
+TRANSMISSIONWood Interior TrimHome LinkROOF
+Automatic TransmissionCONVENIENCERADIOSkyview Roof
+4 Wheel DriveAir ConditioningAM RadioSEATS
+POWERIntermittent WipersFM RadioBucket Seats
+Power SteeringTilt WheelStereoLeather Seats
+Power BrakesCruise ControlSearch/SeekHeated Seats
+Power WindowsRear DefoggerAuxiliary Audio ConnectionRear Heated Seats
+Power LocksKeyless EntrySAFETYWHEELS
+Power MirrorsAlarmDrivers Side Air BagWheel Covers
+Heated MirrorsMessage CenterPassenger Air BagPAINT
+Power Driver SeatSteering Wheel Touch ControlsAnti-Lock Brakes (4)Clear Coat Paint
+Power Passenger SeatTelescopic Wheel4 Wheel Disc BrakesOTHER
+Memory PackageClimate ControlFront Side Impact Air BagsFog Lamps
+DECORNavigation SystemHead/Curtain Air BagsTraction Control
+Dual MirrorsRemote StarterHands Free DeviceStability Control
+Tinted GlassBackup CameraBlind Spot DetectionXenon or L.E.D. Headlamps
+Console/StorageParking SensorsLane Departure WarningPower Trunk/Liftgate
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 1
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+LineOperDescriptionPart NumberQty   Extended
+Price $
+LaborPaint
+1FRONT BUMPER & GRILLE
+2O/H front bumper00.002.90.0
+3** <>Repl  A/M CAPA Bumper cover
+unpainted
+TA1000101C1475.00Incl.3.0
+NOTE: PARTS: Component comes unprimed from OEM. Preparation is required. See ADD IF REQUIRED operation.
+LABOR: Time is after under hood storage unit is removed. Time includes R&I/R&R lower grille, tow bracket cover,
+valance and wire harness.
+4Add for Clear Coat00.000.01.2
+5R&I  Lower grille108592701D00.00Incl.0.0
+6Repl  Add for park sensor10.00m0.60.0
+7Repl  Aim distance sensor10.00m1.00.0
+8   *S02  Repl LT Upper bracket108418100B17.000.20.0
+9S02  Repl LT Inner bracket108417100E18.800.20.0
+10S02  Refn Tow brkt cover108417300D00.000.00.2
+11S02Add for Clear Coat00.000.00.1
+12S02  Repl Tape145592100A10.590.00.0
+13S02  Repl Impact bar (ALU)110466799J1435.990.60.0
+14S02  Repl Absorber110466900F177.00Incl.0.0
+15*S02  Repl Park sensor front outer gray112750312B1120.00mIncl.0.0
+16FRONT LAMPS
+17S02  Repl LT Headlamp assy w/o up-level151495200E11,562.550.40.0
+18S02Aim headlamps00.000.50.0
+19*S02  R&I  LT Repeater lamp149586420F00.00m0.20.0
+20S02  Repl LT Trim molding chrome151487701C110.000.10.0
+21S02  Repl Aim camera10.00m0.5M0.0
+22HOOD
+23*S02  Blnd  Hood (ALU)1081390E0B00.000.01.3
+24S02  Repl Emblem149494900A158.300.20.0
+25R&I  Storage compart108167488D00.001.20.0
+26FENDER
+27S02  Repl LT Fender E-coated1081401E0D1795.002.51.8
+28S02Overlap Major Non-Adj. Panel00.000.0-0.2
+29S02Add for Clear Coat00.000.00.3
+30S02Add for Edging00.000.00.5
+31*S02  R&I  D&R RT Fender liner108158200C00.000.20.0
+32R&I  LT Fender liner108158100C00.00Incl.0.0
+33ELECTRICAL
+34#S02  Rpr  Disconnect/Reconnect 12-volt
+Battery
+00.000.30.0
+35#S02Reset electrical10.000.30.0
+36#S02  Rpr  High voltage system
+deactivate/activate
+00.000.5M0.0
+37PILLARS, ROCKER & FLOOR
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 2
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+38*S02  Blnd  LT Hinge pillar1073679S0A00.000.01.0
+39FRONT DOOR
+40*S02  Blnd  LT Outer panel (ALU)1081439S0G00.000.01.0
+41S02  R&I  LT Water shield109214600B00.000.60.0
+42S02  R&I  LT Belt molding chrome108068100H00.000.20.0
+43S02  R&I  LT R&I mirror111077797E00.000.30.0
+44S02  R&I  LT Door glass TESLA107790000A00.000.50.0
+45S02  R&I  LT Handle, outside chrome108183189D00.000.40.0
+46S02  R&I  LT R&I trim panel109040901D00.000.50.0
+47VEHICLE DIAGNOSTICS
+48*S02  Rpr  Calibration drive00.00m0.30.0
+49MISCELLANEOUS OPERATIONS
+50#Corrosion Protection110.00T0.20.0
+51#Cover Car15.00T0.20.0
+52#S03Pre-repair Diagnostic Scan
+(Repair Facility)
+1185.000.00.0
+53#S03Post-repair Diagnostic Scan
+(Repair Facility)
+1185.000.00.0
+54#S03Seat Belt Inspection10.000.50.0
+55#S02Service mode10.000.20.0
+56#S02Deploy firmware10.000.30.0
+57#S02  Refn Color Tint Spray Out Panel00.000.00.5
+58#S02Mask Jambs15.00T0.30.0
+59#S02  Rpr  Denib and Polish00.002.00.0
+60#S02  Rpr  Remove adhesive00.000.30.0
+61#S02Rope Front Glass10.00T0.30.0
+62OTHER CHARGES
+63#E.P.C.13.50
+SUBTOTALS3,943.7319.510.7
+NOTES
+Estimate Notes:
+Estimate Prepared by: [APPRAISER, REDACTED] This serves as my Electronic Signature. License #: 1207856|
+ALL OEM Parts can be located at:
+[ Tesla]
+[ 160 N Gulph Rd Suite 1310B]
+[  King of Prussia, PA 19406]
+Shop: Avoid delays! Get claim and payment info at www.usaa.com/bodyshop
+Original Assigned Date: 06/12/2025
+E01 Completed on Site: N
+Date E01 Inspected: 06/14/2025
+QRP Brochure provided to OWNER, REDACTED on 06/14/2025
+E01 and explanation of repairs provided to OWNER, REDACTED  on 06/14/2025
+Authorization / Direction to Pay on File: N
+Supplement Assigned Date: 06/23/2025
+Date S01 Inspected: 07/02/2025
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 3
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+S01 Completed on Site: N
+S01 and explanation of repairs provided to OWNER, REDACTED and Conestoga Collision, LLC on 06/30/2025
+Estimate Prepared by: APPRAISER, REDACTED. This serves as my Electronic Signature. License #: 1213863
+Prior Damage Notes:
+lt ft wheel
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts3,920.23
+Body Labor18.5 hrs@$ 95.00 /hr1,757.50
+Paint Labor10.7 hrs@$ 95.00 /hr1,016.50
+Mechanical Labor1.0 hrs@$ 185.00 /hr185.00
+Paint Supplies10.7 hrs@$ 41.00 /hr438.70
+Miscellaneous20.00
+Other Charges3.50
+Subtotal7,341.43
+Sales Tax$ 7,341.43@6.0000 %440.49
+Total Cost of Repairs7,781.92
+Deductible500.00
+Total Adjustments500.00
+Net Cost of Repairs7,281.92
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 4
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+SUPPLEMENT SUMMARY
+LineOperDescriptionPart NumberQty   Extended
+Price $
+LaborPaint
+Changed Items
+52#Rpr  Pre-repair Diagnostic Scan
+(Repair Facility)
+00.00-0.5M0.0
+52#S03Pre-repair Diagnostic Scan
+(Repair Facility)
+1185.000.00.0
+53#S01  Rpr  Post-repair Diagnostic Scan
+(Repair Facility)
+00.00-0.5M0.0
+53#S03Post-repair Diagnostic Scan
+(Repair Facility)
+1185.000.00.0
+Added Items
+54#S03Seat Belt Inspection10.000.50.0
+SUBTOTALS370.00-0.50.0
+NOTES
+Estimate Notes:
+Estimate Prepared by: [APPRAISER, REDACTED] This serves as my Electronic Signature. License #: 1207856|
+ALL OEM Parts can be located at:
+[ Tesla]
+[ 160 N Gulph Rd Suite 1310B]
+[  King of Prussia, PA 19406]
+Shop: Avoid delays! Get claim and payment info at www.usaa.com/bodyshop
+Original Assigned Date: 06/12/2025
+E01 Completed on Site: N
+Date E01 Inspected: 06/14/2025
+QRP Brochure provided to OWNER, REDACTED on 06/14/2025
+E01 and explanation of repairs provided to OWNER, REDACTED  on 06/14/2025
+Authorization / Direction to Pay on File: N
+Supplement Assigned Date: 06/23/2025
+Date S01 Inspected: 07/02/2025
+S01 Completed on Site: N
+S01 and explanation of repairs provided to OWNER, REDACTED and Conestoga Collision, LLC on 06/30/2025
+Estimate Prepared by: APPRAISER, REDACTED. This serves as my Electronic Signature. License #: 1213863
+Prior Damage Notes:
+lt ft wheel
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 5
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+TOTALS SUMMARY
+CategoryBasisRateCost $
+Parts370.00
+Body Labor0.5 hrs@$ 95.00 /hr47.50
+Additional Supplement Labor-185.00
+Subtotal232.50
+Sales Tax$ 232.50@6.0000 %13.95
+Total Supplement Amount246.45
+NET COST OF SUPPLEMENT246.45
+CUMULATIVE EFFECTS OF SUPPLEMENT(S)
+Estimate2,573.20   APPRAISER, REDACTED
+Supplement S010.00   APPRAISER, REDACTED
+Supplement S024,962.27   APPRAISER, REDACTED
+Supplement S03246.45   APPRAISER, REDACTED
+Workfile Total:$7,781.92
+TOTAL ADJUSTMENTS:$500.00
+NET COST OF REPAIRS:$7,281.92
+AVOID DELAYS BY GETTING CLAIM AND PAYMENT INFORMATION IN JUST A FEW CLICKS!
+VISIT: http://www.usaa.com/bodyshop
+MEMBER NUMBER: Use Policy Number
+LOSS NUMBER:  Use digits 16, 17, & 18 of the claim number  (Ex. 012345670000000[003]001)
+LOSS DATE: Use Date of Loss
+If you choose to repair your vehicle at a STARS facility, please visit the following link for information regarding the
+USAA STARS Limited Lifetime Warranty:
+https://content.usaa.com/mcontent/static_assets/Media/usaa-stars-limited-lifetime-warranty.pdf
+If you do not choose to repair your vehicle at a STARS facility, please note that USAA STARS Limited Lifetime
+Warranty will not apply to repairs to your vehicle.
+Please Present A Copy Of This Estimate To A Repair Facility Of Your Choice
+*USAA Subsidiaries include: United Services Automobile Association(USAA), USAA Casualty Insurance Company(CIC),
+USAA General Indemnity Company(GIC) USAA County Mutual Insurance(CMI) and Garrison Property Casualty
+Insurance Company. Garrison Property and Casualty Insurance Company, a subsidiary of USAA Casualty Insurance
+Company, is authorized to use the USAA logo, a registered trademark of United Services Automobile Association.
+This is not an authorization to repair. Failing to present this estimate to the repairing garage before repair may result
+in additional expenses to you. A USAA appraiser must authorize any supplement to this estimate. Repairs to this
+vehicle may require specific welding equipment as recommended by the manufacturer.
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 6
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+ANY PERSON WHO KNOWINGLY AND WITH INTENT TO DEFRAUD ANY INSURANCE COMPANY OR OTHER PERSON
+FILES AN APPLICATION FOR INSURANCE OR STATEMENT OF CLAIM CONTAINING ANY MATERIALLY FALSE
+INFORMATION OR CONCEALS FOR THE PURPOSE OF MISLEADING, INFORMATION CONCERNING ANY FACT
+MATERIAL THERETO COMMITS A FRAUDULENT INSURANCE ACT, WHICH IS A CRIME AND SUBJECTS SUCH PERSON
+TO CRIMINAL AND CIVIL PENALTIES.
+THE FOLLOWING IS A LIST OF ABBREVIATIONS OR SYMBOLS THAT MAY BE USED TO DESCRIBE WORK TO BE
+DONE OR PARTS TO BE REPAIRED OR REPLACED:D=DISCONTINUED PART A=APPROXIMATE PRICE B=BODY
+LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL
+T=TAXED MISCELLANEOUS X=NON TAXED MISCELLANEOUS ADJ=ADJACENT ALGN=ALIGN  A/M=AFTERMARKET
+BLND=BLEND CAPA=CERTIFIED AUTOMOTIVE PARTS ASSOCIATION  D&R=DISCONNECT AND RECONNECT
+EST=ESTIMATE EXT. PRICE=UNIT PRICE MULTIPLIED BY THE QUANTITY INCL=INCLUDED MISC=MISCELLANEOUS
+NON-ADJ=NON ADJACENT O/H=OVERHAUL OP=OPERATION NO=LINE NUMBER QTY=QUANTITY
+RECOND=RECONDITION REFN=REFINISH REPL=REPLACE R&I=REMOVE AND INSTALL R&R=REMOVE AND
+REPLACE RPR=REPAIR RT=RIGHT SECT=SECTION SUBL=SUBLET LT=LEFT W/O=WITHOUT W/_=WITH/_
+#=MANUAL LINE ENTRY *=OTHER [IE..MOTORS DATABASE INFORMATION WAS CHANGED]. **=DATABASE LINE
+WITH AFTERMARKET N=NOTES ATTACHED TO LINE NAGS=NATIONAL AUTO GLASS SPECIFICATIONS. OPT
+OEM=ORIGINAL EQUIPMENT MANUFACTURER PARTS EITHER OPTIONALLY SOURCED OR OTHERWISE PROVIDED
+WITH SOME UNIQUE PRICING OR DISCOUNT.
+THE ATTACHED ESTIMATE REPRESENTS AN APPRAISAL OF THE COST OF REPAIR FOR THE VISIBLE DAMAGE TO
+THE VEHICLE NOTED AT THE TIME OF INSPECTION NECESSARY TO RETURN THE VEHICLE TO ITS PREDAMAGED
+CONDITION.  COSTS ABOVE THE APPRAISED AMOUNT MAY BE THE RESPONSIBILITY OF THE VEHICLE OWNER.
+THERE IS NO REQUIREMENT THAT THE VEHICLE OWNER USE ANY SPECIFIED REPAIR SHOP. INFORMATION
+REGARDING REPAIR FACILITIES WHICH WILL BE ABLE TO REPAIR THE VEHICLE FOR THE APPRAISED AMOUNT IS
+AVAILABLE FROM THE INSURANCE COMPANY. IF USED PARTS ARE SPECIFIED, THEY ARE REQUIRED TO BE OF
+LIKE KIND AND QUALITY TO THOSE BEING REPLACED. INCIDENTAL CHARGES SUCH AS TOWING, PROTECTIVE
+CARE, CUSTODY, STORAGE, DEPRECIATION, BATTERY AND TIRE REPLACEMENT ARE NOTED WHEN APPLICABLE.
+AFTERMARKET CRASH PART - A NONORIGINAL EQUIPMENT MANUFACTURER (NON-OEM) REPLACEMENT PART,
+EITHER NEW OR USED, FOR ANY OF THE NONMECHANICAL PARTS THAT GENERALLY CONSTITUTE THE EXTERIOR
+OF THE MOTOR VEHICLE, INCLUDING INNER AND OUTER PANELS. THIS APPRAISAL WILL INDICATE IF
+AFTERMARKET CRASH PARTS ARE SPECIFIED.  IF THE USE OF SUCH PARTS VOIDS THE WARRANTY ON THE PART
+BEING REPLACED OR ON ANY OTHER PART, THE AFTER MARKET CRASH PART SHALL HAVE A WARRANTY EQUAL
+TO OR BETTER THAN THE REMAINDER OF THE EXISTING WARRANTY.
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 7
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide DR7QA18, CCC Data Date 07/01/2025, and potentially
+other third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for
+the vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM
+parts are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM
+(Alternative OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM
+vehicle dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or
+labor data provided by third party sources of data may have been modified or may have come from an alternate data
+source.  Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category.
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category.
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel.
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part.
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet.
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 8
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+USAAs Quality Replacement Parts Program
+The following information summarizes USAAs Quality Replacement Parts program:
+USAA utilizes a Quality Replacement Parts (QRP) program to help manage repair costs while maintaining a high
+standard of quality and safety for vehicle repairs.  USAAs QRP program includes parts that are required to be
+equivalent in quality, safety, fit, and performance of the part(s) being replaced on your vehicle.  The application of
+USAAs QRP program will comply with all state/federal laws where applicable and may be superseded by
+policy/endorsement language when applicable.
+USAA provides a Limited Parts Warranty on Quality Replacement Parts that are authorized for use on USAA approved
+repair estimates and installed during vehicle repairs. USAAs warranty on sheet metal, and plastic QRP body parts is
+valid for the greater of the following time periods: (1) the remaining period of the Original Equipment Manufacturer
+(OEM) vehicle factory warranty; or (2) three years from the date of the repair completion.  USAAs warranty on
+mechanical and electrical QRP parts is valid for the greater of the following time periods: (1) the remaining period of
+the Original Equipment Manufacturer (OEM) vehicle factory warranty; or (2) the same warranty period that would be
+provided by the Original Equipment Manufacturer (OEM) for an equivalent OEM replacement part.
+Excluded from USAAs QRP warranty are the following conditions: (1) normal wear and tear; (2) damage caused by
+accident and/or acts of nature; (3) intentional acts; (4) improper use or modification; (5) improper installation;
+and/or (6) improper maintenance of the vehicle.
+Any express warranty not provided herein is hereby excluded and disclaimed. Any implied warranties of
+merchantability and fitness for any particular purpose which may exist are expressly limited to the QRP warranty
+period(s) as cited above.  The USAA QRP warranty period(s) will comply with and be superseded by state/federal law
+where applicable.
+USAA shall not be liable to any person for any special, incidental, or consequential damages, whether arising out of
+breach of warranty, breach of contract or otherwise. Limitations or exclusions of liability may be superseded by
+state/federal law where applicable.
+The following questions and answers may help you understand more about USAAs QRP program:
+Q.  What types of parts are utilized in the QRP Program?
+A.  In addition to the use of OEM parts in certain instances, the following types of parts may be utilized in the QRP
+Program:
+New aftermarket parts: Parts provided by manufacturers and distributors other than the Original Equipment
+Manufacturer.
+Recycled parts:  Parts from a vehicle of the same make and model.
+Reconditioned, remanufactured, and rebuilt parts:  Parts that are rebuilt or repaired to OEM specifications.  
+Optional OEM parts:  New OEM or OEM equivalent parts provided by distributors other than the Original Equipment
+Manufacturer. 
+Q. What assurances do I have that QRP parts are of high quality?
+A. USAAs QRP program maintains high standards to utilize parts that are equivalent in quality, safety, fit, and
+performance of the part(s) being replaced on your vehicle.  QRP parts carry an equal or better warranty when
+compared to OEM parts and are backed by USAAs Limited Parts Warranty.
+Q. Do I have a choice of which parts are used to repair my vehicle?
+A. As the owner of the vehicle, you have the right to choose the types of parts that are utilized in the repairs to your
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 9
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+vehicle.  If you choose to utilize parts that differ from USAAs approved estimate, you will be responsible for any
+additional part costs and labor differences.  As well, USAAs Limited Parts Warranty will not be applicable to parts that
+deviate from USAAs approved estimate.
+Q. Will using a non-OEM part void the warranty on my vehicle?
+A. QRP parts utilized in your vehicles repair carry an equal or better warranty when compared to OEM parts.
+Additionally, QRP parts are backed by USAAs Limited Parts Warranty, which includes the duration of the OEM
+warranty period.
+Q.  If an issue arises with a QRP part utilized in the repair to my vehicle, what is the resolution process?
+A. If you experience a problem, contact your repair shop to discuss the concern.  The shop will assess the situation
+and can work directly with the QRP supplier and/or USAA where necessary to resolve the issue.
+Q. What should I do if my repair shop refuses to use QRP parts?
+A. You have the right to choose where, how, and by whom your vehicle will be repaired.  Repair shops have the right
+to conduct business in accordance with their own practices, including charging more than a competitive cost for
+repairs.  Should you choose a repair shop that refuses to utilize the QRP parts listed on the USAA approved estimate,
+you will be responsible for any additional part costs and labor differences in the final repair bill.  As well, the USAA
+Limited Parts Warranty will not apply.
+If you have questions about the program or warranty, log on to http://usaa.com or call 1-800-531-USAA (8722).
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 10
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+ALTERNATE PARTS SUPPLIERS
+Line   SupplierDescriptionPrice
+3Keystone-Complete-H-Chesapeake#TA1000101C$ 475.00
+5415 WEST MILITAR HWYA/M CAPA Bumper cover unpainted
+CHESAPEAKE VA 23321
+(800) 322-7795
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 11
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+ALTERNATE PARTS USAGE
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+VIN:5YJ3E1EB6XXXXXXXXProduction Date:05/2018Interior Color:
+License:XXX0000Odometer:61384Exterior Color:PMNG Midnight
+Silver
+State:PACondition:Good
+Alternate Part Type# Of Available Parts# Of Parts Selected
+Aftermarket11
+Optional OEM00
+Reconditioned00
+Recycled00
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 12
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+RECALL INFO
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+VIN:5YJ3E1EB6XXXXXXXXProduction Date:05/2018Interior Color:
+License:XXX0000Odometer:61384Exterior Color:PMNG Midnight
+Silver
+State:PACondition:Good
+The National Highway Transportation and Safety Administration (NHTSA) has issued 19 safety-related recall notice(s) that may apply to the
+selected vehicle.
+NHTSA ID:     24V935000Issued:     Dec 12, 24Number of Vehicles:     00696281
+TIRES:PRESSURE MONITORING AND REGULATING SYSTEMS Tesla, Inc. (Tesla) is recalling certain 2024 Cybertruck, 2017-2025 Model 3, and
+2020-2025 Model Y vehicles. The tire pressure monitoring system (TPMS) warning light may not remain illuminated between drive cycles, failing to
+warn the driver of low tire pressure. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number
+138, "Tire Pressure Monitoring Systems." Driving with improperly inflated tires increases the risk of a crash. Tesla released an over-the-air (OTA)
+software update, free of charge. Owner notification letters are expected to be mailed February 15, 2025. Owners may contact Tesla customer
+service at 1-877-798-3752. Tesla''s number for this recall is SB-24-00-018.
+NHTSA ID:     24V376000Issued:     May 5, 24Number of Vehicles:     00125233
+SEAT BELTS:FRONT:WARNING LIGHT/DEVICES Tesla, Inc. (Tesla) is recalling certain 2012-2024 Model S, 2015-2024 Model X, 2017-2023 Model 3,
+and 2020-2023 Model Y vehicles. In the event of an unbelted driver, the seat belt warning light and audible chime may not activate as intended. As
+such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 208, "Occupant Crash Protection." A
+seat belt warning system that fails to alert occupants of an unbelted seat belt can increase the risk of injury during a crash. Tesla will release an
+over-the-air (OTA) software update. Owner notification letters were mailed July 26, 2024. Owners may contact Tesla customer service at
+1-877-798-3752. Tesla''s number for this recall is SB-24-00-008.
+NHTSA ID:     24V376000Issued:     May 5, 24Number of Vehicles:     00125227
+SEAT BELTS Tesla, Inc. (Tesla) is recalling certain 2012-2024 Model S, 2015-2024 Model X, 2017-2023 Model 3, and 2020-2023 Model Y vehicles.
+In the event of an unbelted driver, the seat belt warning light and audible chime may not activate as intended. As such, these vehicles fail to
+comply with the requirements of Federal Motor Vehicle Safety Standard number 208, "Occupant Crash Protection." A seat belt warning system that
+fails to alert occupants of an unbelted seat belt can increase the risk of injury during a crash. Tesla will release an over-the-air (OTA) software
+update. Owner notification letters are expected to be mailed July 27, 2024. Owners may contact Tesla customer service at 1-877-798-3752.
+Tesla''s number for this recall is SB-24-00-008.
+NHTSA ID:     24V153000Issued:     Feb 2, 24Number of Vehicles:     00006557
+ELECTRICAL SYSTEM:SOFTWARE Tesla, Inc. (Tesla) is recalling certain 2013, 2018-2021 Model S, 2020-2021 Model X, 2018-2022 Model 3, and
+2020-2022 Model Y vehicles. A factory reset muted the Pedestrian Warning System (PWS) sounds. As such, these vehicles fail to comply with the
+requirements of Federal Motor Vehicle Safety Standard number 141, "Minimum Sound Requirements for Hybrid and Electric Vehicles." Pedestrians
+may be unaware of an approaching vehicle if the PWS sounds are muted, increasing the risk of a crash. Tesla released an over-the-air (OTA)
+software update, release 2023.44.30.14, free of charge. Owner notification letters were mailed April 27, 2024. Owners may contact Tesla customer
+service at 1-877-798-3752. Tesla''s number for this recall is SB-24-00-006.
+NHTSA ID:     24V051000Issued:     Jan 1, 24Number of Vehicles:     02193869
+ELECTRICAL SYSTEM Tesla, Inc. (Tesla) is recalling certain 2012-2023 Model S, 2016-2024 Model X, 2017-2023 Model 3, 2019-2024 Model Y, and
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 13
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+2024 Cybertruck vehicles. An incorrect font size is displayed on the instrument panel for the Brake, Park, and Antilock Brake System (ABS) warning
+lights. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 105, "Hydraulic and Electric
+Brake Systems" and 135, "Light Vehicle Brake Systems." Warning lights with a smaller font size can make critical safety information on the
+instrument panel difficult to read, increasing the risk of a crash. Tesla began releasing an over-the-air (OTA) software update, free of charge.
+Owner notification letters are expected to be mailed March 30, 2024. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s
+number for this recall is SB-24-00-003.
+NHTSA ID:     23V838000Issued:     Dec 12, 23Number of Vehicles:     02031220
+ELECTRICAL SYSTEM:ADAS:AUTONOMOUS/SELF DRIVING:SOFTWARE Tesla, Inc. (Tesla) is recalling 2012-2023 Model S, 2016-2023 Model X,
+2017-2023 Model 3, and 2020-2023 Model Y vehicles equipped with all versions of Autosteer leading up to the version(s) that contains the recall
+remedy. In certain circumstances when Autosteer is engaged, the prominence and scope of the feature''s controls may not be sufficient to prevent
+driver misuse of the SAE Level 2 advanced driver-assistance feature. In certain circumstances when Autosteer is engaged, and the driver does not
+maintain responsibility for vehicle operation and is unprepared to intervene as necessary or fails to recognize when Autosteer is canceled or not
+engaged, there may be an increased risk of a crash. Tesla will release an over-the-air (OTA) software update, free of charge. Owner notification
+letters were mailed February 10, 2024. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is
+SB-23-00-008.
+NHTSA ID:     23V235000Issued:     Mar 3, 23Number of Vehicles:     00000422
+SUSPENSION:FRONT Tesla, Inc. (Tesla) is recalling certain 2018-2019 Model 3 vehicles. The front suspension lateral link fasteners may loosen,
+allowing the lateral link to separate from the sub-frame. A lateral link separation could shift the wheel alignment, causing instability and increasing
+the risk of a crash. Tesla Service will tighten or replace the lateral link fasteners as necessary, free of charge. Owner notification letters were
+mailed May 30, 2023. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is SB-23-31-001. This recall is
+an expansion of previous recall number 21V-835.
+NHTSA ID:     23V085000Issued:     Feb 2, 23Number of Vehicles:     00362758
+STEERING:AUTOMATED/ADAPTIVE STEERING Tesla, Inc. (Tesla) is recalling certain 2016-2023 Model S, Model X, 2017-2023 Model 3, and
+2020-2023 Model Y vehicles equipped with Full Self-Driving Beta (FSD Beta) software or pending installation. The FSD Beta system may allow the
+vehicle to act unsafe around intersections, such as traveling straight through an intersection while in a turn-only lane, entering a stop
+sign-controlled intersection without coming to a complete stop, or proceeding into an intersection during a steady yellow traffic signal without due
+caution. In addition, the system may respond insufficiently to changes in posted speed limits or not adequately account for the driver''s adjustment
+of the vehicle''s speed to exceed posted speed limits. FSD Beta software that allows a vehicle to exceed speed limits or travel through intersections
+in an unlawful or unpredictable manner increases the risk of a crash. Tesla will release an over-the-air (OTA) software update, free of charge.
+Owner notification letters were mailed April 15, 2023. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this
+recall is SB-23-00-001.
+NHTSA ID:     22V798000Issued:     Oct 10, 22Number of Vehicles:     00024064
+SEAT BELTS:REAR/OTHER:ANCHORAGE Tesla, Inc. (Tesla) is recalling certain 2017-2022 Model 3 vehicles. The second-row left seat belt buckle
+and second-row center seat belt anchor may have been incorrectly reassembled during vehicle service. An incorrectly reassembled seat belt anchor
+can impair the performance of the seat belt during a crash, increasing the risk of injury. Tesla Service will inspect and reassemble the seat belt
+anchors as necessary, free of charge. Owner notification letters were mailed December 20, 2022. Owners may contact Tesla customer service at
+1-877-798-3752. Tesla''s number for this recall is SB-22-20-004.
+NHTSA ID:     22V702000Issued:     Sep 9, 22Number of Vehicles:     01096762
+VISIBILITY:POWER WINDOW DEVICES AND CONTROLS Tesla, Inc. (Tesla) is recalling certain 2017-2022 Model 3, 2020-2022 Model Y, and
+2021-2022 Model S and Model X vehicles. The window automatic reversal system may not react correctly after detecting an obstruction. As such,
+these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 118, "Power-Operated Window Systems." A
+closing window may exert excessive force by pinching a driver or passenger before retracting, increasing the risk of injury. Tesla will perform an
+over-the-air (OTA) software update of the automatic window reversal system, free of charge. Owner notification letters were mailed March 31,
+2032. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is SB-22-00-013.
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 14
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+NHTSA ID:     22V263000Issued:     Apr 4, 22Number of Vehicles:     00048184
+ELECTRICAL SYSTEM: INSTRUMENT CLUSTER/PANEL Tesla, Inc. (Tesla) is recalling certain 2018-2022 Model 3 Performance vehicles. The unit of
+speed (mph or km/h) may fail to display on the speedometer while in Track Mode. As such, these vehicles fail to comply with the requirements of
+Federal Motor Vehicle Safety Standard number 101, "Control and Displays." The driver may not know how fast the vehicle is traveling without the
+mph or km/h unit display, increasing the risk of a crash. Tesla will perform an over-the-air (OTA) software update, free of charge. Owner
+notification letters were mailed June 17, 2022. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is
+SB-22-00-008.
+NHTSA ID:     22V235000Issued:     Apr 4, 22Number of Vehicles:     00594894
+ELECTRICAL SYSTEM:SOFTWARE Tesla, Inc. (Tesla) is recalling certain 2020-2022 Model Y, Model X, Model S, and 2017-2022 Model 3 vehicles.
+The Boombox function allows sounds to be played through an external speaker while the vehicle is in motion, which may obscure the Pedestrian
+Warning System (PWS) sounds. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 141,
+"Minimum Sound Requirements for Hybrid and Electric Vehicles." Pedestrians may be unaware of an approaching vehicle if the PWS sounds are
+obscured, increasing the risk of a crash. Tesla will perform an over-the-air (OTA) software update that will disable the Boombox functionality when
+the vehicle is in Drive, Neutral and Reverse modes, including Summon and Smart Summon, free of charge. Owner notification letters were mailed
+June 6, 2022. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is SB-22-00-003. Note: This recall
+supersedes recall 22V-063. Vehicles configured with Summon or Smart Summon and already remedied under 22V-063 will need to have the new
+remedy software installed.
+NHTSA ID:     22V169000Issued:     Mar 3, 22Number of Vehicles:     00000947
+BACK OVER PREVENTION:DISPLAY FUNCTION Tesla, Inc. (Tesla) is recalling certain 2018-2019 Model S, Model X, and 2017-2020 Model 3 vehicles
+equipped with Autopilot Computer 2.5 and operating certain firmware releases. The rearview image may not immediately display when the vehicle
+begins to reverse. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 111, "Rear
+Visibility." A delayed rearview camera image reduces the driver''s rear view, increasing the risk of a crash. Tesla will perform an over-the-air (OTA)
+software update, free of charge. Owner notification letters were mailed May 17, 2022. Owners may contact Tesla customer service at
+1-877-798-3752. Tesla''s number for this recall is SB-22-00-004.
+NHTSA ID:     22V063000Issued:     Feb 2, 22Number of Vehicles:     00578607
+ELECTRICAL SYSTEM:SOFTWARE Tesla, Inc. (Tesla) is recalling certain 2020-2022 Model S, Model X, Model Y, and 2017-2022 Model 3 vehicles.
+The Boombox function allows sounds to be played through an external speaker while the vehicle is in motion, which may obscure the Pedestrian
+Warning System (PWS) sounds. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard number 141,
+"Minimum Sound Requirements for Hybrid and Electric Vehicles." Pedestrians may be unaware of an approaching vehicle if the PWS sounds are
+obscured, increasing the risk of a crash. Tesla will perform an over-the-air (OTA) software update that will disable the Boombox functionality when
+the vehicle is in Drive, Neutral and Reverse modes, free of charge. Owner notification letters are expected to be mailed April 5, 2022. Owners may
+contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is SB-22-00-003. Note: This recall has been superseded by Recall
+22V-235. Tesla''s number for the new recall is SB-22-00-003.
+NHTSA ID:     22V045000Issued:     Jan 1, 22Number of Vehicles:     00817143
+SEAT BELTS:FRONT Tesla, Inc. (Tesla) is recalling certain 2021-2022 Model S and Model X, 2017-2022 Model 3, and 2020-2022 Model Y vehicles.
+The audible chime may not activate when the vehicle starts and the driver has not buckled their seat belt. As such, these vehicles fail to comply
+with the requirements of Federal Motor Vehicle Safety Standard number 208, "Occupant Crash Protection." The driver may be unaware that their
+seat belt is not fastened, increasing the risk of injury during a crash. Tesla will perform an over-the-air (OTA) software update, free of charge.
+Owner notification letters were mailed April 1, 2022. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall
+is SB-22-00-002.
+NHTSA ID:     22V037000Issued:     Jan 1, 22Number of Vehicles:     00053822
+ELECTRICAL SYSTEM:ADAS:AUTONOMOUS/SELF DRIVING:SOFTWARE Tesla, Inc. (Tesla) is recalling certain 2016-2022 Model S and Model X,
+2017-2022 Model 3, and 2020-2022 Model Y vehicles. The "rolling stop" functionality available as part of the Full Self-Driving (Beta) software may
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 15
+
+Claim #:000000000000000000000
+Workfile ID:00000000
+Supplement of Record 3 with Summary
+2018 TESL Model 3 AWD w/Long Range Battery 4D SED Electric- Electric PMNG Midnight Silver
+allow the vehicle to travel through an all-way stop intersection without first coming to a stop. Failing to stop at a stop sign can increase the risk of
+a crash. Tesla will perform an over-the-air (OTA) software update that disables the "rolling stop" functionality, free of charge. Owner notification
+letters were mailed March 28, 2022. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is
+SB-22-00-001.
+NHTSA ID:     21V00D000Issued:     Dec 12, 21Number of Vehicles:     00356309
+ELECTRICAL SYSTEM:WIRING: REAR COMPARTMENT/TRUNK Tesla, Inc. (Tesla) is recalling all 2017-2020 Model 3 vehicles. The rearview camera
+cable harness may be damaged by the opening and closing of the trunk lid, preventing the rearview camera image from displaying. A rearview
+camera that does not function reduces the driver''s rear view, increasing the risk of a crash. Tesla Service will inspect and install a guide protector
+and new cable harness as necessary, free of charge. Owner notification letters were mailed April 24, 2022. Owners may contact Tesla customer
+service at 1-877-798-3752. Tesla''s number for this recall is SB-21-17-008.
+NHTSA ID:     21V846000Issued:     Oct 10, 21Number of Vehicles:     00011728
+FORWARD COLLISION AVOIDANCE: WARNINGS Tesla, Inc. (Tesla) is recalling certain 2017-2021 Model S, Model 3, Model X, and 2020-2021
+Model Y vehicles operating software version 2021.36.5.2. A communication error may cause false forward-collision warning (FCW) or unexpected
+activation of the automatic emergency brake (AEB) system. Unexpected activation of the AEB system may cause the car to stop suddenly,
+increasing the risk of a crash. Tesla Service has released an over-the-air (OTA) software update, free of charge. The recall began October 25,
+2021. Owners may contact Tesla customer service at 1-877-798-3752. Tesla''s number for this recall is SB-21-00-004.
+NHTSA ID:     21V389000Issued:     May 5, 21Number of Vehicles:     00005530
+SEAT BELTS Tesla, Inc. (Tesla) is recalling certain 2018-2020 Model 3 and 2019-2021 Model Y vehicles. One or both fasteners that secure the front
+seat shoulder belt to the b-pillar may not be properly attached. An improperly attached fastener may prevent the seat belt system from performing
+as designed, increasing the risk of injury. Tesla Service will inspect and repair both fasteners if necessary, free of charge. Owner notification letters
+were mailed July 23, 2021. Owners may contact Tesla customer service online by visiting www.tesla.com/support/contact or by calling
+1-877-79-TESLA (or 1-877-798-3752). Tesla''s number for this recall is SB-21-20-001.
+7/9/2025 1:44:11 PM483504  |  1.9.09.09160Page 16
