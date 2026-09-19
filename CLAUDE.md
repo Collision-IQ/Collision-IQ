@@ -89,6 +89,13 @@ the reverse. The registry lives in `src/lib/ai/estimatingGuides.ts` and feeds
 the retrieval lanes, the authority ladder and the chat prompts; add a guide
 there, not in prose.
 
+Link policy: these are licensed reference materials. Collision iQ cites them
+by guide, section heading and line, and quotes only what it retrieved; it
+never provides the address to a user, in chat or in any report, even when
+asked. The addresses below are for retrieval and recognition only, and a guide
+hit is stored under a section reference in place of its URL the moment it
+becomes a source.
+
 - Mitchell CEG P-Pages: https://static.mymitchell.com/static/Webhelp/ppages/ceg/1033/Content/ceg020000.htm
 - CCC/MOTOR Guide to Estimating (new replacement parts): https://help.cccis.com/webhelp/motor/gte/guide.htm
 - CCC/MOTOR Recycled Assemblies Guide to Estimating: https://help.cccis.com/webhelp/motor/ragte/slguide.htm

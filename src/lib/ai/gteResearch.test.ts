@@ -97,8 +97,11 @@ describe("CCC/MOTOR GTE result labeling", () => {
     expect(labelGteWebResult("Repair procedure premise").sourceType).toBe("industry");
   });
 
-  it("stores metadata only: URL, title, retrievedAt, short snippet", () => {
-    expect(source.url).toBe(GTE_URL);
+  it("stores metadata only: section reference, title, retrievedAt, short snippet", () => {
+    // Licensed reference material: the section reference replaces the link.
+    expect(source.url).toBeUndefined();
+    expect(source.locator).toMatch(/^Estimating guide reference — CCC\/MOTOR Guide to Estimating \(GTE\) — /);
+    expect(source.locator).not.toContain("help.cccis.com");
     expect(source.sourceTitle.length).toBeGreaterThan(0);
     expect(Number.isNaN(Date.parse(source.retrievalTimestamp))).toBe(false);
     expect(source.snippet).toBe("Overlap considerations for adjacent panels.");

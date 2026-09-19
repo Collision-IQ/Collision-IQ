@@ -11,6 +11,14 @@
  * statement. Every consumer labels a hit as general estimating-guide
  * guidance for exactly that reason.
  *
+ * LINK POLICY — REFERENCE ONLY. These are licensed reference materials.
+ * Collision iQ may cite them by guide, section heading and line, and may
+ * quote the excerpt it actually retrieved, but it never hands a user the
+ * address. The addresses below exist so the retrieval lanes can search and
+ * recognise the guides; at the moment a hit becomes a source, its URL is
+ * replaced by a section reference (buildEstimatingGuideLocator) so no
+ * prompt, report or citation downstream can print it.
+ *
  * The MOTOR e-book is Collision Academy's own hosted reference. Its serving
  * address is deployment configuration (MOTOR_EBOOK_URL); the Vercel
  * dashboard link recorded below is where it is administered, not a page a
@@ -153,6 +161,47 @@ export function isEstimatingGuideUrl(url: string | null | undefined): boolean {
   return findEstimatingGuideForUrl(url) !== null;
 }
 
+/** Leads every section reference a guide hit is stored under. */
+export const ESTIMATING_GUIDE_REFERENCE_PREFIX = "Estimating guide reference — ";
+const NO_LINK_NOTE = "licensed reference material; cite by section, no link";
+
+/** The citable form of a guide section: guide name, then the section as printed. */
+export function buildEstimatingGuideReference(guide: EstimatingGuide, sectionTitle: string): string {
+  const section = sectionTitle.replace(/\s+/g, " ").trim();
+  return section ? `${guide.label} — ${section}` : guide.label;
+}
+
+/**
+ * The locator a guide hit is stored under IN PLACE OF its URL. Human-readable
+ * and deterministic, so the authority ladder can recognise it and a report
+ * can print it as the "where" of a citation.
+ */
+export function buildEstimatingGuideLocator(guide: EstimatingGuide, sectionTitle: string): string {
+  return `${ESTIMATING_GUIDE_REFERENCE_PREFIX}${buildEstimatingGuideReference(guide, sectionTitle)} (${NO_LINK_NOTE})`;
+}
+
+/** The guide a stored section reference (a locator or a labeled title) names. */
+export function findEstimatingGuideForReference(text: string | null | undefined): EstimatingGuide | null {
+  if (!text) return null;
+  const value = text.trim();
+  const referenced = value.startsWith(ESTIMATING_GUIDE_REFERENCE_PREFIX) ? value.slice(ESTIMATING_GUIDE_REFERENCE_PREFIX.length) : null;
+  return (
+    ESTIMATING_GUIDES.find(
+      (guide) => guide.site !== null && ((referenced !== null && referenced.startsWith(guide.label)) || value.startsWith(`${guide.label} (general estimating guidance)`))
+    ) ?? null
+  );
+}
+
+/** The guide a source belongs to, whether it still carries the URL (a live
+ *  web result) or only the section reference (a stored source). */
+export function findEstimatingGuideForSource(source: {
+  url?: string | null;
+  locator?: string | null;
+  title?: string | null;
+}): EstimatingGuide | null {
+  return findEstimatingGuideForUrl(source.url) ?? findEstimatingGuideForReference(source.locator) ?? findEstimatingGuideForReference(source.title);
+}
+
 /** Site-restricted search query for one guide. */
 export function buildEstimatingGuideQuery(guide: EstimatingGuide, topic: string): string {
   if (!guide.site) return topic.replace(/\s+/g, " ").trim();
@@ -189,14 +238,16 @@ export function describeEstimatingGuideForCustomer(guide: EstimatingGuide, title
  */
 export function buildEstimatingGuideStatusFindings(
   queries: Array<{ query: string }>,
-  acceptedSources: Array<{ url?: string }>
+  acceptedSources: Array<{ url?: string; locator?: string; title?: string; sourceTitle?: string }>
 ): string[] {
   const findings: string[] = [];
   for (const guide of ESTIMATING_GUIDES) {
     if (!guide.site) continue;
     const searched = queries.some((query) => query.query.includes(`site:${guide.site}`));
     if (!searched) continue;
-    const accepted = acceptedSources.some((source) => findEstimatingGuideForUrl(source.url)?.id === guide.id);
+    const accepted = acceptedSources.some(
+      (source) => findEstimatingGuideForSource({ url: source.url, locator: source.locator, title: source.title ?? source.sourceTitle })?.id === guide.id
+    );
     if (!accepted) {
       findings.push(
         `${guide.label}: not confirmed by web research — no matching estimating-guide source was retrieved.`
@@ -214,25 +265,29 @@ export function motorEbookUrl(): string | null {
 
 /**
  * Prompt block for the chat and case-chat system prompts: the references
- * the assistant knows by address and the rules for using them. Kept
- * declarative so a question like "where does it say R&I of the liner is
- * included?" is pointed at the right guide for the estimate's platform.
+ * the assistant knows and the rules for using them. The guides are named,
+ * never addressed — they are licensed reference material, cited by guide,
+ * section and line. Kept declarative so a question like "where does it say
+ * R&I of the liner is included?" is pointed at the right guide for the
+ * estimate's platform.
  */
 export function buildEstimatingReferenceLibraryDirective(): string {
-  const ebook = motorEbookUrl();
   const lines = ESTIMATING_GUIDES.filter((guide) => guide.site !== null).map(
-    (guide) => `- ${guide.label} — ${guide.url}\n  Use for: ${guide.whenToUse}`
+    (guide) => `- ${guide.label} (${guide.publisher})\n  Use for: ${guide.whenToUse}`
   );
-  if (ebook) {
-    lines.push(`- MOTOR Guide to Estimating e-book (Collision Academy hosted reference) — ${ebook}\n  Use for: the full MOTOR estimating-guide text when the web guide page is not enough.`);
+  if (motorEbookUrl()) {
+    lines.push(
+      "- MOTOR Guide to Estimating e-book (Collision Academy hosted reference)\n  Use for: the full MOTOR estimating-guide text when the web guide section is not enough."
+    );
   }
   return `
 ESTIMATING REFERENCE LIBRARY (known estimating-guide sources, tier 2 — licensed estimating data):
 ${lines.join("\n")}
 Rules:
+- These are licensed reference materials. Cite them by guide name, section heading and line ("${ESTIMATING_GUIDES[2].label} — Refinish: Overlap, second paragraph"); quote only the excerpt that was actually retrieved. NEVER provide a web address, link or URL to any of them, even when asked directly — say the guide is licensed reference material, name the guide and the section, and tell the user where the section sits in that guide.
 - Match the guide to the platform that produced the estimate: a CCC ONE estimate is governed by the CCC/MOTOR GTE (new parts) or RAGTE (recycled assemblies); a Mitchell estimate by the Mitchell CEG P-Pages. Never answer a Mitchell included/not-included question from the CCC/MOTOR guide, or the reverse.
 - A P-page states the estimating premise: what a labor time includes and excludes, overlap, headnotes and footnotes, refinish setup. It is general estimating-guide guidance — never an OEM repair procedure, never a position statement, never vehicle-specific evidence. Label it as such.
-- When the user asks whether an operation is included, name the guide, the section (by its printed heading when known), and quote or paraphrase only what was actually retrieved. If the section was not retrieved, say so and give the guide address so they can verify.
+- When the user asks whether an operation is included, name the guide and the section (by its printed heading when known) and state what it says, line by line where the retrieved excerpt allows. If the section was not retrieved, say so plainly rather than paraphrasing from memory.
 - An operation the P-page lists as "not included" supports billing it separately; an operation listed as "included" supports removing a duplicate line. Either way the estimate line itself is the difference; the P-page is the authority for the premise.
 `.trim();
 }

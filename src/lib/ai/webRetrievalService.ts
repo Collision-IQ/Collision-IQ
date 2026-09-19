@@ -127,7 +127,10 @@ export function buildWebRefinementContext(response: WebRetrievalResponse): strin
     const label = guide
       ? labelEstimatingGuideResult(guide, "").generalGuidanceLabel
       : result.sourceType === "law" ? "State Law / Regulation" : result.sourceType === "oem" ? "OEM Support" : "Industry Reference";
-    return `- [${label}] ${result.title} (${result.url})\n  snippet: "${result.snippet}"`;
+    // A guide page is licensed reference material: the model sees the guide,
+    // the section and the excerpt, never the address, so it cannot echo one.
+    const where = guide ? "licensed reference material — cite by guide and section, never give a link" : result.url;
+    return `- [${label}] ${result.title} (${where})\n  snippet: "${result.snippet}"`;
   });
 
   return ["Web Support (external retrieval):", ...lines].join("\n");

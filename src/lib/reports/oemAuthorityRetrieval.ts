@@ -14,7 +14,7 @@
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
 } from "@/lib/ai/gteResearch";
-import { findEstimatingGuideForUrl, labelEstimatingGuideResult } from "@/lib/ai/estimatingGuides";
+import { buildEstimatingGuideLocator, findEstimatingGuideForUrl, labelEstimatingGuideResult } from "@/lib/ai/estimatingGuides";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import {
   retrieveWebSupport,
@@ -266,16 +266,17 @@ function mapWebResultToOemAuthoritySource(result: WebRetrievalResult): OemCitati
   // vehicle-specific MOTOR DaaS sandbox evidence.
   const guide = findEstimatingGuideForUrl(result.url);
   if (guide) {
+    // Licensed reference material: stored under its section reference, never
+    // its address, so nothing downstream can print a link to it.
     return {
       title: `${guide.label}: ${result.title}`,
       sourceType: "internet_fallback",
       evidenceTier: 6,
       verified: false,
-      url: result.url,
+      locator: buildEstimatingGuideLocator(guide, result.title),
       researchSourceType: "industry",
       note: [
-        `${labelEstimatingGuideResult(guide, "").generalGuidanceLabel} — general P-page/estimating-guide support, not vehicle-specific evidence.`,
-        result.url,
+        `${labelEstimatingGuideResult(guide, "").generalGuidanceLabel} — general P-page/estimating-guide support, not vehicle-specific evidence; cite by section, no link.`,
         result.snippet,
       ].filter(Boolean).join(" "),
     };

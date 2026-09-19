@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ESTIMATING_GUIDES,
+  buildEstimatingGuideLocator,
   buildEstimatingGuideQuery,
   buildEstimatingGuideStatusFindings,
   buildEstimatingReferenceLibraryDirective,
+  findEstimatingGuideForReference,
+  findEstimatingGuideForSource,
   findEstimatingGuideForUrl,
   isEstimatingGuideUrl,
   labelEstimatingGuideResult,
@@ -12,6 +15,7 @@ import {
   sniffEstimatingPlatform,
 } from "@/lib/ai/estimatingGuides";
 import { buildGteResearchStatusFindings, isGteUrl } from "@/lib/ai/gteResearch";
+import { __exportResearchTestHooks } from "@/lib/ai/exportResearch";
 import { classifyAuthority } from "@/lib/reports/authorityTier";
 
 // The four addresses the library was asked to memorize, verbatim.
@@ -121,24 +125,75 @@ describe("a guide hit is labeled as general estimating guidance and sits at tier
   });
 });
 
-describe("the chat prompts carry the library", () => {
+describe("link policy — licensed reference material is cited by section, never linked", () => {
+  const mitchell = findEstimatingGuideForUrl(MITCHELL_PPAGES)!;
+
+  it("stores a guide hit under a section reference in place of its address", () => {
+    const locator = buildEstimatingGuideLocator(mitchell, "Refinish — Overlap");
+    expect(locator).toBe(
+      "Estimating guide reference — Mitchell Collision Estimating Guide P-Pages (CEG) — Refinish — Overlap (licensed reference material; cite by section, no link)"
+    );
+    expect(findEstimatingGuideForReference(locator)?.id).toBe("mitchell_ceg_ppages");
+    expect(findEstimatingGuideForReference("Some other locator")).toBeNull();
+    expect(findEstimatingGuideForSource({ locator })?.id).toBe("mitchell_ceg_ppages");
+    expect(findEstimatingGuideForSource({ title: labelEstimatingGuideResult(mitchell, "Overlap").sourceTitle })?.id).toBe("mitchell_ceg_ppages");
+  });
+
+  it("the export research lane drops the URL from a guide hit at the source boundary", () => {
+    const source = __exportResearchTestHooks.buildGteWebSource(
+      { title: "Refinish — Overlap", link: MITCHELL_PPAGES, snippet: "Overlap considerations." },
+      "Estimate Scrubber Agent"
+    );
+    expect(source.url).toBeUndefined();
+    expect(source.locator).toMatch(/^Estimating guide reference — Mitchell Collision Estimating Guide P-Pages \(CEG\)/);
+    expect(`${source.sourceTitle} ${source.locator} ${source.snippet}`).not.toMatch(/mymitchell\.com|https?:/);
+  });
+
+  it("the authority ladder still places the reference at tier 2 without a URL", () => {
+    const result = classifyAuthority({
+      title: labelEstimatingGuideResult(mitchell, "Refinish — Overlap").sourceTitle,
+      locator: buildEstimatingGuideLocator(mitchell, "Refinish — Overlap"),
+    });
+    expect(result).toHaveProperty("tier");
+    if ("tier" in result) {
+      expect(result.tier.tier).toBe(2);
+      expect(result.tier.tierBasis).toMatch(/cited by section — no link/);
+      expect(result.tier.url).toBeUndefined();
+    }
+  });
+
+  it("counts a reference-only source as confirmation for its guide", () => {
+    const queries = [{ query: "site:static.mymitchell.com/static/webhelp/ppages/ceg overlap" }];
+    expect(buildEstimatingGuideStatusFindings(queries, [{ locator: buildEstimatingGuideLocator(mitchell, "Overlap") }])).toEqual([]);
+    expect(buildEstimatingGuideStatusFindings(queries, [{ sourceTitle: labelEstimatingGuideResult(mitchell, "Overlap").sourceTitle }])).toEqual([]);
+  });
+});
+
+describe("the chat prompts carry the library by name, never by address", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("lists every web guide by address with its platform rule", () => {
+  it("names every web guide with its platform rule and forbids handing out a link", () => {
     vi.stubEnv("MOTOR_EBOOK_URL", "");
     const directive = buildEstimatingReferenceLibraryDirective();
-    expect(directive).toContain(MITCHELL_PPAGES);
-    expect(directive).toContain(CCC_GTE);
-    expect(directive).toContain(CCC_RAGTE);
+    for (const guide of ESTIMATING_GUIDES.filter((candidate) => candidate.site !== null)) {
+      expect(directive).toContain(guide.label);
+    }
+    expect(directive).not.toContain(MITCHELL_PPAGES);
+    expect(directive).not.toContain(CCC_GTE);
+    expect(directive).not.toContain(CCC_RAGTE);
+    expect(directive).not.toMatch(/https?:\/\//);
     expect(directive).not.toContain("vercel.com");
+    expect(directive).toMatch(/NEVER provide a web address, link or URL/);
     expect(directive).toMatch(/Never answer a Mitchell included\/not-included question from the CCC\/MOTOR guide/);
     expect(directive).toMatch(/never an OEM repair procedure/);
   });
 
-  it("adds the e-book only when its serving address is configured", () => {
+  it("names the e-book when configured, still without its address", () => {
     vi.stubEnv("MOTOR_EBOOK_URL", "https://motor-ebook.example.test/");
-    expect(buildEstimatingReferenceLibraryDirective()).toContain("https://motor-ebook.example.test/");
+    const directive = buildEstimatingReferenceLibraryDirective();
+    expect(directive).toContain("MOTOR Guide to Estimating e-book");
+    expect(directive).not.toContain("motor-ebook.example.test");
   });
 });

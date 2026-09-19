@@ -5,6 +5,7 @@ import {
   buildGteResearchStatusFindings,
 } from "@/lib/ai/gteResearch";
 import {
+  buildEstimatingGuideLocator,
   buildEstimatingGuideQuery,
   findEstimatingGuideForUrl,
   labelEstimatingGuideResult,
@@ -351,12 +352,15 @@ function buildEstimatingGuideWebSource(
   agent: ExportResearchAgentName
 ): ExportResearchSource {
   const gte = labelEstimatingGuideResult(guide, item.title);
+  // Licensed reference material: the section reference replaces the URL here,
+  // at the moment the hit becomes a source, so no report or citation
+  // downstream can print the address. The link keys the id only.
   return {
     id: stableSourceId(`web:${item.link}:${agent}`),
     sourceType: gte.sourceType,
     sourceTitle: gte.sourceTitle,
-    locator: item.link,
-    url: item.link,
+    locator: buildEstimatingGuideLocator(guide, item.title),
+    url: undefined,
     snippet: (item.snippet ?? "").slice(0, 400) || undefined,
     retrievalTimestamp: new Date().toISOString(),
     jurisdiction: undefined,

@@ -30,6 +30,7 @@
  */
 
 import RULES from "./data/deltaRules.json";
+import { findEstimatingGuideForReference } from "@/lib/ai/estimatingGuides";
 
 export type AuthorityTier = 1 | 2 | 3 | 4 | 5;
 
@@ -171,6 +172,22 @@ export function classifyAuthority(source: {
   }
 
   const host = hostOf(source.url);
+
+  // An estimating-guide hit is stored under a section reference in place of
+  // its URL (licensed reference material — cited by section, never linked).
+  // The reference is written by the registry's own labeler in a fixed shape,
+  // so it is recognised here by that shape, not by a summarizer's label.
+  const guide = findEstimatingGuideForReference(source.locator) ?? findEstimatingGuideForReference(title);
+  if (guide && !host) {
+    return {
+      tier: {
+        title,
+        locator: source.locator,
+        tier: 2,
+        tierBasis: `Licensed estimating guide (${guide.label}), cited by section — no link`,
+      },
+    };
+  }
 
   // Rejections first, so nothing below can rescue a social or forum result.
   if (isMetaAuthorityTitle(title)) {
