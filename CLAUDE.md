@@ -78,6 +78,22 @@ Always prefer evidence in this order whenever applicable:
 
 Never allow lower-authority sources to override higher-authority evidence without explicit justification.
 
+## Estimating Reference Library (tier 4/5 above: licensed estimating data)
+
+These are the estimating guides Collision iQ knows by address. They are the
+authority for the estimating PREMISE (what a labor time includes and excludes,
+overlap, headnotes and footnotes, refinish setup), never OEM procedure and
+never vehicle-specific evidence. Match the guide to the platform that produced
+the estimate; a Mitchell line is never answered from the CCC/MOTOR guide, or
+the reverse. The registry lives in `src/lib/ai/estimatingGuides.ts` and feeds
+the retrieval lanes, the authority ladder and the chat prompts; add a guide
+there, not in prose.
+
+- Mitchell CEG P-Pages: https://static.mymitchell.com/static/Webhelp/ppages/ceg/1033/Content/ceg020000.htm
+- CCC/MOTOR Guide to Estimating (new replacement parts): https://help.cccis.com/webhelp/motor/gte/guide.htm
+- CCC/MOTOR Recycled Assemblies Guide to Estimating: https://help.cccis.com/webhelp/motor/ragte/slguide.htm
+- MOTOR Guide to Estimating e-book (Collision Academy hosted; serving address in `MOTOR_EBOOK_URL`; administered at https://vercel.com/collision-academy-82dbb1d7/motor-ebook)
+
 ## Engineering Expectations
 
 Treat every engineering task as production software.

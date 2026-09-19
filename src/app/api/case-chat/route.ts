@@ -9,6 +9,7 @@ import {
   AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE,
   AUTHORITY_RETRIEVAL_STATUS_FIELDS,
 } from "@/lib/ai/authorityRetrievalPosture";
+import { buildEstimatingReferenceLibraryDirective } from "@/lib/ai/estimatingGuides";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
@@ -551,6 +552,8 @@ ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
 ${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 
 ${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
+
+${buildEstimatingReferenceLibraryDirective()}
 
 ${EVIDENCE_POLICY}
 `;

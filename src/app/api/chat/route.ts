@@ -14,6 +14,7 @@ import {
   AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE,
   AUTHORITY_RETRIEVAL_STATUS_FIELDS,
 } from "@/lib/ai/authorityRetrievalPosture";
+import { buildEstimatingReferenceLibraryDirective } from "@/lib/ai/estimatingGuides";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
@@ -332,6 +333,8 @@ ${DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE}
 ${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 
 ${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
+
+${buildEstimatingReferenceLibraryDirective()}
 
 ${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 

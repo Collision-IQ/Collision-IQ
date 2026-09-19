@@ -3,10 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import {
   buildGteResearchStatusFindings,
-  buildGteSerperQuery,
-  isGteUrl,
-  labelGteWebResult,
 } from "@/lib/ai/gteResearch";
+import {
+  buildEstimatingGuideQuery,
+  findEstimatingGuideForUrl,
+  labelEstimatingGuideResult,
+  selectEstimatingGuides,
+  type EstimatingGuide,
+} from "@/lib/ai/estimatingGuides";
 import { resolveJurisdiction, type ResolvedJurisdiction } from "@/lib/ai/jurisdictionResolver";
 import {
   assessRetrievedDocumentApplicability,
@@ -160,16 +164,21 @@ function buildResearchQueries(
       sourceTarget: "internet",
       query: `${vehicle || "manufacturer"} OEM position statement collision repair scan calibration structural repair`,
     },
-    // CCC/MOTOR Guide to Estimating (GTE / P-Pages): preferred estimating-guide
-    // web source — targeted site: query only, ranked ahead of DEG/SCRS and the
-    // general web fallback (after case docs / MOTOR DaaS / internal Drive).
-    {
-      agent: "Estimate Scrubber Agent",
-      sourceTarget: "internet",
-      query: buildGteSerperQuery(
+    // Estimating reference library (CCC/MOTOR GTE / RAGTE, Mitchell CEG
+    // P-Pages): preferred estimating-guide web sources — targeted site:
+    // queries only, one per guide the library selects for the estimate's
+    // platform, ranked ahead of DEG/SCRS and the general web fallback (after
+    // case docs / MOTOR DaaS / internal Drive).
+    ...selectEstimatingGuides({
+      text: [report.analysis?.rawEstimateText ?? "", operationText].join("\n"),
+    }).map((guide) => ({
+      agent: "Estimate Scrubber Agent" as const,
+      sourceTarget: "internet" as const,
+      query: buildEstimatingGuideQuery(
+        guide,
         operationText || "included not included operations refinish overlap headnotes estimating premise"
       ),
-    },
+    })),
     {
       agent: "Estimate Scrubber Agent",
       sourceTarget: "internet",
@@ -286,10 +295,12 @@ async function runInternetResearch(
         continue;
       }
 
-      // CCC/MOTOR GTE hit: always labeled as general estimating-guide guidance
-      // (industry evidence) — never OEM / vehicle-specific / sandbox evidence.
-      if (isGteUrl(item.link)) {
-        results.push(buildGteWebSource({ title: item.title, link: item.link, snippet: item.snippet }, query.agent));
+      // Estimating-guide hit (GTE, RAGTE, Mitchell CEG): always labeled as
+      // general estimating-guide guidance (industry evidence) — never OEM /
+      // vehicle-specific / sandbox evidence.
+      const guide = findEstimatingGuideForUrl(item.link);
+      if (guide) {
+        results.push(buildEstimatingGuideWebSource(guide, { title: item.title, link: item.link, snippet: item.snippet }, query.agent));
         continue;
       }
 
@@ -334,11 +345,12 @@ type SerperPayload = {
  * (URL, title, short snippet, retrievedAt); labeled as general estimating-guide
  * guidance — never OEM / vehicle-specific / MOTOR DaaS sandbox evidence.
  */
-function buildGteWebSource(
+function buildEstimatingGuideWebSource(
+  guide: EstimatingGuide,
   item: { title: string; link: string; snippet?: string },
   agent: ExportResearchAgentName
 ): ExportResearchSource {
-  const gte = labelGteWebResult(item.title);
+  const gte = labelEstimatingGuideResult(guide, item.title);
   return {
     id: stableSourceId(`web:${item.link}:${agent}`),
     sourceType: gte.sourceType,
@@ -701,7 +713,14 @@ export const __exportResearchTestHooks = {
   mapSupportCategory,
   verifyResearchSources,
   buildResearchQueries,
-  buildGteWebSource,
+  buildEstimatingGuideWebSource,
+  /** GTE-shaped hook kept for the GTE lane tests: the guide is resolved from the link. */
+  buildGteWebSource: (item: { title: string; link: string; snippet?: string }, agent: ExportResearchAgentName) =>
+    buildEstimatingGuideWebSource(
+      findEstimatingGuideForUrl(item.link) ?? selectEstimatingGuides({ platform: "ccc" })[0],
+      item,
+      agent
+    ),
 };
 
 function stableStringify(value: unknown): string {

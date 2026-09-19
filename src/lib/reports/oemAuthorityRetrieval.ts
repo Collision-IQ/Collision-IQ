@@ -13,10 +13,8 @@
  */
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
-  GTE_GENERAL_GUIDANCE_LABEL,
-  GTE_SOURCE_LABEL,
-  isGteUrl,
 } from "@/lib/ai/gteResearch";
+import { findEstimatingGuideForUrl, labelEstimatingGuideResult } from "@/lib/ai/estimatingGuides";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import {
   retrieveWebSupport,
@@ -244,7 +242,10 @@ async function attemptOemWebFallback(
     ]),
     motorPPageSourcesReviewed: uniqueStrings([
       ...trace.motorPPageSourcesReviewed,
-      ...web.results.filter((result) => isGteUrl(result.url)).map((result) => `${GTE_SOURCE_LABEL}: ${result.title}`),
+      ...web.results.flatMap((result) => {
+        const guide = findEstimatingGuideForUrl(result.url);
+        return guide ? [`${guide.label}: ${result.title}`] : [];
+      }),
     ]),
     jurisdictionSourcesReviewed: uniqueStrings([
       ...trace.jurisdictionSourcesReviewed,
@@ -260,18 +261,20 @@ async function attemptOemWebFallback(
 }
 
 function mapWebResultToOemAuthoritySource(result: WebRetrievalResult): OemCitationDensityAuthoritySource {
-  // CCC/MOTOR GTE hits are general estimating-guide guidance — labeled as such,
-  // never as vehicle-specific MOTOR DaaS sandbox evidence.
-  if (isGteUrl(result.url)) {
+  // Estimating-guide hits (CCC/MOTOR GTE, RAGTE, Mitchell CEG P-Pages) are
+  // general estimating-guide guidance — labeled as such, never as
+  // vehicle-specific MOTOR DaaS sandbox evidence.
+  const guide = findEstimatingGuideForUrl(result.url);
+  if (guide) {
     return {
-      title: `${GTE_SOURCE_LABEL}: ${result.title}`,
+      title: `${guide.label}: ${result.title}`,
       sourceType: "internet_fallback",
       evidenceTier: 6,
       verified: false,
       url: result.url,
       researchSourceType: "industry",
       note: [
-        `${GTE_GENERAL_GUIDANCE_LABEL} — general CCC/MOTOR P-page/estimating-guide support, not vehicle-specific evidence.`,
+        `${labelEstimatingGuideResult(guide, "").generalGuidanceLabel} — general P-page/estimating-guide support, not vehicle-specific evidence.`,
         result.url,
         result.snippet,
       ].filter(Boolean).join(" "),

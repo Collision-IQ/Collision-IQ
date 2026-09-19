@@ -12,9 +12,24 @@
 // - No CCC/MOTOR claim is made without a retrieved source; when nothing is
 //   retrieved the item is reported as not confirmed by GTE web research.
 
-export const GTE_SITE = "help.cccis.com/webhelp/motor/gte";
+//
+// The GTE is one entry in the estimating reference library
+// (estimatingGuides.ts), which also carries the CCC/MOTOR Recycled
+// Assemblies guide, the Mitchell CEG P-Pages and the MOTOR e-book. This
+// module keeps the GTE-specific names its callers use; guide-agnostic
+// recognition and labeling live in the registry.
+
+import {
+  ESTIMATING_GUIDES,
+  buildEstimatingGuideStatusFindings,
+  findEstimatingGuideForUrl,
+} from "@/lib/ai/estimatingGuides";
+
+const GTE = ESTIMATING_GUIDES.find((guide) => guide.id === "ccc_gte")!;
+
+export const GTE_SITE = GTE.site!;
 export const GTE_SITE_FILTER = `site:${GTE_SITE}`;
-export const GTE_SOURCE_LABEL = "CCC/MOTOR Guide to Estimating (GTE)";
+export const GTE_SOURCE_LABEL = GTE.label;
 export const GTE_GENERAL_GUIDANCE_LABEL =
   "CCC/MOTOR GTE — general estimating-guide guidance (not vehicle-specific)";
 export const GTE_NOT_CONFIRMED_NOTE =
@@ -22,13 +37,7 @@ export const GTE_NOT_CONFIRMED_NOTE =
 
 /** True when a URL points at the allowed GTE WebHelp target. */
 export function isGteUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  try {
-    const normalized = url.replace(/^https?:\/\//i, "").toLowerCase();
-    return normalized.startsWith(GTE_SITE);
-  } catch {
-    return false;
-  }
+  return findEstimatingGuideForUrl(url)?.id === "ccc_gte";
 }
 
 /** Estimating-guide topics where the GTE is the preferred web source. */
@@ -78,7 +87,11 @@ export function buildGteResearchStatusFindings(
   acceptedSources: Array<{ url?: string }>
 ): string[] {
   const gteQueryRan = queries.some((query) => query.query.includes(GTE_SITE_FILTER));
-  if (!gteQueryRan) return [];
   const gteSourceAccepted = acceptedSources.some((source) => isGteUrl(source.url));
-  return gteSourceAccepted ? [] : [`CCC/MOTOR GTE: ${GTE_NOT_CONFIRMED_NOTE}`];
+  const gte = gteQueryRan && !gteSourceAccepted ? [`CCC/MOTOR GTE: ${GTE_NOT_CONFIRMED_NOTE}`] : [];
+  // The other guides in the library (RAGTE, Mitchell CEG) report the same way.
+  const others = buildEstimatingGuideStatusFindings(queries, acceptedSources).filter(
+    (finding) => !finding.startsWith(GTE_SOURCE_LABEL)
+  );
+  return [...gte, ...others];
 }

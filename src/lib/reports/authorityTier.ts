@@ -108,7 +108,9 @@ const OEM_PORTAL_HOSTS = [
   "gmtechinfo.com",
 ];
 
-const LICENSED_ESTIMATING_HOSTS = ["motor.com", "cccis.com", "mitchell.com", "audatex.com", "solera.com"];
+// static.mymitchell.com serves the Mitchell CEG P-Pages; it is Mitchell's
+// host, not a ".mitchell.com" subdomain, so it is named on its own.
+const LICENSED_ESTIMATING_HOSTS = ["motor.com", "cccis.com", "mitchell.com", "mymitchell.com", "audatex.com", "solera.com"];
 
 const REGULATOR_HOST_SHAPE = /(?:^|\.)(?:[a-z-]+\.)?(?:gov|mil)$/i;
 const REGULATOR_NAMED_HOSTS = ["nhtsa.gov", "pacodeandbulletin.gov", "legis.state.pa.us", "ecfr.gov"];
