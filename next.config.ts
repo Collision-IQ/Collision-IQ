@@ -29,6 +29,12 @@ const OCR_TRACE_INCLUDES = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      // The Daily iQ shipped briefly as /knowledge-daily; keep the old address alive.
+      { source: "/knowledge-daily", destination: "/daily-iq", permanent: true },
+    ];
+  },
   async rewrites() {
     return [
       // Marketing ROI calculator (standalone static page in /public); campaign

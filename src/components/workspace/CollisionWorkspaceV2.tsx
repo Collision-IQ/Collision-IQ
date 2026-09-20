@@ -137,7 +137,7 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
   // What the platform learned, one numbered and sourced entry per day. Sits
   // directly under the Knowledge Base it feeds.
-  { id: "knowledgedaily", label: "Knowledge Base Daily", icon: Newspaper, href: "/knowledge-daily" },
+  { id: "dailyiq", label: "The Daily iQ", icon: Newspaper, href: "/daily-iq" },
 ];
 
 /** Items that read "under construction" for everyone outside their allow-list. */
@@ -161,7 +161,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   history: "nav-history",
   toolbox: "nav-toolbox",
   knowledge: "nav-knowledge-base",
-  knowledgedaily: "nav-knowledge-daily",
+  dailyiq: "nav-daily-iq",
   settings: "nav-settings",
 };
 

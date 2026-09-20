@@ -10,7 +10,7 @@ import { formatKnowledgeDailyDate, getKnowledgeDailyEntries, getKnowledgeDailyEn
 // link policy). A daily entry must never carry one of their addresses.
 const LICENSED_GUIDE_HOSTS = ["mymitchell.com", "cccis.com", "vercel.com"];
 
-describe("Knowledge Base Daily entries", () => {
+describe("The Daily iQ entries", () => {
   const entries = getKnowledgeDailyEntries();
 
   it("publishes at least the first week and numbers entries without gaps", () => {

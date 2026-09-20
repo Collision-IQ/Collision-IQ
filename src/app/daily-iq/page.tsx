@@ -6,7 +6,7 @@ import KnowledgeDailyFeed, { ExternalLink } from "@/components/knowledgeDaily/Kn
 import { formatKnowledgeDailyDate, getKnowledgeDailyEntries } from "@/lib/knowledgeDaily/entries";
 
 export const metadata = {
-  title: "Knowledge Base Daily — what Collision IQ learned",
+  title: "The Daily iQ — what Collision IQ learned",
   description:
     "One numbered, sourced entry per day: the position statements, industry data, and rulings Collision IQ files into its knowledge base and now cites.",
 };
@@ -36,7 +36,7 @@ export default function KnowledgeDailyPage() {
         {/* Left: entry index */}
         <nav className="hidden lg:block" aria-label="Entries">
           <div className="sticky top-20 space-y-1 text-sm">
-            <div className="ci-eyebrow mb-2">Knowledge Base Daily</div>
+            <div className="ci-eyebrow mb-2">The Daily iQ</div>
             {entries.map((entry) => (
               <a key={entry.slug} href={`#${entry.slug}`} className="block rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
                 <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--accent)]">#{entry.entryNumber}</span>{" "}
@@ -49,7 +49,7 @@ export default function KnowledgeDailyPage() {
         {/* Main feed */}
         <main className="min-w-0 space-y-8">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Knowledge Base Daily</h1>
+            <h1 className="text-3xl font-bold text-foreground">The Daily iQ</h1>
             <p className="mt-3 max-w-2xl text-muted-foreground">
               What Collision IQ learned, one numbered and sourced entry per day. Every fact here was verified the day it was
               filed into the platform&apos;s knowledge base, so the platform argues from the industry&apos;s own documents and
@@ -73,7 +73,7 @@ export default function KnowledgeDailyPage() {
               social post; figures trace back to the linked sources, and nothing is quoted that the coverage did not disclose.
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
-              The same entries post daily on Instagram, TikTok, and LinkedIn as the Knowledge Base Daily series.
+              The same entries post daily on Instagram, TikTok, and LinkedIn as The Daily iQ series.
             </p>
           </div>
           <div className="ci-panel p-4">

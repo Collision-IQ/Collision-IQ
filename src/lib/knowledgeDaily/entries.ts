@@ -1,16 +1,16 @@
 /**
- * Knowledge Base Daily — what Collision iQ learned, one numbered and sourced
- * entry per day.
+ * The Daily iQ — what Collision iQ learned, one numbered and sourced entry
+ * per day.
  *
- * This is the publishing record behind the "Knowledge Base Daily" page and the
- * daily IG / TikTok / LinkedIn series. Each entry is filed the day the fact is
+ * This is the publishing record behind "The Daily iQ" page (/daily-iq) and the
+ * daily IG / TikTok / LinkedIn series (filed in marketing as KB-<day>.md). Each entry is filed the day the fact is
  * verified: the headline is the selected hook, the summary is the platform's
  * own wording, and every source is a public article or document reached by a
  * verified search result — never a licensed estimating guide (those are cited
  * by section, never linked; see `src/lib/ai/estimatingGuides.ts`).
  *
  * To publish a new day: append an entry, keep `entryNumber` sequential, and
- * point `image` at a card under `public/knowledge-daily/`. The page renders
+ * point `image` at a 1080x1350 card under `public/daily-iq/`. The page renders
  * newest first and every source opens in a new tab.
  */
 
@@ -96,8 +96,8 @@ const ENTRIES: KnowledgeDailyEntry[] = [
     ],
     tags: ["adas", "calibration", "collisionrepair", "autoclaims", "carinsurance"],
     image: {
-      src: "/knowledge-daily/kb-001-calibration-lines.svg",
-      alt: "Knowledge Base Daily entry 1 card: 31.4% growth in calibration lines on estimates in 2025, per Enlyte Envision Trends 2026.",
+      src: "/daily-iq/kb-001-calibration-lines.png",
+      alt: "The Daily iQ entry 1 card: 31.4% growth in calibration lines on estimates in 2025, per Enlyte Envision Trends 2026.",
     },
   },
   {
@@ -144,8 +144,8 @@ const ENTRIES: KnowledgeDailyEntry[] = [
     ],
     tags: ["ford", "oemprocedures", "adas", "collisionrepair", "autoclaims"],
     image: {
-      src: "/knowledge-daily/kb-002-ford-mandates.svg",
-      alt: "Knowledge Base Daily entry 2 card: Ford officially mandates pre- and post-repair scans, OEM calibrations, and no used or aftermarket ADAS sensors.",
+      src: "/daily-iq/kb-002-ford-mandates.png",
+      alt: "The Daily iQ entry 2 card: Ford officially mandates pre- and post-repair scans, OEM calibrations, and no used or aftermarket ADAS sensors.",
     },
   },
   {
@@ -187,8 +187,8 @@ const ENTRIES: KnowledgeDailyEntry[] = [
     ],
     tags: ["adas", "carinsurance", "collisionrepair", "autoclaims", "iihs"],
     image: {
-      src: "/knowledge-daily/kb-003-iihs-hldi.svg",
-      alt: "Knowledge Base Daily entry 3 card: crash avoidance systems raise per-repair cost but lower overall insurance losses, per IIHS-HLDI.",
+      src: "/daily-iq/kb-003-iihs-hldi.png",
+      alt: "The Daily iQ entry 3 card: crash avoidance systems raise per-repair cost but lower overall insurance losses, per IIHS-HLDI.",
     },
   },
   {
@@ -229,8 +229,8 @@ const ENTRIES: KnowledgeDailyEntry[] = [
     ],
     tags: ["totalloss", "carinsurance", "autoclaims", "knowyourrights", "diminishedvalue"],
     image: {
-      src: "/knowledge-daily/kb-004-chadwick-state-farm.svg",
-      alt: "Knowledge Base Daily entry 4 card: $15.58 million State Farm settlement over typical negotiation adjustments on total-loss valuations.",
+      src: "/daily-iq/kb-004-chadwick-state-farm.png",
+      alt: "The Daily iQ entry 4 card: $15.58 million State Farm settlement over typical negotiation adjustments on total-loss valuations.",
     },
   },
 ];

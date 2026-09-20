@@ -6,7 +6,7 @@ import {
 } from "@/lib/knowledgeDaily/entries";
 
 /**
- * Knowledge Base Daily feed. Pure markup (no hooks, no router) so it renders
+ * The Daily iQ feed. Pure markup (no hooks, no router) so it renders
  * identically on the server, in the page, and under test. Every link here is
  * a document or article the reader leaves the workspace for, so ALL of them
  * open in a new tab — the test asserts it.
@@ -100,7 +100,7 @@ export function KnowledgeDailyCard({ entry }: { entry: KnowledgeDailyEntry }) {
         </div>
         <div className="border-t border-border bg-muted/30 p-4 md:border-l md:border-t-0">
           <ExternalLink href={entry.image.src} title="Open the card in a new tab">
-            {/* Static SVG card; a plain img keeps the feed free of the image optimizer. */}
+            {/* Static 1080x1350 PNG card; a plain img keeps the feed free of the image optimizer. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={entry.image.src}

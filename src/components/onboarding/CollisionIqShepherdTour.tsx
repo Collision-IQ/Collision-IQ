@@ -174,10 +174,10 @@ function buildTour() {
       mobilePlacement: "bottom",
     },
     {
-      id: "knowledge-daily",
-      title: "Knowledge Base Daily",
+      id: "daily-iq",
+      title: "The Daily iQ",
       text: "What Collision IQ learned, one numbered and sourced entry per day — position statements, industry data, and rulings the platform filed and now cites. Sources open in a new tab.",
-      selectors: ['[data-tour="nav-knowledge-daily"]'],
+      selectors: ['[data-tour="nav-daily-iq"]'],
       desktopPlacement: "right",
       mobilePlacement: "bottom",
     },
