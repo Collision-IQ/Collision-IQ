@@ -145,7 +145,18 @@ export function parseEstimateRowsForPlatform(
     // operation; Repl vs R&I is a coding difference, not a scope change).
     // The reader leaves it null for the rekey ledger's sake; the delta
     // pipeline stamps it here from the description head (RO 20792).
-    const coded = rows.map((row) => (row.opCode ? row : { ...row, opCode: resolveMitchellOperationCode(row.description) }));
+    // The reader prices per unit (what the rekey sheet keys); a delta row's
+    // price is the EXTENDED price (what the CCC column prints), so a
+    // "(10 @ $0.59)" rivet line compares as $5.90 against $5.90, not as
+    // $0.59 against $5.90 (RO 20792 findings 19, 20).
+    const coded = rows.map((row) => ({
+      ...row,
+      opCode: row.opCode ?? resolveMitchellOperationCode(row.description),
+      price:
+        row.price !== null && row.qty !== null && row.qty > 1
+          ? Math.round(row.price * row.qty * 100) / 100
+          : row.price,
+    }));
     return { platform, rows: coded, notes: read.notes, subletsBookedAsParts: reclassified };
   }
   return {

@@ -525,6 +525,9 @@ export function parseEstimateNetTotal(text: string): number | null {
 const DESCRIPTION_TOKEN_SYNONYMS: Record<string, string> = {
   buff: "polish",
   buffing: "polish",
+  // Mitchell's "Frt" is CCC's "Front" (a directional token, so the two
+  // platforms' "Frt Bumper Cover" and "front bumper" agree on the axis).
+  frt: "front",
 };
 
 /**
@@ -584,6 +587,14 @@ export function tokenizeDescription(description: string): string[] {
     .replace(/[^a-z0-9 ]+/g, " ")
     .split(/\s+/)
     .map((token) => token.trim())
+    .filter(Boolean)
+    // Mitchell prints the side as one letter at the head of the description
+    // ("L Fender Panel", "R Frt Door"); CCC prints "LT"/"RT". Read as the
+    // same side token BEFORE the length filter would drop it — without it
+    // "L Fender Outside" shared one word with "LT Fender" and never paired
+    // (RO 20792). Only the leading letter is a side; an "L" inside a
+    // description ("L.E.D.") is not.
+    .map((token, index) => (index === 0 && (token === "l" || token === "r") ? `${token}t` : token))
     .filter((token) => token.length >= 2 && !DESCRIPTION_STOPWORDS.has(token))
     .map((token) => DESCRIPTION_TOKEN_SYNONYMS[token] ?? token);
 }
@@ -721,6 +732,18 @@ export function explodeGluedRow(rawText: string): string {
   // "~" is MOTOR's not-included-operation marker; glued into a row it welds
   // the description to the part/qty/price run ("+25%~41035906311,223.75…").
   text = text.replace(/~/g, " ");
+
+  // The labor-TYPE letter glues onto the hours it qualifies ("Pre-repair
+  // scan1.0D", "Reset electrical components10.3M"). Unsplit, the hours cell
+  // never parses and the row carries no hours at all — RO 20792's two scan
+  // shortfalls (1.0 vs 0.5) vanished this way. Uppercase only: lowercase
+  // "m"/"s" are component markers that print BEFORE the hours.
+  text = text.replace(/(\d\.\d)([DEFGMS])(?=\s|$)/g, "$1 $2");
+  // The description's last word glues onto a lone hours cell ("Pre-repair
+  // scan1.0", "front bumper2.5") when the line prints no quantity. One digit
+  // before the decimal only: "color10.5" is a quantity welded to hours and
+  // is split by the digit-run rules below.
+  text = text.replace(/([A-Za-z])(?=-?\d\.\d(?:\s|$))/g, "$1 ");
 
   // Description words glue onto part numbers with no delimiter
   // ("BLACK68534268AH", "Striker68294124AA", "swb7BC10TZZAC"). Split an
@@ -1897,6 +1920,21 @@ function sharesTwoContentTokens(a: EstimateDeltaRow, b: EstimateDeltaRow): boole
 
 const near = (a: number | null, b: number | null, tolerance: number) => Math.abs((a ?? 0) - (b ?? 0)) <= tolerance;
 
+/** The lower row's hours re-read into the higher row's columns when each
+ *  side states hours in exactly one column and they disagree on which. */
+function alignHourColumns(
+  higher: EstimateDeltaRow,
+  lower: EstimateDeltaRow
+): { labor: number | null; paint: number | null } {
+  const higherLaborOnly = higher.labor !== null && higher.paint === null;
+  const higherPaintOnly = higher.paint !== null && higher.labor === null;
+  const lowerLaborOnly = lower.labor !== null && lower.paint === null;
+  const lowerPaintOnly = lower.paint !== null && lower.labor === null;
+  if (higherLaborOnly && lowerPaintOnly) return { labor: lower.paint, paint: null };
+  if (higherPaintOnly && lowerLaborOnly) return { labor: null, paint: lower.labor };
+  return { labor: lower.labor, paint: lower.paint };
+}
+
 /** Do these rows, summed, state the same labor, paint and price as `target`?
  *  At least one of the three must be stated on both sides — two empty rows
  *  agree about nothing. */
@@ -1925,46 +1963,68 @@ function rowsSumTo(rows: EstimateDeltaRow[], target: EstimateDeltaRow): boolean 
  * complementary columns qualifies — an R&I and a Blnd on the same panel are
  * two operations and stay apart.
  */
-export function mergeRepairRefinishTwins(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
-  const isRepair = (row: EstimateDeltaRow) => normalizeOpCode(row.opCode ?? "") === "Rpr";
-  const isRefinish = (row: EstimateDeltaRow) => normalizeOpCode(row.opCode ?? "") === "Refn";
-  const key = (row: EstimateDeltaRow) => `${normalizeCategoryText(row.section ?? "")}|${[...new Set(row.descriptionTokens)].sort().join(" ")}`;
+export function mergeRepairRefinishTwins(
+  rows: EstimateDeltaRow[],
+  /** The other document's rows: when IT also prints refinish as its own line
+   *  for the same panel, the twin is a line in its own right and stays. */
+  counterpartRows: EstimateDeltaRow[] = []
+): EstimateDeltaRow[] {
+  const op = (row: EstimateDeltaRow) => normalizeOpCode(row.opCode ?? "");
+  const isRefinish = (row: EstimateDeltaRow) => op(row) === "Refn";
+  // The operations a refinish line rides on, most to least likely: a
+  // repaired panel is refinished, a replaced one is too, an overhauled
+  // assembly less often. R&I never carries refinish.
+  const HOST_PRIORITY = ["Rpr", "Repl", "O/H"];
+  // Words Mitchell adds to a panel name that CCC does not ("L Fender
+  // OUTSIDE Refinish Only" / "L Fender PANEL Repair" / "Frt Bumper Cover
+  // ASSY Overhaul") — the panel is the same panel without them.
+  const GENERIC_PANEL_TOKENS = new Set(["outside", "inside", "panel", "assy", "assembly", "auto"]);
+  // Tokens only — no section: the two platforms head their sections
+  // differently (and the Mitchell text lane often carries none), and the
+  // counterpart check below compares keys ACROSS documents.
+  const panelKey = (row: EstimateDeltaRow) =>
+    [...new Set(row.descriptionTokens)].filter((token) => !GENERIC_PANEL_TOKENS.has(token)).sort().join(" ");
+  const laborOnly = (row: EstimateDeltaRow) => row.labor !== null && row.paint === null;
+  const paintOnly = (row: EstimateDeltaRow) => row.paint !== null && row.labor === null;
+  const counterpartRefinishKeys = new Set(
+    counterpartRows.filter((row) => isRefinish(row) && paintOnly(row) && !row.partNumber).map(panelKey)
+  );
   const consumed = new Set<number>();
+  const paintFor = new Map<number, EstimateDeltaRow>();
+  rows.forEach((row, index) => {
+    if (!isRefinish(row) || !paintOnly(row) || row.partNumber || row.descriptionTokens.length === 0) return;
+    const key = panelKey(row);
+    if (!key || counterpartRefinishKeys.has(key)) return;
+    let host = -1;
+    for (const wanted of HOST_PRIORITY) {
+      host = rows.findIndex(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          !consumed.has(candidateIndex) &&
+          !paintFor.has(candidateIndex) &&
+          op(candidate) === wanted &&
+          laborOnly(candidate) &&
+          panelKey(candidate) === key
+      );
+      if (host !== -1) break;
+    }
+    if (host === -1) return;
+    consumed.add(index);
+    paintFor.set(host, row);
+  });
   const merged: EstimateDeltaRow[] = [];
   rows.forEach((row, index) => {
     if (consumed.has(index)) return;
-    if (row.partNumber || row.descriptionTokens.length === 0 || !(isRepair(row) || isRefinish(row))) {
+    const refinish = paintFor.get(index);
+    if (!refinish) {
       merged.push(row);
       return;
     }
-    const wantRefinish = isRepair(row);
-    const laborOnly = (candidate: EstimateDeltaRow) => candidate.labor !== null && candidate.paint === null;
-    const paintOnly = (candidate: EstimateDeltaRow) => candidate.paint !== null && candidate.labor === null;
-    if (!(wantRefinish ? laborOnly(row) : paintOnly(row))) {
-      merged.push(row);
-      return;
-    }
-    const twinIndex = rows.findIndex(
-      (candidate, candidateIndex) =>
-        candidateIndex !== index &&
-        !consumed.has(candidateIndex) &&
-        !candidate.partNumber &&
-        (wantRefinish ? isRefinish(candidate) && paintOnly(candidate) : isRepair(candidate) && laborOnly(candidate)) &&
-        key(candidate) === key(row)
-    );
-    if (twinIndex === -1) {
-      merged.push(row);
-      return;
-    }
-    consumed.add(twinIndex);
-    const twin = rows[twinIndex];
-    const repair = wantRefinish ? row : twin;
-    const refinish = wantRefinish ? twin : row;
     merged.push({
-      ...repair,
+      ...row,
       paint: refinish.paint,
       paintIncluded: refinish.paintIncluded,
-      rawText: `${repair.rawText} + ${refinish.rawText} [repair and refinish printed as two lines; read as one operation]`,
+      rawText: `${row.rawText} + ${refinish.rawText} [operation and refinish printed as two lines; read as one operation]`,
     });
   });
   return merged;
@@ -2274,7 +2334,7 @@ export function matchEstimateLineItems(params: {
   const { higherRows, lowerIsOcr = false, lowerCategoryText } = params;
   // Repair + Refinish twins on the lower side are one operation (see
   // mergeRepairRefinishTwins) — folded before any index is handed out.
-  const lowerRows = mergeRepairRefinishTwins(params.lowerRows);
+  const lowerRows = mergeRepairRefinishTwins(params.lowerRows, higherRows);
   const provenance: LowerEstimateProvenance = params.lowerProvenance ?? (lowerIsOcr ? "ocr" : "clean");
   const uncertainLabels: readonly string[] =
     provenance === "unreliable_text" ? TEXT_LAYER_UNCERTAIN_STATUS_LABELS : OCR_UNCERTAIN_STATUS_LABELS;
@@ -2441,31 +2501,89 @@ export function matchEstimateLineItems(params: {
   // "paid only once" — when the carrier paid the whole hour (RO 20792
   // finding 20). A group of token-identical part-less rows whose SUM equals
   // one lower row is that row, and claims it before any 1:1 pass can.
+  // The group is the operation wherever it prints: CCC bills "Add for Clear
+  // Coat" once per panel (bumper 0.8, fender 1.2) where Mitchell carries one
+  // "Clear Coat" line (1.6). Paired line to line, one occurrence took the
+  // Mitchell row and the other became a shortfall, and each was judged
+  // against the whole 1.6 (RO 20792 findings 24 + 29). When the comparison
+  // holds exactly ONE line for the group, the group IS that line: the NET
+  // difference (group total minus the line) is the finding, or nothing when
+  // the line pays the group in full. With several candidate lines the 1:1
+  // passes decide, as before.
   const combinedHigherIndexes = new Set<number>();
   const combinedPairsPending: EstimateDeltaMatchResult["matchedPairs"] = [];
   {
     const groups = new Map<string, number[]>();
     higherRows.forEach((row, index) => {
       if (row.partNumber || row.descriptionTokens.length === 0) return;
-      const key = `${normalizeCategoryText(row.section ?? "")}|${[...new Set(row.descriptionTokens)].sort().join(" ")}`;
+      const key = [...new Set(row.descriptionTokens)].sort().join(" ");
       groups.set(key, [...(groups.get(key) ?? []), index]);
     });
     for (const indexes of groups.values()) {
       if (indexes.length < 2) continue;
       const members = indexes.map((index) => higherRows[index]);
+      const candidates: number[] = [];
       for (let lowerIndex = 0; lowerIndex < lowerRows.length; lowerIndex += 1) {
         if (used.has(lowerIndex)) continue;
         const lowerRow = lowerRows[lowerIndex];
-        if (lowerRow.partNumber || !sharesTwoContentTokens(members[0], lowerRow)) continue;
-        if (!rowsSumTo(members, lowerRow)) continue;
-        used.add(lowerIndex);
-        recordLowerConsumption(lowerIndex, "combined");
-        for (const index of indexes) {
-          combinedHigherIndexes.add(index);
-          matchedPairCount += 1;
-          combinedPairsPending.push({ higherRow: higherRows[index], lowerRow, basis: "description" });
-        }
-        break;
+        if (lowerRow.partNumber || lowerRow.descriptionTokens.length === 0) continue;
+        if (sharesTwoContentTokens(members[0], lowerRow)) candidates.push(lowerIndex);
+      }
+      if (candidates.length !== 1) continue;
+      const lowerIndex = candidates[0];
+      const lowerRow = lowerRows[lowerIndex];
+      used.add(lowerIndex);
+      recordLowerConsumption(lowerIndex, "combined");
+      for (const index of indexes) {
+        combinedHigherIndexes.add(index);
+        matchedPairCount += 1;
+        combinedPairsPending.push({ higherRow: higherRows[index], lowerRow, basis: "description" });
+      }
+      // Net hours of the group against the one line, read into one column
+      // when the two documents file the same hours under different columns.
+      const total = (pick: (row: EstimateDeltaRow) => number | null) => {
+        const values = members.map(pick).filter((value): value is number => value !== null);
+        return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) * 10) / 10 : null;
+      };
+      const groupLabor = total((row) => row.labor);
+      const groupPaint = total((row) => row.paint);
+      const groupPrice = total((row) => row.price);
+      const higherHours = (groupLabor ?? 0) + (groupPaint ?? 0);
+      const lowerHours = (lowerRow.labor ?? 0) + (lowerRow.paint ?? 0);
+      const netHours = Math.round((higherHours - lowerHours) * 10) / 10;
+      const netPrice = groupPrice !== null || lowerRow.price !== null ? Math.round(((groupPrice ?? 0) - (lowerRow.price ?? 0)) * 100) / 100 : null;
+      const lead = members[0];
+      const occurrences = `${members.length} times on this estimate (${members.map((row) => row.lineNumber ?? "?").join(", ")})`;
+      const hoursOf = (row: EstimateDeltaRow) => (row.labor ?? 0) + (row.paint ?? 0);
+      if (netHours >= MATERIAL_LABOR_DELTA) {
+        const paintSide = lowerRow.paint !== null && lowerRow.labor === null;
+        deltas.push({
+          kind: paintSide ? "reduced_paint" : "reduced_labor",
+          lowerRow,
+          higherRow: lead,
+          matchBasis: "description",
+          laborDelta: paintSide ? null : netHours,
+          paintDelta: paintSide ? netHours : null,
+          priceDelta: netPrice,
+          summary: `"${describeRow(lead)}" appears ${occurrences}, ${members.map((row) => formatHours(hoursOf(row))).join(" + ")} = ${formatHours(higherHours)} hr in total; the comparison estimate carries it once as "${describeRow(lowerRow)}" at ${formatHours(lowerHours)} hr. Net difference +${formatHours(netHours)} hr across the occurrences — the line-by-line figures are not each a separate gap.`,
+          changedFields: [paintSide ? "paint" : "labor"],
+          statusLabels: ["COMBINED_OCCURRENCES"],
+          annotate: true,
+        });
+      } else if (netPrice !== null && netPrice >= TCHARGE_PRICE_DELTA && !lead.partNumber) {
+        deltas.push({
+          kind: "part_or_price_difference",
+          lowerRow,
+          higherRow: lead,
+          matchBasis: "description",
+          laborDelta: null,
+          paintDelta: null,
+          priceDelta: netPrice,
+          summary: `"${describeRow(lead)}" appears ${occurrences} at $${(groupPrice ?? 0).toFixed(2)} in total; the comparison estimate carries it once as "${describeRow(lowerRow)}" at $${(lowerRow.price ?? 0).toFixed(2)}. Net difference $${netPrice.toFixed(2)} across the occurrences.`,
+          changedFields: ["price"],
+          statusLabels: ["COMBINED_OCCURRENCES"],
+          annotate: true,
+        });
       }
     }
   }
@@ -2692,8 +2810,15 @@ export function matchEstimateLineItems(params: {
     basis: EstimateLineItemDelta["matchBasis"]
   ) => {
     matchedPairs.push({ higherRow, lowerRow, basis });
-    const laborDelta = numericDelta(higherRow.labor, lowerRow.labor);
-    const paintDelta = numericDelta(higherRow.paint, lowerRow.paint);
+    // COLUMN ALIGNMENT. The text lane cannot always see which hours column a
+    // lone value came from: CCC's "Prep unprimed bumper 0.7" lands in labor
+    // while Mitchell files the same 0.7 under Refinish. When each side
+    // states hours in exactly one column and they disagree on which, the
+    // hours are the same hours — compared as such, never as "0 hr here"
+    // (RO 20792 findings 29, 31, 34).
+    const aligned = alignHourColumns(higherRow, lowerRow);
+    const laborDelta = numericDelta(higherRow.labor, aligned.labor);
+    const paintDelta = numericDelta(higherRow.paint, aligned.paint);
     const priceDelta = numericDelta(higherRow.price, lowerRow.price);
 
     // PART SOURCE FIRST. When the two estimates disagree on where the part
@@ -3923,12 +4048,25 @@ function grandTotalDifference(higher: EstimateTotalsSummary, lower: EstimateTota
  * part row where at least one side names a non-OEM source: two rows that both
  * print no prefix are both claiming a new OEM part and agree.
  */
+/**
+ * A platform's own words for a new OEM part are not a part source: Mitchell
+ * prints "New" (its glossary: "NEW and OEM or part number displayed — these
+ * refer to a new, original equipment manufacturer part"), CCC prints nothing.
+ * "Existing" marks a labor line with no part at all. Neither may read as a
+ * sourcing dispute against the other side's silence (RO 20792 findings 15,
+ * 17-21 told the shop to quote an alternate part that did not exist).
+ */
+const OEM_EQUIVALENT_PART_SOURCE = /^(?:new|oem|new\s+oem|existing)$/i;
+function substantivePartSources(sources: string[] | undefined): string[] {
+  return (sources ?? []).filter((source) => !OEM_EQUIVALENT_PART_SOURCE.test(source.trim()));
+}
+
 function partSourceDisagreement(
   higher: EstimateDeltaRow,
   lower: EstimateDeltaRow
 ): { higher: string; lower: string } | null {
-  const higherSource = higher.partSource ?? [];
-  const lowerSource = lower.partSource ?? [];
+  const higherSource = substantivePartSources(higher.partSource);
+  const lowerSource = substantivePartSources(lower.partSource);
   if (higherSource.length === 0 && lowerSource.length === 0) return null;
   const priced = (row: EstimateDeltaRow) => row.price !== null && row.price > 0;
   if (!priced(higher) || !priced(lower)) return null;

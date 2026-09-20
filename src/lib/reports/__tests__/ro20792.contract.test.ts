@@ -40,18 +40,25 @@ const MITCHELL_TEXT = [
   "Progressive Supplement 2",
   "Mitchell Cloud Estimating 26.2",
   "Line Item Description Operation Labor Type Units Part Type Part Number Qty Total Price Tax",
-  "4201426Bumper Cover UnpaintedRemove / ReplaceBody2.0New1493736-S0-A 1$761.74Yes",
+  "2201425Frt Bumper Cover AssyOverhaulBody3.3Existing",
+  "4201426Frt Bumper CoverRemove / ReplaceBody2.0New1493736-S0-A 1$761.74Yes",
+  "5201436AUTO Frt Bumper CoverRefinish OnlyRefinish2.9Existing",
   "6201427LT Upper BracketRemove / ReplaceBody0.2New1493770-00-C 1$7.00Yes",
   "7201428LT Inner BracketRemove / ReplaceBody0.2New1493772-00-B 1$1.00Yes",
   "8201429Lower Grille Type 1Remove / ReplaceBody0.3New1493759-00-A 1$165.29Yes",
-  "18201431LT FenderRefinishRefinish2.0Existing",
-  "19201430LT FenderRepairBody2.0Existing",
+  "9900500Prep Unprimed BumperRefinish OnlyRefinish0.7Existing",
+  "18201431L Fender OutsideRefinish OnlyRefinish2.0Existing",
+  "19201430L Fender PanelRepairBody2.0Existing",
   "20201441LT Fender LinerRemove / ReplaceBody0.4New1744361-00-A 1$130.00Yes",
-  "21201440LT Fender Liner RivetRemove / ReplaceBody0.0New1006521-00-A 4$2.00Yes",
+  "21201440L Fender Liner Rivet (4 @ $0.50)Remove / ReplaceBody0.0New1006521-00-A 4$2.00Yes",
   "22201442LT RivetRemove / ReplaceBody0.0New1006535-00-A 1$0.38Yes",
   "26201432Storage CompartmentRemove / InstallBody0.5Existing",
   "27201433Valance PanelRemove / ReplaceBody0.3New1613579-00-D 1$302.41Yes",
-  "28201434Valance Panel RivetRemove / ReplaceBody0.0New1128034-00-B 1$5.90Yes",
+  "28201434Valance Panel Rivet (10 @ $0.59)Remove / ReplaceBody0.0New1128034-00-B 10$5.90Yes",
+  "30201450L Frt Door Trim PanelRemove / InstallBody0.4Existing",
+  "33900500Pre-Repair ScanAdditional LaborMechanical0.5Existing",
+  "34900500Post-Repair ScanAdditional LaborMechanical0.5Existing",
+  "35900500Clear CoatAdditional LaborRefinish1.6Existing",
   "36900500Enable and Disable Service modeAdditional LaborBody0.2Existing",
   "37900500Research DTC's Pre and PostAdditional LaborBody1.0Existing",
   "38900500Download and Redeploy FirmwareAdditional LaborBody0.5Existing",
@@ -66,7 +73,7 @@ const MITCHELL_TEXT = [
 
 /** CCC rows as the shop estimate prints them, with the review's values. */
 const CCC_ROWS: Array<[string, string]> = [
-  ["FRONT BUMPER & GRILLE", "1Repl  Bumper cover unpainted1493736S0A1761.742.0"],
+  ["FRONT BUMPER & GRILLE", "1Repl  Bumper cover unpainted1493736S0A1761.742.03.0"],
   ["FRONT BUMPER & GRILLE", "2Repl  LT Upper bracket149377000C17.000.2"],
   ["FRONT BUMPER & GRILLE", "3Repl  LT Inner bracket149377200B11.000.2"],
   ["FRONT BUMPER & GRILLE", "4Repl  Lower grille type 1149375900A1165.290.3"],
@@ -77,7 +84,7 @@ const CCC_ROWS: Array<[string, string]> = [
   ["FENDER", "9R&I  RT Fender liner0.4"],
   ["HOOD", "10R&I  Storage compart1.2"],
   ["RADIATOR SUPPORT", "11Repl  Valance panel161357900D1302.410.3"],
-  ["RADIATOR SUPPORT", "12Repl  Valance panel rivet112803400B15.90"],
+  ["RADIATOR SUPPORT", "12Repl  Valance panel rivet112803400B105.90"],
   ["VEHICLE DIAGNOSTICS", "13#Rpr  Place vehicle in \"Service Mode\"0.1"],
   ["VEHICLE DIAGNOSTICS", "14#Rpr  Research DTC's0.5"],
   ["VEHICLE DIAGNOSTICS", "15#Rpr  Download & redeploy firmware0.5"],
@@ -90,6 +97,14 @@ const CCC_ROWS: Array<[string, string]> = [
   ["MISCELLANEOUS OPERATIONS", "22#Maintain HV battery state of charge15.00T0.5"],
   ["MISCELLANEOUS OPERATIONS", "23#Tint color10.5"],
   ["MISCELLANEOUS OPERATIONS", "24#Rpr  Final road test for safety & quality check0.5"],
+  // Second review (test 2): the rows that exposed the next failure modes.
+  ["FRONT BUMPER & GRILLE", "25O/H  front bumper2.5"],
+  ["FRONT BUMPER & GRILLE", "26Prep unprimed bumper0.7"],
+  ["FRONT BUMPER & GRILLE", "27Add for Clear Coat0.8"],
+  ["FENDER", "28Add for Clear Coat1.2"],
+  ["VEHICLE DIAGNOSTICS", "29#Rpr  Pre-repair scan1.0D"],
+  ["VEHICLE DIAGNOSTICS", "30#Rpr  Post-repair scan1.0D"],
+  ["FRONT DOOR", "31R&I  LT R&I trim panel0.5"],
 ];
 
 function higherRows(): EstimateDeltaRow[] {
@@ -119,6 +134,19 @@ describe("D1 — a Mitchell row reaches the matcher with tokens and an operation
     expect(line(6).descriptionTokens).toEqual(["lt", "upper", "bracket"]);
   });
 
+  it("reads Mitchell's one-letter side and 'Frt' as CCC's LT/RT and front", () => {
+    expect(line(18).descriptionTokens).toEqual(["lt", "fender", "outside"]);
+    expect(line(19).descriptionTokens).toEqual(["lt", "fender", "panel"]);
+    expect(line(2).descriptionTokens).toEqual(["front", "bumper", "cover", "assy"]);
+  });
+
+  it("prices a delta row by its EXTENDED price, not the per-unit figure in the description", () => {
+    expect(line(28).qty).toBe(10);
+    expect(line(28).price).toBe(5.9);
+    expect(line(21).price).toBe(2);
+    expect(line(22).price).toBe(0.38);
+  });
+
   it("carries the CCC code for the operation phrase, none for a manual line", () => {
     expect(line(4).opCode).toBe("Repl");
     expect(line(26).opCode).toBe("R&I");
@@ -137,15 +165,34 @@ describe("D2 — part-number identity survives the platform's punctuation", () =
 });
 
 describe("D4 — Repair and Refinish twins fold into one operation", () => {
-  it("merges the Mitchell Repair/Refinish pair on the same panel and nothing else", () => {
+  it("merges the Mitchell Repair/Refinish pair on the same panel under Mitchell's own wording", () => {
     const merged = mergeRepairRefinishTwins(lowerRows());
-    const fender = merged.filter((row) => row.descriptionTokens.join(" ") === "lt fender" && !row.partNumber);
+    const fender = merged.filter((row) => row.lineNumber === 19 || row.lineNumber === 18);
     expect(fender).toHaveLength(1);
+    expect(fender[0].lineNumber).toBe(19);
     expect(fender[0].labor).toBe(2);
     expect(fender[0].paint).toBe(2);
     expect(fender[0].opCode).toBe("Rpr");
     // The liner is a different line (part number) and stays separate.
     expect(merged.some((row) => row.partNumber === "1744361-00-A")).toBe(true);
+  });
+
+  it("rides a panel's Refinish Only line on its replacement, not on the overhaul of the same assembly", () => {
+    const merged = mergeRepairRefinishTwins(lowerRows());
+    const replace = merged.find((row) => row.lineNumber === 4)!;
+    expect(replace.labor).toBe(2);
+    expect(replace.paint).toBe(2.9);
+    const overhaul = merged.find((row) => row.lineNumber === 2)!;
+    expect(overhaul.paint).toBeNull();
+    expect(merged.some((row) => row.lineNumber === 5)).toBe(false);
+  });
+
+  it("keeps the twin apart when the other document also prints refinish as its own line", () => {
+    const cccRefinish = parseCccEstimateRow("40Refn  LT Fender2.0", { section: "FENDER" })!;
+    cccRefinish.paint = 2;
+    cccRefinish.labor = null;
+    const merged = mergeRepairRefinishTwins(lowerRows(), [cccRefinish]);
+    expect(merged.some((row) => row.lineNumber === 18)).toBe(true);
   });
 });
 
@@ -184,7 +231,7 @@ describe("the review's false positives are matched, the real differences are kep
     expect(serviceMode).toHaveLength(2);
     expect(serviceMode.every((pair) => pair.lowerRow.lineNumber === 36)).toBe(true);
     expect(match.deltas.some((delta) => (delta.statusLabels ?? []).includes("QUANTITY_SHORTFALL"))).toBe(false);
-    expect(match.lowerRowReconciliation.filter((entry) => entry.matchedAs === "combined").map((entry) => entry.lineNumber).sort()).toEqual([36, 37]);
+    expect(match.lowerRowReconciliation.filter((entry) => entry.matchedAs === "combined").map((entry) => entry.lineNumber).sort()).toEqual([35, 36, 37]);
   });
 
   it("D4 — the repaired-and-refinished fender is one paid operation, not unfunded paint", () => {
@@ -204,6 +251,58 @@ describe("the review's false positives are matched, the real differences are kep
     expect(rtLiner).toHaveLength(1);
     expect(["missing_operation", "expanded_scope"]).toContain(rtLiner[0].kind);
     expect(rtLiner[0].annotate).toBe(true);
+  });
+
+  it("test 2 — a labor-only line pairs on panel + operation family", () => {
+    expect(missingLines).not.toContain(25);
+    expect(match.matchedPairs.find((pair) => pair.higherRow.lineNumber === 25)?.lowerRow.lineNumber).toBe(2);
+    // The comparison allows MORE (3.3 vs 2.5): no reduced-labor claim.
+    expect(byLine(match.deltas, 25).some((delta) => delta.kind === "reduced_labor")).toBe(false);
+  });
+
+  it("test 2 — the bumper cover's paint hours are read against the panel's Refinish Only line", () => {
+    const paint = byLine(match.deltas, 1).find((delta) => delta.kind === "reduced_paint");
+    expect(paint).toBeUndefined();
+  });
+
+  it("test 2 — hours filed under the other column are the same hours", () => {
+    for (const line of [26, 23]) {
+      expect(missingLines, `line ${line}`).not.toContain(line);
+      expect(byLine(match.deltas, line).some((delta) => delta.kind === "reduced_labor" || delta.kind === "reduced_paint"), `line ${line}`).toBe(false);
+    }
+  });
+
+  it("test 2 — two clear-coat occurrences against one combined line report the NET gap", () => {
+    const clearCoat = match.deltas.filter((delta) => [27, 28].includes(delta.higherRow.lineNumber ?? -1));
+    expect(clearCoat).toHaveLength(1);
+    expect(clearCoat[0].kind).toBe("reduced_paint");
+    expect(clearCoat[0].paintDelta).toBe(0.4);
+    expect(clearCoat[0].statusLabels).toContain("COMBINED_OCCURRENCES");
+    expect(clearCoat[0].summary).toMatch(/2\.0 hr in total.*1\.6 hr.*\+0\.4 hr/);
+    expect(match.matchedPairs.filter((pair) => [27, 28].includes(pair.higherRow.lineNumber ?? -1)).every((pair) => pair.lowerRow.lineNumber === 35)).toBe(true);
+  });
+
+  it("test 2 — a per-unit annotation never becomes the line total", () => {
+    expect(byLine(match.deltas, 12).some((delta) => delta.kind === "part_or_price_difference")).toBe(false);
+    expect(byLine(match.deltas, 7).some((delta) => delta.kind === "part_or_price_difference")).toBe(false);
+  });
+
+  it("test 2 — Mitchell's 'New' and CCC's silence are the same OEM part, never a sourcing dispute", () => {
+    expect(match.deltas.some((delta) => delta.kind === "part_source_difference")).toBe(false);
+  });
+
+  it("test 2 — real shortfalls survive: both scans 1.0 vs 0.5", () => {
+    for (const line of [29, 30]) {
+      const reduced = byLine(match.deltas, line).find((delta) => delta.kind === "reduced_labor");
+      expect(reduced?.laborDelta, `line ${line}`).toBe(0.5);
+    }
+    // 0.5 vs 0.4 on the trim panel pairs; it sits under the 0.3 h floor.
+    expect(missingLines).not.toContain(31);
+    expect(match.matchedPairs.find((pair) => pair.higherRow.lineNumber === 31)?.lowerRow.lineNumber).toBe(30);
+  });
+
+  it("test 2 — nothing on the pair is a confirmed omission", () => {
+    expect(missing.filter((delta) => delta.annotate && !delta.ocrUncertain)).toHaveLength(0);
   });
 
   it("D6 — a clean text read never wears the OCR caveat", () => {

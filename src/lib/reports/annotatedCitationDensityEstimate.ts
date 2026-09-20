@@ -4234,25 +4234,55 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   }
   if (delta.kind === "missing_operation") {
     if (delta.ocrUncertain) {
-      // OCR confidence drives Delta confidence: the lower estimate is machine-read
-      // from an image-only PDF, so a non-match is unverified, not a confirmed
-      // omission. C-8: OCR is a PROVENANCE qualifier, orthogonal to the
+      // Read confidence drives Delta confidence: a non-match against a
+      // document this pass could not fully read is unverified, not a
+      // confirmed omission. C-8: provenance is a qualifier orthogonal to the
       // finding TYPE — the finding keeps its type label and score lane
       // (identical shapes must not land 12 points apart because one carried
       // the qualifier), while title and proof language stay hedged and the
-      // provenance rides explicitly in the proof text.
+      // provenance rides explicitly in the proof text. The WORDING names the
+      // actual limit: OCR for a scan, an unreliable text layer for broken
+      // font encoding, and the matcher's own reason otherwise — a native
+      // Mitchell export is never described as a scan (RO 20792).
+      const labels = delta.statusLabels ?? [];
+      const provenance = labels.includes("OCR_UNCERTAIN")
+        ? {
+            qualifier: "OCR-uncertain",
+            proof:
+              "Provenance: VERIFY (OCR) — the comparison estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. ",
+            next: "Compare this line against the legible source of the comparison estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
+          }
+        : labels.includes("LOWER_ESTIMATE_TEXT_LAYER_LIMITATION")
+          ? {
+              qualifier: "text layer read unreliably",
+              proof:
+                "Provenance: VERIFY (text layer) — the comparison estimate's text layer read unreliably (LOWER_ESTIMATE_TEXT_LAYER_LIMITATION, a font-encoding limit, not a scan), so exact line matching is limited. ",
+              next: "Compare this line against the comparison estimate as printed to confirm whether it is genuinely absent before treating it as a gap.",
+            }
+          : labels.includes("EXCEEDS_CATEGORY_GAP")
+            ? {
+                qualifier: "exceeds the category gap",
+                proof:
+                  "Provenance: VERIFY (totals) — the \"not present\" claims in this line's category add up to more than the gap the two totals blocks state for it, so some of them are paid on the comparison estimate under other wording. ",
+                next: "Locate this operation on the comparison estimate under its own wording before treating it as a gap.",
+              }
+            : {
+                qualifier: "not matched — verify against source",
+                proof:
+                  "Provenance: VERIFY (unmatched) — the comparison estimate's section for this line yielded no rows this pass could read, so absence is not established. ",
+                next: "Compare this line against the comparison estimate as printed to confirm whether it is genuinely absent before treating it as a gap.",
+              };
       return {
         findingType: "delta-missing-operation-ocr-uncertain",
-        title: `Possibly missing (OCR-uncertain — verify against source): ${label}`,
+        title: `Possibly missing (${provenance.qualifier} — verify against source): ${label}`,
         label: profile.label,
         category: profile.category,
         estimateGapType: "present_but_under_documented",
         missingProof:
           "This line is documented on the annotated estimate but was not located on the comparison estimate. " +
-          "Provenance: VERIFY (OCR) — the comparison estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. " +
+          provenance.proof +
           "Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
-        nextAction:
-          "Compare this line against the legible source of the comparison estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
+        nextAction: provenance.next,
         missingAuthorityTypes: ["legible lower-estimate source", ...profile.missingAuthorityTypes],
         score: profile.score,
         safetyImpact: profile.safetyImpact,
