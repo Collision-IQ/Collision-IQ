@@ -4,6 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { useUser } from "@clerk/nextjs";
+import { canAccessRekeySheet, REKEY_UNDER_CONSTRUCTION_MESSAGE } from "@/lib/access/rekeyAccess";
 import {
   clearNavUpdate,
   markVehicleMaintenanceIfChanged,
@@ -26,6 +28,7 @@ import {
   HelpCircle,
   LayoutDashboard,
   Menu,
+  Newspaper,
   ChevronsLeft,
   ChevronsRight,
   Settings as SettingsIcon,
@@ -132,7 +135,15 @@ const NAV_ITEMS: ReadonlyArray<{
   // came back for", distinct because one is a conversation and one is a report.
   { id: "toolbox", label: "Toolbox", icon: Briefcase, view: "toolbox" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
+  // What the platform learned, one numbered and sourced entry per day. Sits
+  // directly under the Knowledge Base it feeds.
+  { id: "knowledgedaily", label: "Knowledge Base Daily", icon: Newspaper, href: "/knowledge-daily" },
 ];
+
+/** Items that read "under construction" for everyone outside their allow-list. */
+function underConstructionNavIds(email: string | null | undefined): ReadonlySet<string> {
+  return canAccessRekeySheet(email) ? new Set() : new Set(["rekey"]);
+}
 
 /** Pinned to the bottom of the rail beside Tutorial: account-level, not workflow. */
 const NAV_FOOTER_ITEMS: typeof NAV_ITEMS = [
@@ -150,6 +161,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   history: "nav-history",
   toolbox: "nav-toolbox",
   knowledge: "nav-knowledge-base",
+  knowledgedaily: "nav-knowledge-daily",
   settings: "nav-settings",
 };
 
@@ -185,6 +197,11 @@ export default function CollisionWorkspaceV2({
   const [recentReports, setRecentReports] = useState<Array<{ id: string; title: string }>>([]);
   const [pendingReportId, setPendingReportId] = useState<string | null>(null);
   const navUpdateFlags = useNavUpdateFlags();
+  // Rekey Sheet gate: under construction for every account but the allow-list.
+  const { user: clerkUser } = useUser();
+  const userEmail =
+    clerkUser?.primaryEmailAddress?.emailAddress ?? clerkUser?.emailAddresses?.[0]?.emailAddress ?? null;
+  const underConstructionIds = underConstructionNavIds(userEmail);
 
   // Chat-first rails: collapsed by default so the chat fills the space, and
   // EDGE-TRIGGERED autos — every new upload event opens the bottom rail, and
@@ -287,6 +304,7 @@ export default function CollisionWorkspaceV2({
       const section = (event as CustomEvent<WorkspaceNavDetail>).detail?.section;
       const item = NAV_ITEMS.find((candidate) => candidate.id === section);
       if (!item || !item.view) return;
+      if (underConstructionNavIds(userEmail).has(item.id)) return;
       clearNavUpdate(item.id as NavUpdateSection);
       setPendingReportId(null);
       setActiveNav(item.id);
@@ -294,7 +312,7 @@ export default function CollisionWorkspaceV2({
     };
     window.addEventListener(WORKSPACE_NAV_EVENT, handleNavRequest);
     return () => window.removeEventListener(WORKSPACE_NAV_EVENT, handleNavRequest);
-  }, []);
+  }, [userEmail]);
   // My Vehicle red dot: check the maintenance picture once per mount and flag
   // the nav item when something newly came due (fingerprinted so the same due
   // set never re-notifies).
@@ -348,14 +366,18 @@ export default function CollisionWorkspaceV2({
   const activeItem = NAV_ITEMS.find((item) => item.id === activeNav);
   // Guard: never stay on a gated view if analysis is no longer available.
   const activeView: WorkspaceView =
-    activeItem?.requiresAnalysis && !analysisReady ? "workspace" : activeItem?.view ?? "workspace";
+    (activeItem?.requiresAnalysis && !analysisReady) ||
+    (activeItem && underConstructionIds.has(activeItem.id))
+      ? "workspace"
+      : activeItem?.view ?? "workspace";
 
   // Shared nav-item renderer used by both the desktop sidebar and the mobile
   // drawer. `onNavigate` lets the drawer close itself after a selection.
   const renderNavItem = (item: (typeof NAV_ITEMS)[number], onNavigate?: () => void) => {
     const Icon = item.icon;
     const active = activeNav === item.id;
-    const locked = Boolean(item.requiresAnalysis && !analysisReady);
+    const underConstruction = underConstructionIds.has(item.id);
+    const locked = Boolean(item.requiresAnalysis && !analysisReady) || underConstruction;
     const hasUpdate = !active && !locked && navUpdateFlags[item.id as NavUpdateSection] === true;
     const classes = `inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
       locked
@@ -368,6 +390,13 @@ export default function CollisionWorkspaceV2({
       <>
         <Icon size={16} className={active && !locked ? "text-[var(--accent)]" : ""} />
         <span className="flex-1">{item.label}</span>
+        {underConstruction ? (
+          <span
+            className="shrink-0 rounded border border-border px-1 py-px font-mono text-[9px] uppercase tracking-[0.06em]"
+          >
+            Under construction
+          </span>
+        ) : null}
         {hasUpdate ? (
           <span
             className="h-2 w-2 shrink-0 rounded-full bg-red-500"
@@ -383,8 +412,14 @@ export default function CollisionWorkspaceV2({
           key={item.id}
           type="button"
           disabled
+          aria-disabled="true"
           className={classes}
-          title="Available after an estimate review or comparison is generated"
+          title={
+            underConstruction
+              ? REKEY_UNDER_CONSTRUCTION_MESSAGE
+              : "Available after an estimate review or comparison is generated"
+          }
+          data-under-construction={underConstruction ? "true" : undefined}
           data-tour={NAV_TOUR_TARGETS[item.id]}
         >
           {inner}

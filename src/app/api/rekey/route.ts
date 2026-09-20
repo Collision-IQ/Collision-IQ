@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
+import { canAccessRekeySheet, REKEY_UNDER_CONSTRUCTION_MESSAGE } from "@/lib/access/rekeyAccess";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canUseProIntegrations, PRO_FEATURE_REQUIRED_MESSAGE } from "@/lib/billing/proFeatures";
 import { extractPreviewDataFromBuffer } from "@/lib/attachments/extractPreviewData";
@@ -352,6 +353,12 @@ async function readEmsFilesFromZip(buffer: Buffer): Promise<Array<{ filename: st
 export async function POST(request: NextRequest) {
   try {
     const { user, isPlatformAdmin } = await requireCurrentUser();
+    // Under construction: the sheet is open to the allow-listed account only.
+    // The workspace disables the nav entry for everyone else; this keeps a
+    // direct API call honest with what the UI shows.
+    if (!canAccessRekeySheet(user.email)) {
+      return NextResponse.json({ error: REKEY_UNDER_CONSTRUCTION_MESSAGE }, { status: 403 });
+    }
     const entitlements = await getCurrentEntitlements({ isPlatformAdmin });
     if (!canUseProIntegrations(entitlements)) {
       return NextResponse.json({ error: PRO_FEATURE_REQUIRED_MESSAGE }, { status: 403 });
