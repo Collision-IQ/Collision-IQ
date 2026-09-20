@@ -20,8 +20,8 @@ This appends to `scripts/explee-performance-log.jsonl` (gitignored)
 
 ### Cost Efficiency
 - [ ] **Total spend** (vs. $60 budget limit)
-- [ ] **Leads generated** (raw count)
-- [ ] **Cost per lead** (spend ÷ leads)
+- [ ] **Leads generated** (Explee "hot leads": replies classified as interested)
+- [ ] **Cost per lead** (spend ÷ hot leads; `summary` prints it for the test period)
 - [ ] **Cost per reply** (spend ÷ replies)
 - [ ] **Reply rate** (replies ÷ sent)
 - [ ] **HubSpot comparison**: Cost per lead in HubSpot for same segments

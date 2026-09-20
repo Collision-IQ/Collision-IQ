@@ -3,39 +3,64 @@
 Scripts: `scripts/explee-api.cjs` (API wrapper + CLI) and
 `scripts/explee-daily-monitor.cjs` (daily snapshot + summary).
 Assessment template: `docs/explee/EXPLEE-ASSESSMENT-FRAMEWORK.md`.
+API reference: `docs/explee/openapi.json` (copy of
+`https://api.explee.com/public/api/openapi.json`; human view at
+`https://api.explee.com/public/api/docs`). All routes live under
+`/public/api/v1`; the AutoGTM ones under `/public/api/v1/autogtm`.
+
+## How Explee's objects fit together
+
+- A **project** is your company (identified by `domain`) and owns the total
+  daily budget. Campaigns are listed and rolled up per project.
+- A **campaign** is one segment (body shops, MSOs, …). Campaign ids are
+  global, not nested under the project: inbox, analytics, start/stop and
+  per-campaign budget all take just the campaign id.
+- **Analytics** exist at both levels with a `period` of `today`, `7d`, `30d`
+  or `all`. The project rollup already includes the per-campaign rows, so the
+  monitor uses it instead of calling each campaign.
+- A **hot lead** is a contact whose reply the classifier marked as interested.
+  Explee's "cost per lead" is spend ÷ hot leads.
+- The **inbox** is per campaign; the `need_reply` tab is what's waiting for a
+  human.
 
 ## Quick Start
 
 ### 1. Put the API key in `.env.local` (never in source)
+Create a key at `https://explee.com/app-auto-gtm/api-keys`, then:
 ```bash
-# .env.local is gitignored
-echo 'EXPLEE_API_KEY=sk_explee_...' >> .env.local
+# .env.local is gitignored. Type the real key; the scripts reject a placeholder.
+echo 'EXPLEE_API_KEY=PASTE_KEY_HERE' >> .env.local
 ```
 The scripts read `EXPLEE_API_KEY` from your shell first, then from `.env.local`
-and `.env` at the repo root. They refuse to run without it.
+and `.env` at the repo root, and refuse to run without it.
 
-### 2. Find Your Project ID
+### 2. Find your project and campaign ids
 ```bash
 node scripts/explee-api.cjs list-projects
+node scripts/explee-api.cjs list-campaigns <project-id>
 ```
 
-### 3. Set Daily Budget (optional)
+### 3. Set the daily budget (optional)
 ```bash
-node scripts/explee-api.cjs set-budget <project-id> 10
+node scripts/explee-api.cjs set-budget <project-id> 10   # whole USD per day; 0 pauses all sending
 ```
-Sets a $10 daily budget for the entire project.
+Explee spreads the project budget across its running campaigns.
 
-### 4. Capture First Snapshot
+### 4. Capture the first snapshot
 ```bash
 node scripts/explee-daily-monitor.cjs <project-id>
 ```
-Appends one snapshot to `scripts/explee-performance-log.jsonl` (gitignored;
-set `EXPLEE_LOG_FILE` to write elsewhere).
+Appends one line to `scripts/explee-performance-log.jsonl` (gitignored; set
+`EXPLEE_LOG_FILE` to write elsewhere). Each snapshot holds lifetime and
+today's totals, the per-campaign breakdown, the project budget, and the count
+of replies awaiting a human.
 
-### 5. View Performance Summary
+### 5. View the summary
 ```bash
 node scripts/explee-daily-monitor.cjs summary
 ```
+Shows the latest lifetime numbers, the change since the first snapshot (the
+test-period figures for the Friday report), today's numbers, and campaign rows.
 
 ## Daily Workflow (Sept 20–25)
 
@@ -50,63 +75,78 @@ Anytime:
 node scripts/explee-daily-monitor.cjs summary
 ```
 
-### Manual Campaign Control
+### Manual campaign control
 ```bash
-node scripts/explee-api.cjs list-campaigns <project-id>
-node scripts/explee-api.cjs get-analytics <project-id> <campaign-id>
-node scripts/explee-api.cjs start-campaign <project-id> <campaign-id>
-node scripts/explee-api.cjs stop-campaign <project-id> <campaign-id>
-node scripts/explee-api.cjs get-hot-leads <project-id>
-node scripts/explee-api.cjs get-inbox <project-id>
+node scripts/explee-api.cjs project-analytics <project-id> [today|7d|30d|all]
+node scripts/explee-api.cjs get-analytics <campaign-id> [period]
+node scripts/explee-api.cjs get-campaign <campaign-id>          # targeting, briefs, schedule
+node scripts/explee-api.cjs start-campaign <campaign-id>
+node scripts/explee-api.cjs stop-campaign <campaign-id>
+node scripts/explee-api.cjs set-campaign-budget <campaign-id> 5  # 1–300 USD; only while autopilot is off
+node scripts/explee-api.cjs get-autopilot <project-id>
+node scripts/explee-api.cjs set-autopilot <project-id> off
+node scripts/explee-api.cjs get-hot-leads [campaign-id]
+node scripts/explee-api.cjs get-inbox <campaign-id> [need_reply|replied|sent]
+node scripts/explee-api.cjs get-thread <campaign-id> <person-id>
+node scripts/explee-api.cjs reply <campaign-id> <person-id> Your reply text
+node scripts/explee-api.cjs balance
 ```
 
 ## Common Scenarios
 
 **"One campaign is spending too fast"**
 ```bash
-node scripts/explee-api.cjs set-budget <project-id> 5   # reduce to $5/day
+node scripts/explee-api.cjs set-autopilot <project-id> off        # hand budgets back to you
+node scripts/explee-api.cjs set-campaign-budget <campaign-id> 1
 node scripts/explee-daily-monitor.cjs summary
 ```
+Or lower the whole project: `set-budget <project-id> 5`.
 
 **"I want to pause one segment"**
 ```bash
-node scripts/explee-api.cjs get-campaign <project-id> <campaign-id>   # note the status
-node scripts/explee-api.cjs stop-campaign <project-id> <campaign-id>
-node scripts/explee-api.cjs start-campaign <project-id> <campaign-id> # resume later
+node scripts/explee-api.cjs stop-campaign <campaign-id>
+node scripts/explee-api.cjs start-campaign <campaign-id>          # resume later
 ```
 
-**"What's in my inbox?"**
+**"Who is waiting on me?"**
 ```bash
-node scripts/explee-api.cjs get-inbox <project-id> | jq '.[] | {sender, subject, message}'
+node scripts/explee-api.cjs get-inbox <campaign-id> need_reply | jq '.contacts[] | {person_id, name, email, latest_intent, latest_reply_at}'
+node scripts/explee-api.cjs get-thread <campaign-id> <person-id>
 ```
 
 **"Generate Friday Report"**
 1. `node scripts/explee-daily-monitor.cjs summary > friday-report-data.txt`
 2. Open `docs/explee/EXPLEE-ASSESSMENT-FRAMEWORK.md`
-3. Fill in metrics from the snapshots and `friday-report-data.txt`
+3. Fill in metrics from the summary ("Since first snapshot" is the test period)
 4. Add analysis and recommendation
 
 ## Error Handling
 
-**"EXPLEE_API_KEY is not set"** — add the key to `.env.local` (step 1) or
-`export EXPLEE_API_KEY=...` in the shell.
+**"EXPLEE_API_KEY is not set"** — add the real key to `.env.local` (step 1) or
+`export EXPLEE_API_KEY=...` in the shell. A placeholder ending in `...` is
+rejected on purpose.
 
-**"API Error 403: Forbidden"** — a network proxy or firewall is blocking
+**"API Error 404 … Not Found"** — the route does not exist. Compare against
+`docs/explee/openapi.json`; the wrapper's routes are pinned to it by
+`npm run test:explee`.
+
+**"API Error 401 / 403"** — the key is wrong, revoked, or a proxy is blocking
 `api.explee.com` (cloud sandboxes typically do). Run from a local machine.
 
-**"API Error 401"** — the key is wrong or revoked; regenerate it in Explee.
+**"API Error 409" on `set-campaign-budget`** — autopilot is on and manages
+per-campaign budgets. Turn it off first (`set-autopilot <project-id> off`) or
+set the project budget instead.
 
-**"Empty response" / "API Error 404"** — the project ID does not exist; check
+**"Project N not found"** — the id is not one of this key's projects; check
 `list-projects`.
-
-**"Connection timeout"** — retry in a moment, or check the Explee status page.
 
 ## Tests
 ```bash
 npm run test:explee
 ```
-Offline: covers snapshot math, summary rendering, log parsing, and the
-missing-key guard.
+Offline: every wrapper route is checked against `docs/explee/openapi.json`,
+plus query/body field names, argument validation, error surfacing, snapshot
+math, summary rendering, log parsing and the missing-key guard.
 
 ## Next Steps
 
