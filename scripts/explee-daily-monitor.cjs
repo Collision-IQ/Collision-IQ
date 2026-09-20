@@ -2,13 +2,15 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Explee Daily Performance Monitor
- * Tracks campaigns, budgets, and lead volume — run daily for the Friday assessment.
+ * Captures one snapshot per run of an AutoGTM project: lifetime and today's
+ * totals, the per-campaign breakdown, budget, and how many replies are
+ * waiting for a human. Run daily for the Friday assessment.
  *
  * Usage:
  *   node scripts/explee-daily-monitor.cjs <project-id>   # capture a snapshot
  *   node scripts/explee-daily-monitor.cjs summary        # print aggregated data
  *
- * Creates: scripts/explee-performance-log.jsonl (appends one snapshot per run)
+ * Writes: scripts/explee-performance-log.jsonl (one JSON line per run).
  * Override the log location with EXPLEE_LOG_FILE.
  */
 
@@ -18,7 +20,10 @@ const ExpleeAPI = require('./explee-api.cjs');
 
 const LOG_FILE = process.env.EXPLEE_LOG_FILE || path.join(__dirname, 'explee-performance-log.jsonl');
 
-const asArray = (value) => (Array.isArray(value) ? value : []);
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const round2 = (v) => Math.round(num(v) * 100) / 100;
+const pct = (part, whole) => (whole > 0 ? round2((part / whole) * 100) : 0);
+const money = (v) => `$${round2(v).toFixed(2)}`;
 
 class PerformanceMonitor {
   constructor(api) {
@@ -28,98 +33,119 @@ class PerformanceMonitor {
   async captureSnapshot(projectId) {
     console.log(`\n📊 Capturing snapshot for project ${projectId}...`);
 
-    // Get project details
     const project = await this.api.getProject(projectId);
-    console.log(`Project: ${project && project.name}`);
+    if (!project) throw new Error(`Project ${projectId} not found for this API key (run list-projects)`);
+    console.log(`Project: ${project.domain} (id ${project.id})`);
 
-    // Get all campaigns
-    const campaignsList = asArray(await this.api.listCampaigns(projectId));
-    console.log(`Found ${campaignsList.length} campaigns`);
+    const [allTime, today, campaignList, budget] = await Promise.all([
+      this.api.getProjectAnalytics(project.id, 'all'),
+      this.api.getProjectAnalytics(project.id, 'today'),
+      this.api.listCampaigns(project.id),
+      this.api.getProjectBudget(project.id).catch((err) => ({ error: err.message })),
+    ]);
 
-    // Collect analytics for each campaign
-    const campaigns = [];
-    for (const campaign of campaignsList) {
+    const campaigns = (campaignList && campaignList.campaigns) || [];
+    console.log(`Found ${campaigns.length} campaigns`);
+
+    // Replies waiting for a human, per campaign (inbox "need_reply" tab).
+    const needReply = {};
+    for (const c of campaigns) {
       try {
-        const analytics = await this.api.getCampaignAnalytics(projectId, campaign.id);
-        campaigns.push({
-          id: campaign.id,
-          name: campaign.name,
-          status: campaign.status,
-          ...analytics, // contains: sent, replies, reply_rate, spend, leads, etc.
-        });
-        console.log(`  ✓ ${campaign.name}: ${analytics.sent} sent, ${analytics.replies} replies`);
+        const inbox = await this.api.getInbox(c.id, { tab: 'need_reply', limit: 1 });
+        needReply[c.id] = num(inbox && inbox.total);
       } catch (err) {
-        console.warn(`  ✗ Error getting analytics for ${campaign.name}:`, err.message);
-        campaigns.push({
-          id: campaign.id,
-          name: campaign.name,
-          status: campaign.status,
-          error: err.message,
+        console.warn(`  ✗ inbox for ${c.name || c.id}: ${err.message}`);
+        needReply[c.id] = null;
+      }
+    }
+
+    const snapshot = PerformanceMonitor.buildSnapshot({ project, allTime, today, campaigns, needReply, budget });
+
+    for (const c of snapshot.campaignDetails) {
+      console.log(`  ✓ ${c.name} [${c.status}]: ${c.sent} sent, ${c.replies} replies, ${c.hotLeads} hot, ${money(c.spend)}`);
+    }
+    console.log(`Hot leads: ${snapshot.totals.hotLeads} | Spend: ${money(snapshot.totals.spend)} | Awaiting reply: ${snapshot.needReplyTotal}`);
+
+    fs.appendFileSync(LOG_FILE, JSON.stringify(snapshot) + '\n');
+    console.log(`\n✅ Snapshot logged to ${LOG_FILE}`);
+    return snapshot;
+  }
+
+  /** Pure: normalises the API responses into one snapshot record. */
+  static buildSnapshot({ project, allTime, today, campaigns = [], needReply = {}, budget, now }) {
+    const totalsOf = (a) => ({
+      sent: num(a && a.total_emails_sent),
+      replies: num(a && a.total_replies),
+      autoReplies: num(a && a.total_auto_replies),
+      replyRate: a && a.overall_reply_rate_pct !== undefined
+        ? round2(a.overall_reply_rate_pct)
+        : pct(num(a && a.total_replies), num(a && a.total_emails_sent)),
+      hotLeads: num(a && a.total_hot_leads),
+      spend: round2(a && a.total_spend_usd),
+    });
+
+    const totals = totalsOf(allTime);
+    totals.costPerLead = totals.hotLeads > 0 ? round2(totals.spend / totals.hotLeads) : 0;
+    totals.costPerReply = totals.replies > 0 ? round2(totals.spend / totals.replies) : 0;
+
+    const byId = new Map(campaigns.map((c) => [c.id, c]));
+    const rows = (allTime && allTime.campaigns) || [];
+    const campaignDetails = rows.map((r) => {
+      const c = byId.get(r.campaign_id) || {};
+      return {
+        id: r.campaign_id,
+        name: r.name || c.name || String(r.campaign_id),
+        status: r.status || c.status || 'unknown',
+        statusReason: r.status_reason || null,
+        sent: num(r.emails_sent),
+        replies: num(r.total_replies),
+        replyRate: round2(r.reply_rate_pct),
+        hotLeads: num(r.hot_leads),
+        spend: round2(r.spend_usd),
+        costPerLead: round2(r.cost_per_lead_usd),
+        dailyBudgetUsd: r.daily_budget_usd !== undefined ? round2(r.daily_budget_usd) : num(c.daily_limit_usd),
+        leadsPoolUsed: num(r.leads_pool_used),
+        leadsPoolTotal: num(r.leads_pool_total),
+        coldLost: num(r.cold_lost),
+        needReply: needReply[r.campaign_id] === undefined ? null : needReply[r.campaign_id],
+      };
+    });
+    // Campaigns the analytics rollup did not report (e.g. still in discovery).
+    for (const c of campaigns) {
+      if (!rows.some((r) => r.campaign_id === c.id)) {
+        campaignDetails.push({
+          id: c.id,
+          name: c.name || String(c.id),
+          status: c.status || 'unknown',
+          statusReason: null,
+          sent: 0, replies: 0, replyRate: 0, hotLeads: 0, spend: 0, costPerLead: 0,
+          dailyBudgetUsd: num(c.daily_limit_usd),
+          leadsPoolUsed: 0, leadsPoolTotal: 0, coldLost: 0,
+          needReply: needReply[c.id] === undefined ? null : needReply[c.id],
         });
       }
     }
 
-    // Get hot leads
-    const hotLeads = asArray(await this.api.getHotLeads(projectId));
-    console.log(`Hot leads: ${hotLeads.length}`);
-
-    // Get inbox status
-    const inbox = asArray(await this.api.getInbox(projectId));
-    console.log(`Inbox conversations: ${inbox.length}`);
-
-    const snapshot = PerformanceMonitor.buildSnapshot({
-      projectId,
-      projectName: project && project.name,
-      campaigns,
-      hotLeads: hotLeads.length,
-      inboxConversations: inbox.length,
-    });
-
-    // Append to log
-    fs.appendFileSync(LOG_FILE, JSON.stringify(snapshot) + '\n');
-    console.log(`\n✅ Snapshot logged to ${LOG_FILE}`);
-
-    return snapshot;
-  }
-
-  /** Pure: turns per-campaign analytics into a snapshot record. */
-  static buildSnapshot({ projectId, projectName, campaigns, hotLeads, inboxConversations, now }) {
-    const totals = campaigns.reduce(
-      (acc, c) => ({
-        sent: acc.sent + (Number(c.sent) || 0),
-        replies: acc.replies + (Number(c.replies) || 0),
-        spend: acc.spend + (Number(c.spend) || 0),
-        leads: acc.leads + (Number(c.leads) || 0),
-      }),
-      { sent: 0, replies: 0, spend: 0, leads: 0 }
-    );
-
-    const replyRate = totals.sent > 0 ? Number(((totals.replies / totals.sent) * 100).toFixed(2)) : 0;
-    const costPerLead = totals.leads > 0 ? Number((totals.spend / totals.leads).toFixed(2)) : 0;
+    const needReplyTotal = campaignDetails.reduce((acc, c) => acc + num(c.needReply), 0);
 
     return {
       timestamp: (now || new Date()).toISOString(),
-      projectId,
-      projectName,
-      campaigns: campaigns.length,
-      totals: {
-        sent: totals.sent,
-        replies: totals.replies,
-        replyRate,
-        spend: totals.spend.toFixed(2),
-        leads: totals.leads,
-        costPerLead,
-      },
-      campaignDetails: campaigns,
-      hotLeads,
-      inboxConversations,
+      projectId: project.id,
+      projectName: project.domain,
+      dailyBudgetUsd:
+        budget && budget.daily_budget_usd !== undefined && budget.daily_budget_usd !== null
+          ? num(budget.daily_budget_usd)
+          : project.daily_budget_usd === undefined ? null : project.daily_budget_usd,
+      campaigns: campaignDetails.length,
+      totals,
+      today: totalsOf(today),
+      campaignDetails,
+      needReplyTotal,
     };
   }
 
-  // Parse the log file
   static readLog(file = LOG_FILE) {
     if (!fs.existsSync(file)) return [];
-
     return fs
       .readFileSync(file, 'utf8')
       .split('\n')
@@ -127,41 +153,57 @@ class PerformanceMonitor {
       .map((line) => JSON.parse(line));
   }
 
-  /** Pure: renders the summary text for a list of snapshots (oldest first). */
+  /** Pure: renders the summary for a list of snapshots (oldest first). */
   static formatSummary(entries) {
     if (entries.length === 0) return 'No performance log found. Run monitor first.';
 
     const latest = entries[entries.length - 1];
     const oldest = entries[0];
     const days = new Set(entries.map((e) => String(e.timestamp).slice(0, 10))).size;
+    const t = latest.totals;
+    const o = oldest.totals;
+    const delta = {
+      sent: t.sent - o.sent,
+      replies: t.replies - o.replies,
+      hotLeads: t.hotLeads - o.hotLeads,
+      spend: round2(t.spend - o.spend),
+    };
+    delta.replyRate = pct(delta.replies, delta.sent);
+    delta.costPerLead = delta.hotLeads > 0 ? round2(delta.spend / delta.hotLeads) : 0;
 
-    const breakdown = (latest.campaignDetails || [])
-      .filter((c) => !c.error)
-      .map(
-        (c) => `  • ${c.name} (${c.status})
-    - Sent: ${c.sent || 0} | Replies: ${c.replies || 0} | Spend: $${c.spend || 0}`
-      )
-      .join('\n');
+    const rows = (latest.campaignDetails || []).map(
+      (c) =>
+        `  • ${c.name} [${c.status}${c.statusReason ? `: ${c.statusReason}` : ''}]\n` +
+        `    sent ${c.sent} | replies ${c.replies} (${c.replyRate}%) | hot ${c.hotLeads} | spend ${money(c.spend)}` +
+        ` | CPL ${money(c.costPerLead)} | budget ${money(c.dailyBudgetUsd)}/day` +
+        ` | pool ${c.leadsPoolUsed}/${c.leadsPoolTotal}` +
+        (c.needReply === null ? '' : ` | awaiting reply ${c.needReply}`)
+    );
+
+    const budget = latest.dailyBudgetUsd === null || latest.dailyBudgetUsd === undefined ? 'not set' : `${money(latest.dailyBudgetUsd)}/day`;
 
     return `
-📈 Explee Performance Summary
-============================
-Period: ${oldest.timestamp} to ${latest.timestamp}
+📈 Explee Performance Summary — ${latest.projectName} (project ${latest.projectId})
+==================================================
+Period: ${oldest.timestamp} → ${latest.timestamp}
 Snapshots: ${entries.length} (${days} distinct day${days === 1 ? '' : 's'})
+Project daily budget: ${budget}
 
-Campaigns: ${latest.campaigns}
-Total Emails Sent: ${latest.totals.sent}
-Total Replies: ${latest.totals.replies}
-Reply Rate: ${latest.totals.replyRate}%
-Total Spend: $${latest.totals.spend}
-Total Leads: ${latest.totals.leads}
-Cost per Lead: $${latest.totals.costPerLead}
+Lifetime (latest snapshot)
+  Emails sent: ${t.sent} | Replies: ${t.replies} (${t.replyRate}%) | Auto-replies: ${t.autoReplies}
+  Hot leads: ${t.hotLeads} | Spend: ${money(t.spend)} | Cost/lead: ${money(t.costPerLead)} | Cost/reply: ${money(t.costPerReply)}
 
-Hot Leads: ${latest.hotLeads}
-Inbox Conversations: ${latest.inboxConversations}
+Since first snapshot (${String(oldest.timestamp).slice(0, 10)})
+  Emails sent: +${delta.sent} | Replies: +${delta.replies} (${delta.replyRate}%) | Hot leads: +${delta.hotLeads}
+  Spend: +${money(delta.spend)} | Cost/lead: ${money(delta.costPerLead)}
 
-Campaign Breakdown:
-${breakdown}
+Today (as of latest snapshot)
+  Emails sent: ${latest.today.sent} | Replies: ${latest.today.replies} | Hot leads: ${latest.today.hotLeads} | Spend: ${money(latest.today.spend)}
+
+Awaiting a human reply: ${latest.needReplyTotal}
+
+Campaign Breakdown (lifetime)
+${rows.join('\n')}
 `;
   }
 
@@ -175,7 +217,7 @@ async function main() {
 
   if (!arg || arg === 'help' || arg === '--help') {
     console.log('Usage: node scripts/explee-daily-monitor.cjs <project-id> | summary');
-    console.log('  <project-id>  capture a snapshot and append it to the log');
+    console.log('  <project-id>  capture a snapshot and append it to the log (ids: node scripts/explee-api.cjs list-projects)');
     console.log('  summary       show aggregated data from the log');
     process.exit(arg ? 0 : 1);
   }
@@ -186,8 +228,7 @@ async function main() {
   }
 
   try {
-    const monitor = new PerformanceMonitor();
-    const snapshot = await monitor.captureSnapshot(arg);
+    const snapshot = await new PerformanceMonitor().captureSnapshot(arg);
     console.log('\n' + JSON.stringify(snapshot, null, 2));
   } catch (err) {
     console.error('Fatal error:', err.message);
