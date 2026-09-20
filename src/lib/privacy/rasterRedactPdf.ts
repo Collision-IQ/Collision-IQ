@@ -65,7 +65,13 @@ interface CharSpan {
  * What the export boundary removes.
  *
  * `full` — every identifier: personal identity, VIN tail, insurer, claim
- * and policy numbers, every phone, address and email on the page.
+ * and policy numbers, the RO, workfile and federal/tax IDs, the plate, every
+ * phone, address, email and web domain on the page, the whole block printed
+ * beneath an owner / inspection-location / insurer label, and the letterhead
+ * band above the document title (which is where the shop's logo prints — an
+ * image no text rule can reach). RO 21336's annotated pages shipped with the
+ * shop's logo, name, address, phones, RO, workfile and federal IDs, the
+ * writer, the adjuster, the claim number and the insurer all legible.
  *
  * `natural_person` — a natural person's identity only: the owner / insured
  * / claimant name, the contact details printed in that person's block, and
@@ -92,6 +98,18 @@ const CONTACT_PATTERNS: RegExp[] = [
   /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
   // email
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+  // web domain ("conestogacollision.com", "www.carwise.com/e/574vTg") — a
+  // shop's letterhead names it by its domain as often as by its name
+  /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|co|biz|info)\b(?:\/\S*)?/gi,
+];
+
+/** Same-item value patterns for the document's own identifiers: RO, workfile,
+ *  federal / tax ID, EIN. The value is what is covered; the label survives. */
+const DOCUMENT_ID_PATTERNS: RegExp[] = [
+  /\b(?:ro|r\.o\.)\s*(?:#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{2,})/gi,
+  /\b(?:workfile|work\s+file)\s*(?:id|#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/gi,
+  /\b(?:federal|tax)\s*(?:id|#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{3,})/gi,
+  /\bein\s*[:#.-]{1,3}\s*([0-9][0-9-]{5,})/gi,
 ];
 
 /**
@@ -140,8 +158,9 @@ export function identifierSpans(
 
   if (scope === "full") {
     applyPatterns([
-      // claim / policy / RO values, wherever the label sits
+      // claim / policy values, wherever the label sits
       /(?:claim|policy)\s*(?:#|no\.?|number|id)?\s*[:#.-]{1,3}\s*([A-Za-z0-9][A-Za-z0-9-]{4,})/gi,
+      ...DOCUMENT_ID_PATTERNS,
       ...CONTACT_PATTERNS,
       // license plate
       /\b(?:license|plate)\s*(?:#|no\.?|number)?\s*[:#.-]{1,3}\s*([A-Z0-9-]{4,10})/gi,
@@ -189,7 +208,87 @@ export function identifierSpans(
  * exactly what the first cut did.
  */
 const IDENTITY_LABEL =
-  /\b(?:insured|owner|claimant|policyholder|adjuster|appraiser|written\s+by|claim|policy|license|plate|insurance\s+company|inspection\s+location)\s*(?:#|no\.?|number|id)?\s*[:#.-]*\s*$/i;
+  /\b(?:insured|owner|claimant|policyholder|adjuster|appraiser|written\s+by|claim|policy|license|plate|insurance\s+company|inspection\s+location|ro|workfile|work\s+file|federal|tax|ein)\s*(?:#|no\.?|number|id)?\s*[:#.-]*\s*$/i;
+
+/**
+ * Labels the print stacks a BLOCK beneath — the owner's name, address and
+ * phone; the inspection location's shop name, address and phone; the
+ * insurer's name on the line below its label. Under the full scope every
+ * text item inside the measured block is painted, because a shop's name is
+ * not contact-shaped and would otherwise survive.
+ */
+const BLOCK_LABEL =
+  /\b(?:insured|owner|claimant|policyholder|inspection\s+location|insurance\s+company)\s*(?:\(insured\))?\s*:\s*$/i;
+
+/** A CCC document title. Everything printed ABOVE it is the letterhead:
+ *  logo, shop identity, workfile and federal IDs. */
+const DOCUMENT_TITLE =
+  /^(?:preliminary estimate|estimate of record|final bill|supplement of record(?:\s+\d+)?(?:\s+with\s+summary)?|supplement\s+\d+(?:\s+of\s+record)?|estimate|final estimate|committed estimate)$/i;
+
+/** One text item as measured on its page (pdf.js: y grows upward). */
+export interface MeasuredTextItem {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A painted region in page points, with the rule that produced it. */
+export interface StructuralRedaction {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  reason: "letterhead_band" | "label_block";
+}
+
+/** Height of the block beneath a block label: five text lines. */
+const BLOCK_HEIGHT = 64;
+const BLOCK_WIDTH = 260;
+
+/**
+ * The full scope's MEASURED structural regions on one page: the letterhead
+ * band above the document title, and the block beneath each block label.
+ * Pure, so the geometry is testable without rendering.
+ */
+export function planStructuralRedactions(
+  items: MeasuredTextItem[],
+  pageWidth: number,
+  pageHeight: number
+): StructuralRedaction[] {
+  const regions: StructuralRedaction[] = [];
+  const title = items
+    .filter((item) => DOCUMENT_TITLE.test(item.text.trim()))
+    .sort((a, b) => b.y - a.y)[0];
+  if (title) {
+    const bandBottom = title.y + title.height + 2;
+    if (pageHeight - bandBottom > 4) {
+      regions.push({ x: 0, y: bandBottom, width: pageWidth, height: pageHeight - bandBottom, reason: "letterhead_band" });
+    }
+  }
+  for (const label of items) {
+    if (!BLOCK_LABEL.test(label.text.trim())) continue;
+    regions.push({
+      x: label.x - 10,
+      y: label.y - BLOCK_HEIGHT,
+      width: BLOCK_WIDTH,
+      height: BLOCK_HEIGHT,
+      reason: "label_block",
+    });
+  }
+  return regions;
+}
+
+/** Is this item inside a block region (its baseline within the block)? */
+export function itemInsideBlock(item: MeasuredTextItem, block: StructuralRedaction): boolean {
+  return (
+    item.y < block.y + block.height - 1 &&
+    item.y >= block.y &&
+    item.x >= block.x &&
+    item.x <= block.x + block.width
+  );
+}
 
 /** A value worth sweeping for elsewhere in the document. Short or generic
  *  strings are refused so a captured value cannot black out the estimate. */
@@ -314,6 +413,24 @@ export async function redactAndRasterizePdf(
       (item) => typeof item.str === "string" && (item.str as string).trim().length > 0
     );
     const blocks = ownerBlocks.get(pageNumber) ?? [];
+    const measured: MeasuredTextItem[] = items.map((item) => ({
+      text: item.str as string,
+      x: (item.transform as number[])[4],
+      y: (item.transform as number[])[5],
+      width: item.width as number,
+      height: item.height as number,
+    }));
+    const unscaled = page.getViewport({ scale: 1 });
+    // Full scope: the letterhead band (logo included — an image no text rule
+    // reaches) and every item inside a block beneath a block label.
+    const structural = scope === "full" ? planStructuralRedactions(measured, unscaled.width, unscaled.height) : [];
+    for (const region of structural.filter((candidate) => candidate.reason === "letterhead_band")) {
+      // pdf.js y grows upward; the canvas y grows downward.
+      const top = (unscaled.height - (region.y + region.height)) * scale;
+      context.fillRect(region.x * scale, top, region.width * scale, region.height * scale);
+      redactedRegionCount += 1;
+    }
+    const labelBlocks = structural.filter((candidate) => candidate.reason === "label_block");
     for (const item of items) {
       const text = item.str as string;
       const itemX = (item.transform as number[])[4];
@@ -331,11 +448,32 @@ export async function redactAndRasterizePdf(
       // reappears — "YU, WENBAO" is printed beside "Insured:" once and stands
       // alone under "Owner:" a few lines later.
       for (const value of sweepValues) {
-        let at = text.toUpperCase().indexOf(value);
+        const upper = text.toUpperCase();
+        let at = upper.indexOf(value);
         while (at !== -1) {
-          spans.push({ start: at, end: at + value.length });
-          at = text.toUpperCase().indexOf(value, at + 1);
+          // A purely numeric value (an RO number) is swept as a whole token
+          // only: "21336" inside a ten-digit part number is that part's
+          // digits, not the RO.
+          const numeric = /^\d+$/.test(value);
+          const boundedBefore = at === 0 || !/\d/.test(upper[at - 1]);
+          const boundedAfter = at + value.length >= upper.length || !/\d/.test(upper[at + value.length]);
+          if (!numeric || (boundedBefore && boundedAfter)) {
+            spans.push({ start: at, end: at + value.length });
+          }
+          at = upper.indexOf(value, at + 1);
         }
+      }
+      // Inside a block beneath a block label, the whole item goes (the label
+      // itself, and any other identity label, survives).
+      if (
+        labelBlocks.length > 0 &&
+        !IDENTITY_LABEL.test(text.trim()) &&
+        !BLOCK_LABEL.test(text.trim()) &&
+        labelBlocks.some((block) =>
+          itemInsideBlock({ text, x: itemX, y: itemY, width: item.width as number, height: item.height as number }, block)
+        )
+      ) {
+        spans.push({ start: 0, end: text.length });
       }
       const merged = mergeSpans(spans);
       if (merged.length === 0) continue;

@@ -34,6 +34,69 @@ export interface Finding {
   category: string;
   /** All subject rows in an aggregated (QTY_SHORTFALL) group; [subject] otherwise. */
   subjects?: EstimateRow[];
+  /** MISSED only: the comparison prices the OTHER side of this two-sided
+   *  operation, so this is one side of a symmetric repair left unaddressed,
+   *  never a duplicate (RO 21336 findings 23, 51, 55, 58). */
+  otherSideOnCompeting?: "left" | "right";
+  /** Pass 5 (near-variant): the pair was made on a close description with
+   *  comparable values — a colour-variant part number, a "+25%" suffix. */
+  nearVariant?: boolean;
+}
+
+/**
+ * A CCC Supplement of Record prints, after the estimate body, a SUPPLEMENT
+ * SUMMARY: the changed, deleted and added items of each supplement, with the
+ * superseded amounts printed NEGATIVE. Those rows are history, never the
+ * document's current state, and never a pairing basis. RO 21336 cited a
+ * "-68.40" from that ledger as the carrier's figure for a rivet the main
+ * estimate priced at $63.90, and reported a $132.30 gap.
+ */
+const CHANGELOG_SECTION = /supplement\s+summary|changed\s+items|deleted\s+items|added\s+items|changelog|supplement\s+history/i;
+export function isChangelogRow(row: EstimateRow): boolean {
+  return CHANGELOG_SECTION.test(row.sectionLabel ?? "") || CHANGELOG_SECTION.test(row.section ?? "");
+}
+
+/** The aggregation identity of a row: its operation AND its side. "RT R&I
+ *  front seat" and "LT R&I front seat" are two sides of one repair, never
+ *  two occurrences of one operation. */
+function aggKeyOf(row: EstimateRow): string {
+  return row.side ? `${row.key}|${row.side}` : row.key;
+}
+
+/** Content words of a row's printed description, for the near-variant pass
+ *  (the canonical key is a compact string with no word boundaries). */
+function descriptionWords(row: EstimateRow): string[] {
+  return row.rawDesc
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !/^\d+$/.test(word));
+}
+
+/**
+ * Pass 5 evidence: a MISSED subject and a competing-only row that describe
+ * the same item under a minor variant — a colour-coded part number ("Seat
+ * belt bezel atmosphere" / "Seat belt bezel black"), a markup suffix
+ * ("Suspension Alignment +25%") — with values in the same range. Two shared
+ * content words at half or better of the shorter key, the same side (or
+ * none), and comparable price or hours.
+ */
+function isNearVariant(a: EstimateRow, b: EstimateRow): boolean {
+  if (a.side && b.side && a.side !== b.side) return false;
+  const wordsA = descriptionWords(a);
+  const wordsB = new Set(descriptionWords(b));
+  const shared = wordsA.filter((word) => wordsB.has(word));
+  if (shared.length < 2 || shared.length < Math.min(wordsA.length, wordsB.size) * 0.5) return false;
+  const price = (row: EstimateRow) => (row.price !== null && row.price > 0 ? row.price : null);
+  const hours = (row: EstimateRow) => (row.labor ?? 0) + (row.paint ?? 0);
+  const priceA = price(a);
+  const priceB = price(b);
+  if (priceA !== null && priceB !== null) {
+    const ratio = Math.max(priceA, priceB) / Math.min(priceA, priceB);
+    return ratio <= 2 || Math.abs(priceA - priceB) <= 50;
+  }
+  if (priceA === null && priceB === null) return Math.abs(hours(a) - hours(b)) <= 1;
+  return false;
 }
 
 const EPS = 0.001;
@@ -83,9 +146,16 @@ export interface PairResult {
   pairs: Array<{ subject: EstimateRow; competing: EstimateRow }>;
 }
 
-export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[]): PairResult {
+export function pairAndCompare(subjectInput: EstimateRow[], competingInput: EstimateRow[]): PairResult {
+  // History rows (a Supplement Summary's changed / deleted / added items) are
+  // never the document's current state: out of both pools before any pass.
+  const subject = subjectInput.filter((row) => !isChangelogRow(row));
+  const competing = competingInput.filter((row) => !isChangelogRow(row));
   const used = new Set<number>();
   const paired = new Map<EstimateRow, number>();
+  // A NEGATIVE competing row is a reversal or deduction, never the current
+  // state of a positive subject operation — not a pairing basis for one.
+  const usable = (s: EstimateRow, index: number) => !used.has(index) && !(isDeduction(competing[index]) && !isDeduction(s));
 
   // pass 1 — part-number-first
   const byPart = new Map<string, number[]>();
@@ -98,7 +168,7 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
   for (const s of subject) {
     if (!s.part) continue;
     for (const index of byPart.get(s.part) ?? []) {
-      if (!used.has(index)) {
+      if (usable(s, index)) {
         used.add(index);
         paired.set(s, index);
         break;
@@ -106,16 +176,16 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
     }
   }
 
-  // pass 2 — route subject-surplus keys to aggregation
-  const count = (rows: { key: string }[], include: (index: number) => boolean) => {
+  // pass 2 — route subject-surplus keys to aggregation (by operation AND side)
+  const count = (rows: EstimateRow[], include: (index: number) => boolean) => {
     const map = new Map<string, number>();
     rows.forEach((row, index) => {
-      if (include(index)) map.set(row.key, (map.get(row.key) ?? 0) + 1);
+      if (include(index)) map.set(aggKeyOf(row), (map.get(aggKeyOf(row)) ?? 0) + 1);
     });
     return map;
   };
   const subjectCount = count(subject, (index) => !paired.has(subject[index]));
-  const competingCount = count(competing, (index) => !used.has(index));
+  const competingCount = count(competing, (index) => !used.has(index) && !isDeduction(competing[index]));
   const aggKeys = new Set(
     [...subjectCount.keys()].filter(
       (key) => (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)!
@@ -130,8 +200,12 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
     else byKey.set(row.key, [index]);
   });
   for (const s of subject) {
-    if (paired.has(s) || aggKeys.has(s.key)) continue;
-    const candidates = (byKey.get(s.key) ?? []).filter((index) => !used.has(index));
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s))) continue;
+    // Same operation, and never the OPPOSING side: "LT R&I front seat" is
+    // not "RT R&I front seat" however the subject list is ordered.
+    const candidates = (byKey.get(s.key) ?? []).filter(
+      (index) => usable(s, index) && !(s.side && competing[index].side && competing[index].side !== s.side)
+    );
     candidates.sort((a, b) => {
       const costA = (competing[a].section !== s.section ? 2 : 0) + (competing[a].side !== s.side ? 1 : 0);
       const costB = (competing[b].section !== s.section ? 2 : 0) + (competing[b].side !== s.side ? 1 : 0);
@@ -145,9 +219,10 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
 
   // pass 4 — prefix containment for truncated/verbose variants
   for (const s of subject) {
-    if (paired.has(s) || aggKeys.has(s.key)) continue;
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s))) continue;
     for (let index = 0; index < competing.length; index += 1) {
-      if (used.has(index)) continue;
+      if (!usable(s, index)) continue;
+      if (s.side && competing[index].side && competing[index].side !== s.side) continue;
       const a = s.key;
       const b = competing[index].key;
       if (a.length >= 12 && b.length >= 12 && (a.startsWith(b) || b.startsWith(a))) {
@@ -158,14 +233,33 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
     }
   }
 
+  // pass 5 — near-variant: what is left unpaired on BOTH sides, where a
+  // subject and a competing row describe one item under a minor variant. One
+  // "priced / part differently" finding, never a MISSED here AND a
+  // competing-only line there for the same bezel (RO 21336: seat belt bezel
+  // atmosphere / black, $10.38 / $10.95; suspension alignment $268 / $250).
+  const nearVariants = new Set<EstimateRow>();
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s)) || isDeduction(s)) continue;
+    for (let index = 0; index < competing.length; index += 1) {
+      if (!usable(s, index) || paired.has(competing[index])) continue;
+      if (!isNearVariant(s, competing[index])) continue;
+      used.add(index);
+      paired.set(s, index);
+      nearVariants.add(s);
+      break;
+    }
+  }
+
   // emit — 1:1 deltas, MISSED, then aggregated qty shortfalls
   const findings: Finding[] = [];
   const aggSubjects = new Map<string, EstimateRow[]>();
+  const pairedSubjects = [...paired.keys()];
   for (const s of subject) {
-    if (aggKeys.has(s.key)) {
-      const list = aggSubjects.get(s.key);
+    if (aggKeys.has(aggKeyOf(s))) {
+      const list = aggSubjects.get(aggKeyOf(s));
       if (list) list.push(s);
-      else aggSubjects.set(s.key, [s]);
+      else aggSubjects.set(aggKeyOf(s), [s]);
       continue;
     }
     const index = paired.get(s);
@@ -177,7 +271,21 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
       // what the document is for (RO 22185 stamped two "Overlap Major
       // Non-Adj. Panel -0.2" lines "MISSED on ERIE").
       if (isDeduction(s)) continue;
-      findings.push({ kind: "MISSED", subject: s, competing: null, deltas: [], category: "missing on competing" });
+      // The other side of this two-sided operation IS priced on the
+      // comparison: this is one side of a symmetric repair left unaddressed.
+      const otherSide = s.side
+        ? pairedSubjects.find((t) => t !== s && t.key === s.key && t.side && t.side !== s.side)?.side
+        : undefined;
+      findings.push({
+        kind: "MISSED",
+        subject: s,
+        competing: null,
+        deltas: [],
+        category: otherSide
+          ? `${s.side} side not on the comparison estimate (it prices the ${otherSide} side only)`
+          : "missing on competing",
+        ...(otherSide ? { otherSideOnCompeting: otherSide as "left" | "right" } : {}),
+      });
       continue;
     }
     const deltas = compareTyped(s, competing[index]);
@@ -191,12 +299,13 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
           deltas[0].field === "part#"
             ? "part number change"
             : `reduced ${laborCategory(s, deltas[0].field as CellField)}`,
+        ...(nearVariants.has(s) ? { nearVariant: true } : {}),
       });
   }
   for (const [key, subjects] of aggSubjects) {
     const matched: EstimateRow[] = [];
     competing.forEach((row, index) => {
-      if (row.key === key && !used.has(index)) {
+      if (aggKeyOf(row) === key && !used.has(index) && !isDeduction(row)) {
         used.add(index);
         matched.push(row);
       }

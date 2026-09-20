@@ -516,3 +516,37 @@ describe("the adapter reads the Forensic report's own inputs", () => {
     expect(built.buckets.find((b) => b.key === "other")!.gap).toBe(220);
   });
 });
+
+describe("RO 21336 — the ADAS narrative reads from the computed findings", () => {
+  // Five sublet calibrations priced on BOTH estimates (+34% vs +25%) and one
+  // calibration with no counterpart. The dispute report narrated all of them
+  // as "the insurer wrote none of them at a real price".
+  const input = {
+    ...RO22264,
+    findings: [
+      ...RO22264.findings.filter((f) => f.section !== "adas"),
+      { id: 12, category: "part_or_price_difference" as const, section: "adas" as const, title: "Front view camera calibration +34%", lineA: 120, amountDelta: 35.0, priceA: 469.0, priceB: 434.0 },
+      { id: 13, category: "part_or_price_difference" as const, section: "adas" as const, title: "Pre-repair scan +34%", lineA: 121, amountDelta: 12.0, priceA: 167.0, priceB: 155.0 },
+      { id: 62, category: "missing_operation" as const, section: "adas" as const, title: "Seat belt dynamic function test +34%", lineA: 130, amountDelta: 120.0 },
+    ],
+  };
+  const adasModel = buildPlainSummaryModel(input);
+  const doc = buildPlainSummaryDocument(adasModel);
+  const text = JSON.stringify(doc);
+
+  it("separates ADAS lines the insurer priced from the ones it did not write", () => {
+    expect(adasModel.adas.priced.map((x) => x.title)).toEqual(["Front view camera calibration +34%", "Pre-repair scan +34%"]);
+    expect(adasModel.adas.lines.map((x) => x.title)).toEqual(["Seat belt dynamic function test +34%"]);
+  });
+
+  it("never says the insurer wrote none of them at a real price when it priced some", () => {
+    expect(text).not.toContain("The insurer wrote none of them at a real price");
+    expect(text).toMatch(/The insurer priced 2 of them at a different figure: Front view camera calibration \+34% \(\$469\.00 on ours, \$434\.00 on theirs\), Pre-repair scan \+34% \(\$167\.00 on ours, \$155\.00 on theirs\)\./);
+    expect(text).toMatch(/Missing on theirs: Seat belt dynamic function test \+34%\./);
+  });
+
+  it("still says so when nothing ADAS was priced", () => {
+    const none = buildPlainSummaryModel({ ...input, findings: input.findings.filter((f) => f.category !== "part_or_price_difference") });
+    expect(JSON.stringify(buildPlainSummaryDocument(none))).toContain("The insurer wrote none of them at a real price.");
+  });
+});

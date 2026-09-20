@@ -65,7 +65,8 @@ describe("identifiers inside one text item", () => {
   it("leaves estimate content untouched", () => {
     expect(cover("2023 TESL Model 3 RWD 4D SED Electric- Electric GRAY")).toEqual([]);
     expect(cover("Repl RT Headlamp assy 156371400G 2,341.65")).toEqual([]);
-    expect(cover("RO Number: 22116")).toEqual([]);
+    // The RO is the document's own identifier and leaves under the full scope.
+    expect(cover("RO Number: 22116")).toEqual(["22116"]);
   });
 });
 

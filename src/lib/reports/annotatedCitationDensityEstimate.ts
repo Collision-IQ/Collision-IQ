@@ -436,6 +436,8 @@ function engineResultToLineItemDeltas(params: {
     const lowerRow = finding.competing ? engineRowsToDeltaRows([finding.competing], null)[0] ?? null : null;
     if (finding.kind === "MISSED") {
       missingOperationCount += 1;
+      const otherSide = finding.otherSideOnCompeting;
+      const sideLabel = (side: string) => (side === "left" ? "LT" : side === "right" ? "RT" : side);
       deltas.push({
         kind: "missing_operation",
         lowerRow: null,
@@ -445,7 +447,10 @@ function engineResultToLineItemDeltas(params: {
         laborDelta: finding.subject.labor,
         paintDelta: finding.subject.paint,
         priceDelta: finding.subject.price,
-        summary: `${higherRow.description} is documented on this estimate and has no counterpart on the comparison estimate.`,
+        summary: otherSide
+          ? `${higherRow.description} is documented on this estimate; the comparison estimate prices only the ${sideLabel(otherSide)} side of this two-sided operation. This is the ${sideLabel(finding.subject.side)} side left unaddressed — one side of a symmetric repair, not a duplicate of the ${sideLabel(otherSide)} line.`
+          : `${higherRow.description} is documented on this estimate and has no counterpart on the comparison estimate.`,
+        ...(otherSide ? { statusLabels: ["ONE_SIDE_ONLY_ON_COMPARISON"] } : {}),
       });
       continue;
     }
@@ -481,7 +486,11 @@ function engineResultToLineItemDeltas(params: {
         ...(laborDelta !== null ? ["labor"] : []),
         ...(paintDelta !== null ? ["paint"] : []),
       ],
-      statusLabels: aggregated ? [`AGGREGATED_GROUP_${(finding.subjects ?? []).length || 1}X`] : undefined,
+      statusLabels: aggregated
+        ? [`AGGREGATED_GROUP_${(finding.subjects ?? []).length || 1}X`]
+        : finding.nearVariant
+          ? ["NEAR_VARIANT_PAIR"]
+          : undefined,
       summary: aggregated
         ? `${finding.category} across L${lines.join("/L")}.`
         : `${higherRow.description}: ${finding.deltas

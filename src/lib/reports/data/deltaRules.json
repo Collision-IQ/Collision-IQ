@@ -181,7 +181,13 @@
     "Test 98/99 reviews asked for the reversal explicitly."
   ],
   "redaction": {
-    "scope": "natural_person"
+    "$scopeComment": [
+      "full: every identifier leaves the export — the shop letterhead and logo, RO, workfile and",
+      "federal/tax IDs, writer, adjuster, claim and policy numbers, insurer, plate, owner and the VIN",
+      "tail. natural_person kept the insurer, claim, RO and shop legible (Test 98/99); the 2026-09-20",
+      "review of RO 21336 asked for those gone too, on every deliverable."
+    ],
+    "scope": "full"
   },
 
   "marks": {

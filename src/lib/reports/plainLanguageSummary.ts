@@ -163,7 +163,14 @@ export interface PlainSummaryModel {
   paintHours: NamedLine[];      // blends, clear coat adds, feather/prime/block
   bodyHours: NamedLine[];       // door shells, test fits, R&I trim
   bumperOverhaul?: Finding;     // the reduced_labor bumper finding, if present
-  adas: { lines: NamedLine[]; placeholders: NamedLine[]; scanPriceDiff?: Finding };
+  adas: {
+    /** ADAS lines with NO counterpart on the comparison estimate. */
+    lines: NamedLine[];
+    /** ADAS lines the comparison estimate DOES price, at a different figure. */
+    priced: Array<NamedLine & { priceA?: number; priceB?: number }>;
+    placeholders: NamedLine[];
+    scanPriceDiff?: Finding;
+  };
   misc: NamedLine[];
   supportReview: Finding[];
   missingLineCount: number;
@@ -295,8 +302,15 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
     .slice(0, 8)
     .map((f) => named(f, "labor"));
 
-  const adasAll = F.filter((f) => isAdas(f) && f.category !== "support_review");
-  const adasLines = adasAll.map((f) => named(f, "labor"));
+  const adasAll = F.filter((f) => isAdas(f) && f.category !== "support_review" && f.category !== "lower_only_lines");
+  // Read from the SAME computed findings the forensic report prints: a
+  // priced-differently ADAS line is priced on both estimates and is never
+  // "missing on theirs" (RO 21336: five sublet calibrations at +25% vs +34%
+  // were narrated as "the insurer wrote none of them at a real price").
+  const adasMissing = adasAll.filter((f) => f.category === "missing_operation");
+  const adasPriced = adasAll.filter((f) => f.category !== "missing_operation");
+  const adasLines = adasMissing.map((f) => named(f, "labor"));
+  const adasPricedLines = adasPriced.map((f) => ({ ...named(f, "labor"), priceA: f.priceA, priceB: f.priceB }));
   const placeholders = adasAll
     .filter((f) => f.priceA !== undefined && f.priceA > 0 && f.priceA <= 0.01)
     .map((f) => named(f, "labor"));
@@ -323,7 +337,7 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
     paintHours,
     bodyHours,
     bumperOverhaul: F.find((f) => f.category === "reduced_labor" && BUMPER_OH.test(f.title)),
-    adas: { lines: adasLines, placeholders, scanPriceDiff },
+    adas: { lines: adasLines, priced: adasPricedLines, placeholders, scanPriceDiff },
     misc,
     supportReview: F.filter((f) => f.category === "support_review"),
     missingLineCount: input.missingLineCount,
@@ -551,13 +565,25 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
   }
   bucketBlocks.push({ kind: "bullets", items: hoursItems });
 
-  if (model.adas.lines.length) {
+  if (model.adas.lines.length || model.adas.priced.length) {
     bucketBlocks.push({ kind: "subheading", text: "Safety systems / ADAS (small dollars now, big dollars later)" });
+    const pricedText = model.adas.priced.length
+      ? `The insurer priced ${model.adas.priced.length === 1 ? "this one" : `${model.adas.priced.length} of them`} at a different figure: ${model.adas.priced
+          .map((x) =>
+            typeof x.priceA === "number" && typeof x.priceB === "number"
+              ? `${x.title} (${money(x.priceA)} on ours, ${money(x.priceB)} on theirs)`
+              : x.title
+          )
+          .join(", ")}. `
+      : "";
+    const missingText = model.adas.lines.length
+      ? `${model.adas.priced.length ? "" : "The insurer wrote none of them at a real price. "}Missing on theirs: ${model.adas.lines.map((x) => x.title).join(", ")}.`
+      : "";
     bucketBlocks.push({
       kind: "paragraph",
-      text: `${model.adas.placeholders.length ? `${model.adas.placeholders.length} calibration and scan lines on our sheet are written at $0.01 as a placeholder, cost open to the dealer invoice. ` : ""}The insurer wrote none of them at a real price. ${
-        pricedBoth ? `${pricedBoth.title}: ${money(pricedBoth.priceA!)} on ours, ${money(pricedBoth.priceB!)} on theirs. ` : ""
-      }Missing on theirs: ${model.adas.lines.map((x) => x.title).join(", ")}.`,
+      text: `${model.adas.placeholders.length ? `${model.adas.placeholders.length} calibration and scan lines on our sheet are written at $0.01 as a placeholder, cost open to the dealer invoice. ` : ""}${
+        pricedBoth && !model.adas.priced.length ? `${pricedBoth.title}: ${money(pricedBoth.priceA!)} on ours, ${money(pricedBoth.priceB!)} on theirs. ` : ""
+      }${pricedText}${missingText}`.trim(),
     });
     bucketBlocks.push({
       kind: "bullets",
