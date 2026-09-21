@@ -300,5 +300,9 @@ describe("VIN decode → profile fields", () => {
     const panel = read("src/components/workspace/MyVehiclePanel.tsx");
     expect(panel).toMatch(/\/api\/vehicle\/decode-vin/);
     expect(panel).toMatch(/lastDecodedVin/);
+    // A saved VIN with fields missing decodes on load (filling gaps only), and
+    // there is always a manual Decode VIN button as the explicit trigger.
+    expect(panel).toMatch(/"fill-missing"/);
+    expect(panel).toMatch(/Decode VIN/);
   });
 });
