@@ -55,6 +55,11 @@ Appends one line to `scripts/explee-performance-log.jsonl` (gitignored; set
 today's totals, the per-campaign breakdown, the project budget, and the count
 of replies awaiting a human.
 
+Replies live in the Explee inbox, not your email. When any are waiting, or a
+hot lead arrived today, the run ends with an **ACTION NEEDED** banner naming
+the campaign and the command to open it, and exits with code 2 (0 = nothing
+waiting, 1 = the snapshot failed), so a scheduled task can notice.
+
 ### 5. View the summary
 ```bash
 node scripts/explee-daily-monitor.cjs summary

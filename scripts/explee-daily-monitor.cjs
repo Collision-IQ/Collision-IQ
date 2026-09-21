@@ -12,6 +12,9 @@
  *
  * Writes: scripts/explee-performance-log.jsonl (one JSON line per run).
  * Override the log location with EXPLEE_LOG_FILE.
+ *
+ * Exit codes: 0 nothing waiting, 2 replies or hot leads need a human (the
+ * banner at the end says which), 1 the snapshot failed.
  */
 
 const fs = require('fs');
@@ -210,6 +213,31 @@ ${rows.join('\n')}
   static summary() {
     console.log(PerformanceMonitor.formatSummary(PerformanceMonitor.readLog()));
   }
+
+  /**
+   * Pure: what needs a human right now, or null when nothing does.
+   * Replies waiting in the Explee inbox are the reason to go look; hot leads
+   * that arrived today are the reason to look quickly.
+   */
+  static attentionBanner(snapshot) {
+    const waiting = num(snapshot.needReplyTotal);
+    const hotToday = num(snapshot.today && snapshot.today.hotLeads);
+    if (waiting === 0 && hotToday === 0) return null;
+
+    const lines = ['', '🔔 ACTION NEEDED — replies live in the Explee inbox, not your email'];
+    if (waiting > 0) {
+      lines.push(`   ${waiting} repl${waiting === 1 ? 'y is' : 'ies are'} waiting for a human:`);
+      for (const c of snapshot.campaignDetails || []) {
+        if (num(c.needReply) > 0) {
+          lines.push(`     • ${c.name}: ${c.needReply}  →  node scripts/explee-api.cjs get-inbox ${c.id} need_reply`);
+        }
+      }
+    }
+    if (hotToday > 0) {
+      lines.push(`   ${hotToday} hot lead${hotToday === 1 ? '' : 's'} today  →  node scripts/explee-api.cjs get-hot-leads`);
+    }
+    return lines.join('\n');
+  }
 }
 
 async function main() {
@@ -230,6 +258,11 @@ async function main() {
   try {
     const snapshot = await new PerformanceMonitor().captureSnapshot(arg);
     console.log('\n' + JSON.stringify(snapshot, null, 2));
+    const banner = PerformanceMonitor.attentionBanner(snapshot);
+    if (banner) {
+      console.log(banner);
+      process.exitCode = 2; // "someone is waiting" — lets a scheduled task notice
+    }
   } catch (err) {
     console.error('Fatal error:', err.message);
     process.exit(1);

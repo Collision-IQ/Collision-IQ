@@ -151,6 +151,7 @@ const specHas = (method, routePath) => {
       { campaign_id: 2, name: "MSOs", status: "paused", status_reason: "budget_pause", emails_sent: 50, total_replies: 2, reply_rate_pct: 4, hot_leads: 1, spend_usd: 5.5, cost_per_lead_usd: 5.5, daily_budget_usd: 5, leads_pool_used: 50, leads_pool_total: 90, cold_lost: 0 },
     ],
   };
+  const TODAY_QUIET = { total_emails_sent: 20, total_replies: 0, total_auto_replies: 0, overall_reply_rate_pct: 0, total_hot_leads: 0, total_spend_usd: 0.6, campaigns: [] };
   const TODAY = { total_emails_sent: 20, total_replies: 1, total_auto_replies: 0, overall_reply_rate_pct: 5, total_hot_leads: 1, total_spend_usd: 1.25, campaigns: [] };
   const CAMPAIGNS = [
     { id: 1, project_id: 7, name: "Body shops", status: "outreach", daily_limit_usd: 5 },
@@ -212,6 +213,23 @@ const specHas = (method, routePath) => {
     assert.match(out, /Awaiting a human reply: 2/);
     assert.match(out, /MSOs \[paused: budget_pause\]/);
     assert.match(out, /Fleet \[discovery\]/);
+  });
+
+  await test("attentionBanner names waiting replies and today's hot leads, and is null when quiet", () => {
+    const quiet = PerformanceMonitor.buildSnapshot({ project: PROJECT, allTime: ALL, today: TODAY_QUIET, campaigns: CAMPAIGNS, needReply: { 1: 0, 2: 0 } });
+    assert.equal(PerformanceMonitor.attentionBanner(quiet), null);
+
+    const busy = PerformanceMonitor.buildSnapshot({ project: PROJECT, allTime: ALL, today: TODAY, campaigns: CAMPAIGNS, needReply: { 1: 2, 2: 0, 3: 1 } });
+    const banner = PerformanceMonitor.attentionBanner(busy);
+    assert.match(banner, /ACTION NEEDED/);
+    assert.match(banner, /3 replies are waiting for a human/);
+    assert.match(banner, /• Body shops: 2  →  node scripts\/explee-api\.cjs get-inbox 1 need_reply/);
+    assert.match(banner, /• Fleet: 1/);
+    assert.doesNotMatch(banner, /• MSOs/);
+    assert.match(banner, /1 hot lead today  →  node scripts\/explee-api\.cjs get-hot-leads/);
+
+    const one = PerformanceMonitor.buildSnapshot({ project: PROJECT, allTime: ALL, today: TODAY_QUIET, campaigns: CAMPAIGNS, needReply: { 2: 1 } });
+    assert.match(PerformanceMonitor.attentionBanner(one), /1 reply is waiting/);
   });
 
   await test("readLog parses JSONL and ignores blank lines", () => {
