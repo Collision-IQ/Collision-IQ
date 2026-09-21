@@ -1,3 +1,5 @@
+import type { VehicleRecallSnapshot } from "@/lib/nhtsa/types";
+
 // Deterministic vehicle-maintenance projections. Pure functions — no I/O — so
 // they are easy to test and safe to run on the server or the client.
 //
@@ -29,6 +31,10 @@ export type VehicleProfile = {
   oilChange?: ServiceRecord;
   tireRotation?: ServiceRecord;
   tireChange?: ServiceRecord;
+  /** Most recent NHTSA recall check (server-managed; see src/lib/nhtsa). */
+  recalls?: VehicleRecallSnapshot | null;
+  /** NHTSA campaign numbers already surfaced to the owner (server-managed). */
+  seenRecallCampaignNumbers?: string[];
   updatedAt?: string;
 };
 

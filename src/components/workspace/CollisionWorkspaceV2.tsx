@@ -324,11 +324,18 @@ export default function CollisionWorkspaceV2({
         if (!response.ok || cancelled) return;
         const data = (await response.json()) as {
           maintenance?: { items?: Array<{ key: string; status: string }> } | null;
+          profile?: { recalls?: { campaigns?: Array<{ campaignNumber: string }> } | null } | null;
         };
         const dueKeys = (data.maintenance?.items ?? [])
           .filter((item) => item.status === "overdue" || item.status === "due-soon")
           .map((item) => item.key);
-        if (!cancelled) markVehicleMaintenanceIfChanged(dueKeys);
+        // Open NHTSA recall campaigns ride the same fingerprint, so a newly
+        // surfaced campaign lights the dot once, exactly like a newly due item.
+        const recallKeys = (data.profile?.recalls?.campaigns ?? [])
+          .map((c) => c.campaignNumber)
+          .filter(Boolean)
+          .map((n) => `recall:${n}`);
+        if (!cancelled) markVehicleMaintenanceIfChanged([...dueKeys, ...recallKeys]);
       } catch {
         // signed-out / offline — no dot
       }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { VehicleProfile, MileageReading } from "@/lib/vehicleMaintenance";
+import type { VehicleRecallSnapshot } from "@/lib/nhtsa/types";
 
 // The vehicle profile + its attachments are persisted as rows in the existing
 // UploadedAttachment table (which is present on every deployment) using only
@@ -111,6 +112,54 @@ export async function saveVehicleProfile(
   }
 
   return merged;
+}
+
+/**
+ * Persist the outcome of a recall check. Server-managed fields only: the
+ * snapshot replaces the previous one and newly surfaced campaign numbers are
+ * appended to the seen list, so a later weekly run only reports NEW campaigns.
+ */
+export async function saveVehicleRecallSnapshot(
+  userId: string,
+  snapshot: VehicleRecallSnapshot,
+  seenRecallCampaignNumbers: string[]
+): Promise<VehicleProfile> {
+  const existing = await getVehicleProfile(userId);
+  const merged: VehicleProfile = { ...existing, recalls: snapshot, seenRecallCampaignNumbers };
+  const text = JSON.stringify(merged);
+  const row = await findProfileRow(userId);
+  if (row) {
+    await prisma.uploadedAttachment.update({ where: { id: row.id }, data: { text }, select: { id: true } });
+  } else {
+    await prisma.uploadedAttachment.create({
+      data: { filename: PROFILE_FILENAME, type: PROFILE_TYPE, text, ...ownerWhere(userId) },
+      select: { id: true },
+    });
+  }
+  return merged;
+}
+
+export type StoredVehicleProfile = { userId: string; profile: VehicleProfile };
+
+/**
+ * Every user's vehicle profile (newest row per user), for the weekly recall
+ * sweep. Profile rows are small JSON blobs, so a single scan is fine at the
+ * current scale; paginate here if the table ever grows past that.
+ */
+export async function listAllVehicleProfiles(): Promise<StoredVehicleProfile[]> {
+  const rows = await prisma.uploadedAttachment.findMany({
+    where: { ownerType: "USER", type: PROFILE_TYPE },
+    select: { ownerId: true, text: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const seen = new Set<string>();
+  const out: StoredVehicleProfile[] = [];
+  for (const row of rows) {
+    if (seen.has(row.ownerId)) continue;
+    seen.add(row.ownerId);
+    out.push({ userId: row.ownerId, profile: parseProfile(row.text) });
+  }
+  return out;
 }
 
 export async function listVehicleAttachments(userId: string): Promise<VehicleAttachment[]> {

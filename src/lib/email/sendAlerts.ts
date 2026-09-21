@@ -111,3 +111,33 @@ Timestamp: ${new Date().toISOString()}
     // Don't throw — log and continue.
   }
 }
+
+/**
+ * Weekly NHTSA recall alert to a vehicle owner. Returns true only when an
+ * email was actually handed to Resend; false when the sender is not
+ * configured or the send failed (the caller still surfaces the recalls in-app).
+ */
+export async function sendRecallAlert(params: {
+  to: string;
+  vehicleLabel: string;
+  campaignCount: number;
+  text: string;
+}): Promise<boolean> {
+  const client = getResend();
+  if (!client) {
+    console.warn("[sendRecallAlert] RESEND_API_KEY not set — skipping recall email.");
+    return false;
+  }
+  try {
+    await client.emails.send({
+      from: "reports@collision-iq.ai",
+      to: params.to,
+      subject: `[Collision iQ] ${params.campaignCount === 1 ? "New safety recall" : `${params.campaignCount} new safety recalls`} for your ${params.vehicleLabel}`,
+      text: params.text,
+    });
+    return true;
+  } catch (error) {
+    console.error("[sendRecallAlert] Failed to send recall email:", error);
+    return false;
+  }
+}
