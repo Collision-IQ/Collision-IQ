@@ -17,6 +17,7 @@ every surface (panel, email) and points owners at NHTSA's VIN checker.
 | --- | --- |
 | `src/lib/nhtsa/client.ts` | fetch with timeout + backoff (429/5xx) |
 | `src/lib/nhtsa/vinDecode.ts` | vPIC decode; distinct from the offline `decodeVinVehicleIdentity`, which has no model |
+| `src/app/api/vehicle/decode-vin/route.ts` | `POST { vin }` → decoded fields for the My Vehicle form; persists nothing |
 | `src/lib/nhtsa/recalls.ts` | recalls-by-vehicle lookup |
 | `src/lib/nhtsa/vehicleRecalls.ts` | identity resolution (cached decode → vPIC → typed profile), snapshot, seen-campaign diffing, grouping, alert copy |
 | `src/app/api/vehicle/recalls/route.ts` | `POST` on-demand check for the signed-in user's stored vehicle |
@@ -33,6 +34,12 @@ so neither can be written by a client; only the two routes above set them.
 
 ## Behaviour
 
+- **VIN decoder in the form.** A well-formed 17-character VIN typed or
+  pasted into My Vehicle is decoded by NHTSA vPIC (debounced, once per
+  distinct VIN) and the year, make and model fill in automatically; the
+  decode outranks what was typed. A VIN that is missing or cannot be decoded
+  leaves manual entry as the fallback, with the reason shown under the field.
+  A VIN loaded from the saved profile is not re-decoded over saved values.
 - Saving a new or changed VIN / year / make / model in the panel triggers an
   immediate check; "Re-check recalls" re-runs it. Campaigns returned are
   marked seen because the owner saw them in the panel.

@@ -59,3 +59,43 @@ export async function decodeVinViaVpic(
     errorText: isValid ? null : row.ErrorText || "VIN could not be fully decoded.",
   };
 }
+
+/** Makes NHTSA returns in caps that are written in caps by their owners. */
+const ALL_CAPS_MAKES = new Set(["BMW", "GMC", "RAM", "MINI", "KIA", "MG", "SRT", "AMC", "GM"]);
+
+/**
+ * vPIC returns makes in ALL CAPS ("FORD", "MERCEDES-BENZ", "LAND ROVER").
+ * Present them the way the form expects while leaving initialisms alone.
+ */
+export function formatVpicMake(make: string | null | undefined): string | null {
+  const trimmed = (make ?? "").trim();
+  if (!trimmed) return null;
+  const upper = trimmed.toUpperCase();
+  if (ALL_CAPS_MAKES.has(upper)) return upper;
+  return upper
+    .split(/(\s+|-)/)
+    .map((part) => (/^[A-Z]/.test(part) ? part[0] + part.slice(1).toLowerCase() : part))
+    .join("");
+}
+
+export interface DecodedVinProfileFields {
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  trim: string | null;
+}
+
+/**
+ * The profile fields a successful decode fills in. An invalid decode yields
+ * all nulls so a caller never overwrites typed values with partial data.
+ */
+export function decodedVinToProfileFields(decoded: VpicDecodeResult): DecodedVinProfileFields {
+  if (!decoded.isValid) return { year: null, make: null, model: null, trim: null };
+  const year = decoded.modelYear ? Number(decoded.modelYear) : NaN;
+  return {
+    year: Number.isFinite(year) ? year : null,
+    make: formatVpicMake(decoded.make),
+    model: decoded.model?.trim() || null,
+    trim: decoded.trim?.trim() || null,
+  };
+}
