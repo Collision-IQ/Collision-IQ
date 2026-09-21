@@ -22,6 +22,7 @@ every surface (panel, email) and points owners at NHTSA's VIN checker.
 | `src/app/api/vehicle/recalls/route.ts` | `POST` on-demand check for the signed-in user's stored vehicle |
 | `src/app/api/cron/check-recalls/route.ts` | weekly sweep; `CRON_SECRET` bearer or Platform Admin |
 | `vercel.json` | schedules the sweep Monday 13:00 UTC |
+| `src/lib/nhtsa/chatRecallLookup.ts` | chat: recall-question detection, vehicle selection, live lookup, evidence block for the model |
 
 ## Storage
 
@@ -42,6 +43,16 @@ so neither can be written by a client; only the two routes above set them.
   still updates the in-app snapshot and reports `emailsSent: 0`.
 - Open campaigns feed the My Vehicle nav dot through the existing
   `markVehicleMaintenanceIfChanged` fingerprint (`recall:<campaign>` keys).
+- **Chat** (`/api/chat`): a recall question (e.g. "Check for recall: <VIN>",
+  "any open recalls on my car?") triggers a live lookup before the model's
+  first pass. Vehicle precedence: VIN in the message → vehicle resolved from
+  the case/attachments → the signed-in user's saved My Vehicle. The result is
+  appended to the system instructions as an evidence block that forbids
+  answering from memory, requires campaign numbers, and carries the
+  year/make/model caveat; the same block reaches the research-mode
+  refinement pass. When the vehicle checked is the saved one, the snapshot
+  and seen list are persisted so the weekly sweep does not re-alert. With no
+  identifiable vehicle the model is told to ask for a VIN rather than guess.
 
 ## Local check
 
