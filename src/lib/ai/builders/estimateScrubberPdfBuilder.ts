@@ -30,6 +30,14 @@ import {
   normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
 import { CCC_WORKFILE_DISCLAIMER } from "@/lib/ccc/cccWorkfileClient";
+import {
+  buildDegInquiryCitationNote,
+  buildDegInquiryCitationTitle,
+  findDegInquiryForSource,
+  findSettlingDegInquiries,
+  type DegInquiryPlatform,
+} from "@/lib/ai/degInquiries";
+import { sniffEstimatingPlatform } from "@/lib/ai/estimatingGuides";
 
 export type AnnotatedEstimateAudience = "customer" | "estimator" | "admin";
 
@@ -582,7 +590,8 @@ function buildComparisonOnlyAnnotations(
   comparisonRows: EstimateComparisonRow[],
   lineAnchors: EstimateLineAnchor[],
   offset: number,
-  scrubTargetRole: AnnotatedEstimateReviewModel["scrubTarget"]["role"]
+  scrubTargetRole: AnnotatedEstimateReviewModel["scrubTarget"]["role"],
+  platform: DegInquiryPlatform | null
 ): EstimateAnnotation[] {
   return comparisonRows
     .map((row) => ({ row, score: scoreComparisonRowForAnnotation(row) }))
@@ -611,6 +620,7 @@ function buildComparisonOnlyAnnotations(
         anchor: anchor ?? undefined,
         lowerLine,
         higherLine,
+        platform,
       });
 
       return {
@@ -630,7 +640,9 @@ function buildComparisonOnlyAnnotations(
         citationDensityScore,
         citationReadiness,
         citationFinding,
-        sourceRefs: [],
+        sourceRefs: buildAnnotationSourceRefs({
+          sources: attachDegInquirySources([], `${title} ${lowerLine ?? ""} ${higherLine ?? ""} ${anchor?.text ?? ""}`, platform),
+        }),
         visibility: {
           customer: true,
           estimator: true,
@@ -745,6 +757,7 @@ function buildCitationDensityFindingFromScrubFinding(params: {
   anchor: EstimateLineAnchor;
   comparison: { shopLine?: string; carrierLine?: string; difference?: string } | null;
   sourceRefs: string[];
+  platform?: DegInquiryPlatform | null;
 }): CitationDensityFinding {
   const sourceText = `${params.sourceRefs.join(" ")} ${params.comparison?.shopLine ?? ""} ${params.comparison?.carrierLine ?? ""} ${params.anchor.text}`;
   const text = `${params.finding.operation} ${params.finding.status} ${params.finding.whyItMatters} ${params.finding.recommendedRevision} ${sourceText}`;
@@ -754,7 +767,11 @@ function buildCitationDensityFindingFromScrubFinding(params: {
     lineNumber: params.anchor.lineNumber > 0 ? String(params.anchor.lineNumber) : extractLineNumberFromText(params.anchor.text),
     nearbyOperation: params.finding.operation,
   });
-  const sources = mergeEmbeddedLinkSources(params.finding.sources, embeddedEstimateLinks);
+  const sources = attachDegInquirySources(
+    mergeEmbeddedLinkSources(params.finding.sources, embeddedEstimateLinks),
+    text,
+    params.platform
+  );
   const citationStatus = buildCitationSupportStatus(sources, params.finding.citationGapBucket, text);
   const verifiedAuthorityCount = countVerifiedAuthoritySources(sources);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
@@ -830,6 +847,7 @@ function buildCitationDensityFindingFromComparison(params: {
   anchor?: EstimateLineAnchor;
   lowerLine?: string;
   higherLine?: string;
+  platform?: DegInquiryPlatform | null;
 }): CitationDensityFinding {
   const text = `${params.title} ${params.row.category ?? ""} ${params.row.operation ?? ""} ${params.row.partName ?? ""} ${params.row.delta ?? ""} ${params.row.notes?.join(" ") ?? ""}`;
   const embeddedEstimateLinks = detectEmbeddedEstimateLinks({
@@ -837,7 +855,11 @@ function buildCitationDensityFindingFromComparison(params: {
     estimateRole: "unknown",
     nearbyOperation: params.title,
   });
-  const sources = mergeEmbeddedLinkSources([], embeddedEstimateLinks);
+  const sources = attachDegInquirySources(
+    mergeEmbeddedLinkSources([], embeddedEstimateLinks),
+    `${text} ${params.lowerLine ?? ""} ${params.higherLine ?? ""} ${params.anchor?.text ?? ""}`,
+    params.platform
+  );
   const citationStatus = buildCitationSupportStatus(sources, params.citationGapBucket, text);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
   const bestAvailableAuthority = resolveBestAvailableAuthority(sources, citationStatus);
@@ -1094,6 +1116,45 @@ function inferEmbeddedLinkRetrievalStatus(
   return "not_fetched";
 }
 
+/**
+ * The estimating platform the scrubbed estimate was written on, from the
+ * document's own markers, or null when the raw text carries none. Decides
+ * whether a platform-specific DEG inquiry may be attached as settled.
+ */
+function resolveScrubberEstimatePlatform(params: ExportBuilderInput): DegInquiryPlatform | null {
+  const rawText = params.analysis?.rawEstimateText ?? params.report?.analysis?.rawEstimateText ?? "";
+  return sniffEstimatingPlatform(rawText);
+}
+
+/**
+ * Attach the DEG inquiries on file that SETTLE this item (operation and
+ * subject both named in the text) as reviewed DEG authority. A platform the
+ * document establishes as not the inquiry's excludes it; an unknown platform
+ * attaches it with a note asking for the platform to be confirmed. An
+ * inquiry already cited is not attached twice.
+ */
+export function attachDegInquirySources(
+  sources: SourceCitation[],
+  text: string,
+  platform: DegInquiryPlatform | null | undefined
+): SourceCitation[] {
+  const matches = findSettlingDegInquiries(text, { platform });
+  if (matches.length === 0) return sources;
+  const cited = new Set(
+    sources.map((source) => findDegInquiryForSource(source)?.id).filter((id): id is number => typeof id === "number")
+  );
+  const added = matches
+    .filter((match) => !cited.has(match.inquiry.id))
+    .map((match) => ({
+      title: buildDegInquiryCitationTitle(match.inquiry),
+      sourceType: "DEG" as const,
+      url: match.inquiry.url,
+      note: buildDegInquiryCitationNote(match),
+      verified: true,
+    }));
+  return added.length > 0 ? [...sources, ...added] : sources;
+}
+
 function mergeEmbeddedLinkSources(
   sources: SourceCitation[],
   links: CitationDensityEmbeddedEstimateLink[]
@@ -1132,6 +1193,10 @@ function buildAuthorityNote(
 
 function isReviewedAuthoritySource(source: SourceCitation): boolean {
   if (!source.verified) return false;
+  // A DEG inquiry on file is a reviewed record; its title names the
+  // platform ("CCC ONE"), which the estimate-evidence guard below would
+  // otherwise read as parser-derived.
+  if (source.sourceType === "DEG" && findDegInquiryForSource(source)) return true;
   if (!isAuthoritySource(source)) return false;
   const sourceText = `${source.sourceType} ${source.title} ${source.note ?? ""}`;
   if (/EstimateParser|CCC|BMS|Mitchell|Audatex|estimate link|embedded link/i.test(sourceText) &&
@@ -1503,7 +1568,19 @@ function buildEstimateAnnotations(params: {
   annotations: EstimateAnnotation[];
   diagnostics: CitationDensityDeltaDiagnostics;
 } {
-  const findingAnnotations = params.findings.map((finding, index) => {
+  const platform = resolveScrubberEstimatePlatform(params.params);
+  const findingAnnotations = params.findings.map((rawFinding, index) => {
+    // A DEG inquiry on file that settles the item joins the finding's own
+    // sources first, so the reader-facing source references carry it, not
+    // only the citation-density status.
+    const finding: EstimateScrubFinding = {
+      ...rawFinding,
+      sources: attachDegInquirySources(
+        rawFinding.sources,
+        `${rawFinding.operation} ${rawFinding.status} ${rawFinding.whyItMatters} ${rawFinding.recommendedRevision}`,
+        platform
+      ),
+    };
     const anchor = findEstimateAnchorForFinding(finding, params.lineItems, params.lineAnchors, params.params);
     const category = classifyAnnotationCategory(finding);
     const severity = classifyAnnotationSeverity(category, finding);
@@ -1522,6 +1599,7 @@ function buildEstimateAnnotations(params: {
       anchor,
       comparison,
       sourceRefs,
+      platform,
     });
 
     return {
@@ -1558,7 +1636,8 @@ function buildEstimateAnnotations(params: {
     params.comparisonRows,
     params.lineAnchors,
     findingAnnotations.length,
-    params.scrubTargetRole
+    params.scrubTargetRole,
+    platform
   );
   const combined = [...findingAnnotations, ...comparisonAnnotations];
   const annotations = dedupeAnnotations(combined);
@@ -1799,11 +1878,14 @@ export function isPlaceholderScrubberSource(source: Pick<SourceCitation, "title"
   );
 }
 
-export function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string[] {
+export function buildAnnotationSourceRefs(finding: Pick<EstimateScrubFinding, "sources">): string[] {
   return finding.sources
     .map((source) => {
       if (isPlaceholderScrubberSource(source)) return "";
-      const title = cleanCustomerFacingEstimateLine(source.title);
+      // A DEG inquiry title is authored library text, not a parsed estimate
+      // line; the line cleaner would read its "frame-mounted" as a structural
+      // parser fragment and replace the whole title.
+      const title = findDegInquiryForSource(source) ? source.title.trim() : cleanCustomerFacingEstimateLine(source.title);
       if (!title) return "";
       const classification = classifyScrubberSource(source.sourceType, title);
       return `${SCRUBBER_SOURCE_LABELS[classification] ?? "Supporting evidence"}: ${title}`;
@@ -1814,6 +1896,7 @@ export function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string
 function classifyScrubberSource(sourceType: string | undefined, title: string): string {
   const text = `${sourceType ?? ""} ${title}`;
   if (/policy|declaration|endorsement/i.test(text)) return "POLICY_EVIDENCE";
+  if (/\bDEG\b|database enhancement gateway/i.test(text)) return "INDUSTRY_CONTEXT";
   if (/estimate|ccc|mitchell|audatex|uploadeddocument|estimateparser/i.test(text)) return "ESTIMATE_EVIDENCE";
   if (/position statement/i.test(text)) return "OEM_POSITION_STATEMENT";
   if (/oem|procedure|repair manual|service manual/i.test(text)) return "OEM_PROCEDURE";
