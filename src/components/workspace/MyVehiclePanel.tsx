@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Car, FileText, Loader2, Lock, Paperclip, Save, Trash2, Wrench, X } from "lucide-react";
+import { Car, FileText, Loader2, Lock, Paperclip, Save, ShieldAlert, Trash2, Wrench, X } from "lucide-react";
 import type {
   MaintenanceItem,
   VehicleMaintenanceSummary,
   VehicleProfile,
 } from "@/lib/vehicleMaintenance";
+import type { VehicleRecallSnapshot } from "@/lib/nhtsa/types";
 
 type VehicleAttachment = {
   id: string;
@@ -85,6 +86,30 @@ function formToPayload(f: FormState) {
   };
 }
 
+/** Year/make/model or VIN present — enough for a recall lookup. */
+function canCheckRecalls(f: FormState): boolean {
+  if (f.vin.trim().length === 17) return true;
+  return !!(f.year.trim() && f.make.trim() && f.model.trim());
+}
+
+/**
+ * True when the saved identity differs from what the last recall check used
+ * (or that check did not complete), so a changed VIN — or, for a typed-identity
+ * check, a changed year/make/model — re-queries NHTSA while an unrelated save
+ * (mileage, service dates) does not.
+ */
+function recallIdentityChanged(snapshot: VehicleRecallSnapshot | null, f: FormState): boolean {
+  if (!snapshot || snapshot.status !== "ok") return true;
+  const vin = f.vin.trim().toUpperCase() || null;
+  if ((snapshot.vin ?? null) !== vin) return true;
+  if (snapshot.identitySource === "vin_decoded") return false;
+  const typed = [f.year.trim(), f.make.trim(), f.model.trim()].map((v) => v.toUpperCase()).join("|");
+  const used = snapshot.identity
+    ? [snapshot.identity.modelYear, snapshot.identity.make, snapshot.identity.model].map((v) => v.trim().toUpperCase()).join("|")
+    : "";
+  return typed !== used;
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -120,6 +145,9 @@ export default function MyVehiclePanel() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [recalls, setRecalls] = useState<VehicleRecallSnapshot | null>(null);
+  const [checkingRecalls, setCheckingRecalls] = useState(false);
+  const [recallError, setRecallError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -141,6 +169,7 @@ export default function MyVehiclePanel() {
       setForm(profileToForm(data.profile ?? {}));
       setAttachments(data.attachments ?? []);
       setMaintenance(data.maintenance ?? null);
+      setRecalls(data.profile?.recalls ?? null);
       setState("ready");
     } catch {
       setState("error");
@@ -156,6 +185,28 @@ export default function MyVehiclePanel() {
   const update = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  const checkRecalls = useCallback(async () => {
+    setCheckingRecalls(true);
+    setRecallError(null);
+    try {
+      const res = await fetch("/api/vehicle/recalls", { method: "POST" });
+      if (res.status === 401) {
+        setState("unauthorized");
+        return;
+      }
+      if (!res.ok) {
+        setRecallError("Could not check recalls right now. Try again in a moment.");
+        return;
+      }
+      const data = (await res.json()) as { recalls: VehicleRecallSnapshot | null };
+      setRecalls(data.recalls ?? null);
+    } catch {
+      setRecallError("Could not check recalls right now. Try again in a moment.");
+    } finally {
+      setCheckingRecalls(false);
+    }
+  }, []);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -170,9 +221,16 @@ export default function MyVehiclePanel() {
       }
       if (!res.ok) return;
       const data = (await res.json()) as { profile: VehicleProfile; maintenance: VehicleMaintenanceSummary };
-      setForm(profileToForm(data.profile));
+      const nextForm = profileToForm(data.profile);
+      setForm(nextForm);
       setMaintenance(data.maintenance);
       setSavedAt(Date.now());
+      // A new or changed vehicle identity gets an immediate NHTSA recall check
+      // (same moment the maintenance outlook refreshes); otherwise the stored
+      // snapshot stands until the weekly sweep or a manual re-check.
+      if (canCheckRecalls(nextForm) && recallIdentityChanged(data.profile.recalls ?? null, nextForm)) {
+        void checkRecalls();
+      }
     } finally {
       setSaving(false);
     }
@@ -332,6 +390,27 @@ export default function MyVehiclePanel() {
         </p>
       </div>
 
+      {/* NHTSA safety recalls */}
+      <div className="mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={15} className="text-[var(--accent)]" />
+            <div className="ci-eyebrow">Safety recalls (NHTSA)</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void checkRecalls()}
+            disabled={checkingRecalls || !canCheckRecalls(form)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:border-[var(--accent)]/50 disabled:opacity-60"
+            title={canCheckRecalls(form) ? "Check NHTSA for recall campaigns" : "Enter a VIN or year, make, and model first"}
+          >
+            {checkingRecalls ? <Loader2 size={12} className="animate-spin" /> : <ShieldAlert size={12} />}
+            {recalls ? "Re-check recalls" : "Check for recalls"}
+          </button>
+        </div>
+        <RecallSummary snapshot={recalls} checking={checkingRecalls} canCheck={canCheckRecalls(form)} error={recallError} />
+      </div>
+
       {/* Attachments */}
       <div className="mt-6">
         <div className="flex items-center gap-2">
@@ -388,6 +467,90 @@ export default function MyVehiclePanel() {
           <p className="mt-2 text-[11px] text-muted-foreground">Up to {MAX_FILES} images or PDFs (registration, insurance, service records), 4 MB each.</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function fmtCheckedAt(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function RecallSummary({
+  snapshot, checking, canCheck, error,
+}: {
+  snapshot: VehicleRecallSnapshot | null;
+  checking: boolean;
+  canCheck: boolean;
+  error: string | null;
+}) {
+  if (error) {
+    return <p className="mt-2 flex items-center gap-1 text-xs text-red-500"><X size={12} /> {error}</p>;
+  }
+  if (!snapshot) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        {checking
+          ? "Checking NHTSA for recall campaigns…"
+          : canCheck
+            ? "Save your vehicle to check NHTSA for open recall campaigns. We re-check weekly and flag anything new."
+            : "Enter a VIN (or year, make, and model) and save to check NHTSA for recall campaigns."}
+      </p>
+    );
+  }
+
+  const identityText = snapshot.identity
+    ? `${snapshot.identity.modelYear} ${snapshot.identity.make} ${snapshot.identity.model}`
+    : null;
+  const checkedText = fmtCheckedAt(snapshot.checkedAt);
+  const sourceText =
+    snapshot.identitySource === "vin_decoded" ? "from your VIN" : snapshot.identitySource === "profile" ? "from the year, make, and model you entered" : "";
+
+  return (
+    <div className="mt-1">
+      {snapshot.status !== "ok" ? (
+        <p className="text-xs text-amber-600 dark:text-amber-300">
+          {snapshot.message ?? "Recalls could not be checked."}
+          {checkedText ? ` (last attempt ${checkedText})` : ""}
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            {snapshot.campaigns.length === 0
+              ? "No recall campaigns found"
+              : `${snapshot.campaigns.length} recall ${snapshot.campaigns.length === 1 ? "campaign" : "campaigns"} may apply`}
+            {identityText ? ` for a ${identityText}` : ""}
+            {sourceText ? ` (${sourceText})` : ""}
+            {checkedText ? ` · checked ${checkedText}` : ""}.
+          </p>
+          {snapshot.campaigns.length > 0 ? (
+            <ul className="mt-3 space-y-2">
+              {snapshot.campaigns.map((c) => (
+                <li key={c.campaignNumber} className="ci-card rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-foreground">{c.component || "Recall campaign"}</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
+                      {c.campaignNumber}{c.reportReceivedDate ? ` · ${c.reportReceivedDate}` : ""}
+                    </span>
+                  </div>
+                  {c.summary ? <p className="mt-1 text-xs text-muted-foreground">{c.summary}</p> : null}
+                  {c.consequence ? <p className="mt-1 text-xs text-muted-foreground"><span className="font-medium text-foreground">Risk:</span> {c.consequence}</p> : null}
+                  {c.remedy ? <p className="mt-1 text-xs text-muted-foreground"><span className="font-medium text-foreground">Remedy:</span> {c.remedy}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
+      <p className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground">
+        {snapshot.disclaimer}{" "}
+        <a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noreferrer" className="underline">
+          Check your VIN at NHTSA
+        </a>
+        .
+      </p>
     </div>
   );
 }
