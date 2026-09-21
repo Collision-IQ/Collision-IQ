@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fetchJsonWithRetry } from "@/lib/nhtsa/client";
-import { decodeVinViaVpic } from "@/lib/nhtsa/vinDecode";
+import { decodeVinViaVpic, decodedVinToProfileFields, formatVpicMake } from "@/lib/nhtsa/vinDecode";
 import { getRecallsForVehicle } from "@/lib/nhtsa/recalls";
 import { RECALL_MATCH_DISCLAIMER, type NhtsaRecall } from "@/lib/nhtsa/types";
 import {
@@ -268,5 +268,37 @@ describe("route governance", () => {
   it("clients cannot write the server-managed recall fields through PUT /api/vehicle", () => {
     const source = read("src/app/api/vehicle/route.ts");
     expect(source).not.toMatch(/recalls|seenRecallCampaignNumbers/);
+  });
+});
+
+describe("VIN decode → profile fields", () => {
+  it("presents vPIC's all-caps makes the way owners write them", () => {
+    expect(formatVpicMake("FORD")).toBe("Ford");
+    expect(formatVpicMake("MERCEDES-BENZ")).toBe("Mercedes-Benz");
+    expect(formatVpicMake("LAND ROVER")).toBe("Land Rover");
+    expect(formatVpicMake("BMW")).toBe("BMW");
+    expect(formatVpicMake("GMC")).toBe("GMC");
+    expect(formatVpicMake("  ")).toBeNull();
+  });
+
+  it("fills year/make/model/trim from a valid decode and nothing from an invalid one", () => {
+    expect(
+      decodedVinToProfileFields({ vin: VIN, make: "JEEP", model: "Grand Wagoneer", modelYear: "2024", trim: "Series III", bodyClass: "SUV", isValid: true, errorText: null })
+    ).toEqual({ year: 2024, make: "Jeep", model: "Grand Wagoneer", trim: "Series III" });
+    expect(
+      decodedVinToProfileFields({ vin: VIN, make: "JEEP", model: null, modelYear: "2024", trim: null, bodyClass: null, isValid: false, errorText: "Check digit failed" })
+    ).toEqual({ year: null, make: null, model: null, trim: null });
+  });
+
+  it("the decode route is authenticated, accepts only a VIN, and persists nothing", () => {
+    const read = (rel: string) => readFileSync(path.join(process.cwd(), rel), "utf8");
+    const source = read("src/app/api/vehicle/decode-vin/route.ts");
+    expect(source).toMatch(/requireCurrentUser/);
+    expect(source).toMatch(/decodeVinViaVpic/);
+    expect(source).not.toMatch(/saveVehicleProfile|saveVehicleRecallSnapshot|prisma/);
+    // The panel decodes on VIN entry and fills the fields.
+    const panel = read("src/components/workspace/MyVehiclePanel.tsx");
+    expect(panel).toMatch(/\/api\/vehicle\/decode-vin/);
+    expect(panel).toMatch(/lastDecodedVin/);
   });
 });

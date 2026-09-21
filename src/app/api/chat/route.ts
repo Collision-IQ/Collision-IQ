@@ -15,6 +15,13 @@ import {
   AUTHORITY_RETRIEVAL_STATUS_FIELDS,
 } from "@/lib/ai/authorityRetrievalPosture";
 import { buildEstimatingReferenceLibraryDirective } from "@/lib/ai/estimatingGuides";
+import {
+  RECALL_NO_VEHICLE_CONTEXT,
+  isRecallLookupRequest,
+  runChatRecallLookup,
+} from "@/lib/nhtsa/chatRecallLookup";
+import { mergeSeenCampaignNumbers } from "@/lib/nhtsa/vehicleRecalls";
+import { getVehicleProfile, saveVehicleRecallSnapshot } from "@/lib/userVehicleStore";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
@@ -1585,6 +1592,48 @@ export async function POST(req: Request) {
       vin: resolvedVehicle.vin ?? null,
       confidence: resolvedVehicle.confidence,
     });
+
+    // Safety-recall questions are answered from a LIVE NHTSA lookup, never
+    // from model memory: the result rides into the system instructions as
+    // evidence (NHTSA documentation tier) for the first pass AND the
+    // research-mode refinement pass. Vehicle precedence: VIN in the message,
+    // then the case/attachment vehicle, then the user's saved My Vehicle.
+    let liveEvidenceInstructions = systemInstructions;
+    if (isRecallLookupRequest(userMessage)) {
+      const storedProfile = isAnonymous
+        ? null
+        : await getVehicleProfile(user.id).catch(() => null);
+      const recallLookup = await runChatRecallLookup({
+        userMessage,
+        resolvedVehicle,
+        storedProfile,
+        options: { retries: 1, timeoutMs: 6000 },
+      });
+      liveEvidenceInstructions = `${systemInstructions}\n\n${
+        recallLookup ? recallLookup.context : RECALL_NO_VEHICLE_CONTEXT
+      }`;
+      console.info("[chat-recalls] live NHTSA lookup", {
+        ownerUserId: user.id,
+        ran: Boolean(recallLookup),
+        vehicleSource: recallLookup?.vehicleSource ?? null,
+        status: recallLookup?.snapshot.status ?? null,
+        campaigns: recallLookup?.snapshot.campaigns.length ?? 0,
+        usedStoredVehicle: recallLookup?.usedStoredVehicle ?? false,
+      });
+      // The owner just saw these campaigns for their saved vehicle, so the
+      // weekly sweep should not alert on them again.
+      if (recallLookup?.usedStoredVehicle && recallLookup.snapshot.status === "ok" && !isAnonymous) {
+        await saveVehicleRecallSnapshot(
+          user.id,
+          recallLookup.snapshot,
+          mergeSeenCampaignNumbers(storedProfile?.seenRecallCampaignNumbers, recallLookup.snapshot.campaigns)
+        ).catch((error: unknown) => {
+          console.warn("[chat-recalls] could not persist recall snapshot", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
     const activeCaseDocuments: UploadedDocument[] = (openActiveCase?.files ?? []).map((file) => ({
       id: file.id,
       filename: file.name,
@@ -1687,7 +1736,7 @@ export async function POST(req: Request) {
 
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
       model: deps.collisionIqModels.primary,
-      instructions: systemInstructions,
+      instructions: liveEvidenceInstructions,
       temperature: 0.7,
       input,
       effort: conversationalGeneration?.effort,
@@ -1695,7 +1744,7 @@ export async function POST(req: Request) {
     }, reducedRetryInput ? {
       retryInput: {
         model: deps.collisionIqModels.primary,
-        instructions: systemInstructions,
+        instructions: liveEvidenceInstructions,
         temperature: 0.7,
         input: reducedRetryInput,
       },
@@ -1880,7 +1929,7 @@ export async function POST(req: Request) {
     const outputText = linkedProcedureContext || retrievalContext
       ? await refineAnswerWithDriveSupport({
           deps,
-          systemInstructions,
+          systemInstructions: liveEvidenceInstructions,
           userMessage,
           conversationContext,
           firstPassAnswer: firstPassText,

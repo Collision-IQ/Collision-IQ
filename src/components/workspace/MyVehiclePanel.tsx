@@ -7,7 +7,8 @@ import type {
   VehicleMaintenanceSummary,
   VehicleProfile,
 } from "@/lib/vehicleMaintenance";
-import type { VehicleRecallSnapshot } from "@/lib/nhtsa/types";
+import type { VehicleRecallSnapshot, VpicDecodeResult } from "@/lib/nhtsa/types";
+import { VIN_SHAPE, type DecodedVinProfileFields } from "@/lib/nhtsa/vinDecode";
 
 type VehicleAttachment = {
   id: string;
@@ -86,6 +87,12 @@ function formToPayload(f: FormState) {
   };
 }
 
+type VinDecodeState =
+  | { status: "decoding"; vin: string }
+  | { status: "decoded"; vin: string; decoded: VpicDecodeResult; fields: DecodedVinProfileFields }
+  | { status: "invalid"; vin: string; message: string }
+  | { status: "error"; vin: string; message: string };
+
 /** Year/make/model or VIN present — enough for a recall lookup. */
 function canCheckRecalls(f: FormState): boolean {
   if (f.vin.trim().length === 17) return true;
@@ -148,6 +155,10 @@ export default function MyVehiclePanel() {
   const [recalls, setRecalls] = useState<VehicleRecallSnapshot | null>(null);
   const [checkingRecalls, setCheckingRecalls] = useState(false);
   const [recallError, setRecallError] = useState<string | null>(null);
+  const [vinDecode, setVinDecode] = useState<VinDecodeState | null>(null);
+  // The VIN most recently decoded (or loaded from the saved profile), so a
+  // stored VIN is never re-decoded over the owner's saved make/model on load.
+  const lastDecodedVin = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -167,6 +178,7 @@ export default function MyVehiclePanel() {
         maintenance: VehicleMaintenanceSummary;
       };
       setForm(profileToForm(data.profile ?? {}));
+      lastDecodedVin.current = (data.profile?.vin ?? "").trim().toUpperCase() || null;
       setAttachments(data.attachments ?? []);
       setMaintenance(data.maintenance ?? null);
       setRecalls(data.profile?.recalls ?? null);
@@ -184,6 +196,70 @@ export default function MyVehiclePanel() {
 
   const update = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleVinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setForm((f) => ({ ...f, vin: value }));
+    const vin = value.trim().toUpperCase();
+    if (!vin) {
+      lastDecodedVin.current = null;
+      setVinDecode(null);
+    } else if (vin.length === 17 && !VIN_SHAPE.test(vin)) {
+      setVinDecode({ status: "invalid", vin, message: "A VIN never contains the letters I, O, or Q." });
+    } else if (vin.length !== 17) {
+      setVinDecode(null);
+    }
+  };
+
+  // VIN decoder: once a well-formed 17-character VIN is typed or pasted, ask
+  // NHTSA vPIC for year/make/model and fill the fields. The decode is the
+  // higher authority, so it replaces what was typed; manual entry stays the
+  // fallback whenever the VIN is missing or cannot be decoded.
+  useEffect(() => {
+    const vin = form.vin.trim().toUpperCase();
+    if (!VIN_SHAPE.test(vin) || vin === lastDecodedVin.current) return;
+    const handle = setTimeout(async () => {
+      lastDecodedVin.current = vin;
+      setVinDecode({ status: "decoding", vin });
+      try {
+        const res = await fetch("/api/vehicle/decode-vin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vin }),
+        });
+        if (res.status === 401) {
+          setState("unauthorized");
+          return;
+        }
+        // A newer VIN was typed while this decode was in flight: drop it.
+        if (lastDecodedVin.current !== vin) return;
+        const body = (await res.json().catch(() => null)) as
+          | { decoded?: VpicDecodeResult; fields?: DecodedVinProfileFields; error?: string }
+          | null;
+        if (!res.ok || !body?.decoded || !body.fields) {
+          setVinDecode({ status: "error", vin, message: body?.error ?? "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
+          return;
+        }
+        if (!body.decoded.isValid) {
+          setVinDecode({ status: "invalid", vin, message: `${body.decoded.errorText ?? "VIN could not be decoded."} Enter the year, make, and model manually.` });
+          return;
+        }
+        const fields = body.fields;
+        setForm((f) => ({
+          ...f,
+          vin,
+          year: fields.year !== null ? String(fields.year) : f.year,
+          make: fields.make ?? f.make,
+          model: fields.model ?? f.model,
+        }));
+        setVinDecode({ status: "decoded", vin, decoded: body.decoded, fields });
+      } catch {
+        if (lastDecodedVin.current !== vin) return;
+        setVinDecode({ status: "error", vin, message: "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
+      }
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [form.vin]);
 
   const checkRecalls = useCallback(async () => {
     setCheckingRecalls(true);
@@ -308,8 +384,9 @@ export default function MyVehiclePanel() {
         <h2 className="text-lg font-semibold text-foreground">My Vehicle</h2>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Store your vehicle and last-service details. We track your average mileage and project upcoming maintenance —
-        or count down from the service date when mileage isn&apos;t available.
+        Enter your VIN and we decode the year, make, and model from NHTSA — or type them in if you don&apos;t have
+        it. We track your average mileage and project upcoming maintenance, or count down from the service date when
+        mileage isn&apos;t available.
       </p>
 
       {/* Vehicle identity + mileage */}
@@ -321,7 +398,19 @@ export default function MyVehiclePanel() {
           <Field label="Model"><input className={inputClass} value={form.model} onChange={update("model")} placeholder="Grand Wagoneer" /></Field>
           <Field label="Current mileage"><input className={inputClass} inputMode="numeric" value={form.mileage} onChange={update("mileage")} placeholder="42,000" /></Field>
           <div className="col-span-2 sm:col-span-4">
-            <Field label="VIN"><input className={inputClass} value={form.vin} onChange={update("vin")} placeholder="1C4SJVFP1RS133438" /></Field>
+            <Field label="VIN">
+              <input
+                className={inputClass}
+                value={form.vin}
+                onChange={handleVinChange}
+                placeholder="1C4SJVFP1RS133438"
+                maxLength={17}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </Field>
+            <VinDecodeStatus state={vinDecode} />
           </div>
         </div>
       </div>
@@ -468,6 +557,34 @@ export default function MyVehiclePanel() {
         )}
       </div>
     </div>
+  );
+}
+
+function VinDecodeStatus({ state }: { state: VinDecodeState | null }) {
+  if (!state) {
+    return <p className="mt-1 text-[11px] text-muted-foreground">17 characters. Year, make, and model fill in automatically once it decodes.</p>;
+  }
+  if (state.status === "decoding") {
+    return (
+      <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+        <Loader2 size={11} className="animate-spin" /> Decoding VIN with NHTSA…
+      </p>
+    );
+  }
+  if (state.status === "decoded") {
+    const f = state.fields;
+    const label = [f.year, f.make, f.model, f.trim].filter(Boolean).join(" ");
+    const extra = state.decoded.bodyClass ? ` · ${state.decoded.bodyClass}` : "";
+    return (
+      <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+        Decoded by NHTSA vPIC: {label}{extra}. Adjust anything that looks off, then save.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-300">
+      <X size={11} /> {state.message}
+    </p>
   );
 }
 
