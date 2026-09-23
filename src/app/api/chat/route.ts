@@ -15,6 +15,7 @@ import {
   AUTHORITY_RETRIEVAL_STATUS_FIELDS,
 } from "@/lib/ai/authorityRetrievalPosture";
 import { buildEstimatingReferenceLibraryDirective } from "@/lib/ai/estimatingGuides";
+import { buildDegInquiryLibraryDirective } from "@/lib/ai/degInquiries";
 import {
   RECALL_NO_VEHICLE_CONTEXT,
   isRecallLookupRequest,
@@ -342,6 +343,8 @@ ${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 ${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
 
 ${buildEstimatingReferenceLibraryDirective()}
+
+${buildDegInquiryLibraryDirective()}
 
 ${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 

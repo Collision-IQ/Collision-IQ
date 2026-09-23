@@ -101,6 +101,22 @@ becomes a source.
 - CCC/MOTOR Recycled Assemblies Guide to Estimating: https://help.cccis.com/webhelp/motor/ragte/slguide.htm
 - MOTOR Guide to Estimating e-book (Collision Academy hosted; serving address in `MOTOR_EBOOK_URL`; administered at https://vercel.com/collision-academy-82dbb1d7/motor-ebook)
 
+## DEG Inquiry Library (tier 9 above: DEG)
+
+DEG inquiries Collision iQ knows by number live in `src/lib/ai/degInquiries.ts`.
+Each entry records the platform it answers for, the operation, the finding as
+recorded, the review action, and WHERE the text came from (the inquiry page,
+or a secondary publication that summarizes it, stated as such). The estimate
+scrubber attaches an inquiry as reviewed DEG authority only when a line names
+both the operation and the subject the inquiry settled, on the inquiry's own
+platform; the chat prompts carry the library so a review can raise the check.
+Inquiries are public and are cited by number with their address. Add an
+inquiry there, never in prose, and never paraphrase a finding from memory.
+
+- DEG Inquiry 41986 (CCC ONE): frame-mounted cage nuts and bed-mounting
+  hardware are not included in Pick Up Box R&I / R&R; replacement, transfer or
+  cleanup is a separate manual line.
+
 ## Engineering Expectations
 
 Treat every engineering task as production software.
