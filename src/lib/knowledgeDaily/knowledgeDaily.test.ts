@@ -4,14 +4,21 @@ import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import KnowledgeDailyFeed from "@/components/knowledgeDaily/KnowledgeDailyFeed";
-import { formatKnowledgeDailyDate, getKnowledgeDailyEntries, getKnowledgeDailyEntry } from "./entries";
+import {
+  formatKnowledgeDailyDate,
+  getAllKnowledgeDailyEntries,
+  getKnowledgeDailyEntries,
+  getKnowledgeDailyEntry,
+  knowledgeDailyToday,
+} from "./entries";
 
 // Licensed estimating guides are cited by section, never linked (CLAUDE.md
 // link policy). A daily entry must never carry one of their addresses.
 const LICENSED_GUIDE_HOSTS = ["mymitchell.com", "cccis.com", "vercel.com"];
 
 describe("The Daily iQ entries", () => {
-  const entries = getKnowledgeDailyEntries();
+  // Every filed entry, published or still date-gated: all of them must be complete.
+  const entries = getAllKnowledgeDailyEntries();
 
   it("publishes at least the first week and numbers entries without gaps", () => {
     expect(entries.length).toBeGreaterThanOrEqual(4);
@@ -57,6 +64,26 @@ describe("The Daily iQ entries", () => {
     expect(getKnowledgeDailyEntry("ford-officially-mandates-adas-standards")?.entryNumber).toBe(2);
     expect(getKnowledgeDailyEntry("nope")).toBeNull();
     expect(formatKnowledgeDailyDate("2026-09-09")).toBe("Wednesday, Sep 9, 2026");
+  });
+
+  it("publishes each entry on its own day and holds later ones back", () => {
+    // A week is filed in advance; the page shows only entries dated today or earlier (New York time).
+    expect(getKnowledgeDailyEntries("2026-09-10").map((entry) => entry.entryNumber)).toEqual([2, 1]);
+    expect(getKnowledgeDailyEntries("2026-09-01")).toEqual([]);
+    expect(getKnowledgeDailyEntry("ford-officially-mandates-adas-standards", "2026-09-09")).toBeNull();
+    for (const entry of getKnowledgeDailyEntries()) expect(entry.date <= knowledgeDailyToday()).toBe(true);
+    expect(knowledgeDailyToday(new Date("2026-09-24T03:30:00Z"))).toBe("2026-09-23"); // 11:30 PM ET the day before
+    expect(knowledgeDailyToday(new Date("2026-09-24T04:30:00Z"))).toBe("2026-09-24");
+  });
+
+  it("files at most one entry per calendar day and never lets an entry number run ahead of its date", () => {
+    const byDate = new Map<string, number>();
+    for (const entry of entries) byDate.set(entry.date, (byDate.get(entry.date) ?? 0) + 1);
+    for (const [date, count] of byDate) expect(count, date).toBe(1);
+    const ascending = [...entries].sort((a, b) => a.entryNumber - b.entryNumber);
+    for (let i = 1; i < ascending.length; i += 1) {
+      expect(ascending[i].date > ascending[i - 1].date, `#${ascending[i].entryNumber}`).toBe(true);
+    }
   });
 });
 

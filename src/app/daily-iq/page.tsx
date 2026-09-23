@@ -5,6 +5,10 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import KnowledgeDailyFeed, { ExternalLink } from "@/components/knowledgeDaily/KnowledgeDailyFeed";
 import { formatKnowledgeDailyDate, getKnowledgeDailyEntries } from "@/lib/knowledgeDaily/entries";
 
+// Entries are filed a week ahead and date-gated; revalidate so each day's entry
+// surfaces on its day without a redeploy.
+export const revalidate = 3600;
+
 export const metadata = {
   title: "The Daily iQ — what Collision IQ learned",
   description:
