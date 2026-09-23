@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCurrentUser, UnauthorizedError } from "@/lib/auth/require-current-user";
-import { getVehicleProfile, saveVehicleProfile, listVehicleAttachments } from "@/lib/userVehicleStore";
+import {
+  getLastAnalyzedVehicle,
+  getVehicleProfile,
+  saveVehicleProfile,
+  listVehicleAttachments,
+} from "@/lib/userVehicleStore";
 import { computeVehicleMaintenance, type ServiceRecord, type VehicleProfile } from "@/lib/vehicleMaintenance";
 
 export const runtime = "nodejs";
@@ -52,12 +57,22 @@ function sanitizeProfileInput(body: unknown): Partial<VehicleProfile> {
 export async function GET() {
   try {
     const { user } = await requireCurrentUser();
-    const [profile, attachments] = await Promise.all([
+    const [profile, attachments, lastAnalyzed] = await Promise.all([
       getVehicleProfile(user.id),
       listVehicleAttachments(user.id),
+      // Reference only; a report-store hiccup must not hide the saved vehicle.
+      getLastAnalyzedVehicle(user.id).catch((error: unknown) => {
+        console.warn("[vehicle] last analyzed vehicle unavailable", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }),
     ]);
     const maintenance = computeVehicleMaintenance(profile);
-    return NextResponse.json({ profile, attachments, maintenance }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { profile, attachments, maintenance, lastAnalyzed },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     return handleError(error, "load");
   }
