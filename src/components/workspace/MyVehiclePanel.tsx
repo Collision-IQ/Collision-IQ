@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Car, FileText, Loader2, Lock, Paperclip, Save, ShieldAlert, Trash2, Wrench, X } from "lucide-react";
+import { ArrowRightLeft, Car, FileSearch, FileText, Loader2, Lock, Paperclip, Save, ScanSearch, ShieldAlert, Trash2, Wrench, X } from "lucide-react";
 import type {
   MaintenanceItem,
   VehicleMaintenanceSummary,
   VehicleProfile,
 } from "@/lib/vehicleMaintenance";
 import type { VehicleRecallSnapshot, VpicDecodeResult } from "@/lib/nhtsa/types";
+import { isSameVehicle, type LastAnalyzedVehicle } from "@/lib/lastAnalyzedVehicle";
 import { VIN_SHAPE, type DecodedVinProfileFields } from "@/lib/nhtsa/vinDecode";
 
 type VehicleAttachment = {
@@ -87,6 +88,20 @@ function formToPayload(f: FormState) {
   };
 }
 
+type VehicleView = "mine" | "analyzed";
+
+type VehicleIdentityFields = Pick<VehicleProfile, "year" | "make" | "model" | "vin">;
+
+function identityOf(p: VehicleProfile): VehicleIdentityFields | null {
+  const id = { year: p.year ?? null, make: p.make ?? null, model: p.model ?? null, vin: p.vin ?? null };
+  return id.year || id.make || id.model || id.vin ? id : null;
+}
+
+function savedVehicleLabel(saved: VehicleIdentityFields | null): string | null {
+  if (!saved) return null;
+  return [saved.year, saved.make, saved.model].filter(Boolean).join(" ").trim() || (saved.vin ? `VIN ${saved.vin}` : null);
+}
+
 type VinDecodeState =
   | { status: "decoding"; vin: string }
   | { status: "decoded"; vin: string; decoded: VpicDecodeResult; fields: DecodedVinProfileFields }
@@ -156,9 +171,17 @@ export default function MyVehiclePanel() {
   const [checkingRecalls, setCheckingRecalls] = useState(false);
   const [recallError, setRecallError] = useState<string | null>(null);
   const [vinDecode, setVinDecode] = useState<VinDecodeState | null>(null);
+  // The owner's saved vehicle is what recalls and maintenance track. The
+  // vehicle from the most recent analysis rides alongside as a reference and
+  // never overwrites it unless the owner chooses "Use as my vehicle".
+  const [savedVehicle, setSavedVehicle] = useState<VehicleIdentityFields | null>(null);
+  const [lastAnalyzed, setLastAnalyzed] = useState<LastAnalyzedVehicle | null>(null);
+  const [view, setView] = useState<VehicleView>("mine");
   // The VIN most recently decoded (or loaded from the saved profile), so a
   // stored VIN is never re-decoded over the owner's saved make/model on load.
   const lastDecodedVin = useRef<string | null>(null);
+  /** The VIN as loaded from the saved profile; a decode of it fills only empty fields. */
+  const savedVinRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -176,9 +199,25 @@ export default function MyVehiclePanel() {
         profile: VehicleProfile;
         attachments: VehicleAttachment[];
         maintenance: VehicleMaintenanceSummary;
+        lastAnalyzed?: LastAnalyzedVehicle | null;
       };
-      setForm(profileToForm(data.profile ?? {}));
-      lastDecodedVin.current = (data.profile?.vin ?? "").trim().toUpperCase() || null;
+      const loaded = profileToForm(data.profile ?? {});
+      setForm(loaded);
+      const saved = identityOf(data.profile ?? {});
+      setSavedVehicle(saved);
+      const analyzed = data.lastAnalyzed ?? null;
+      setLastAnalyzed(analyzed);
+      // Open on the last vehicle analysed when it is a different car from the
+      // saved one; the "My vehicle" switch always brings the owner's car back.
+      setView(analyzed && !isSameVehicle(analyzed, saved) ? "analyzed" : "mine");
+      // A saved VIN with year, make and model already filled is left alone;
+      // a saved VIN with any of them missing decodes on load and fills the gaps.
+      const savedVin = loaded.vin.trim().toUpperCase();
+      savedVinRef.current = VIN_SHAPE.test(savedVin) ? savedVin : null;
+      lastDecodedVin.current =
+        savedVinRef.current && loaded.year.trim() && loaded.make.trim() && loaded.model.trim()
+          ? savedVinRef.current
+          : null;
       setAttachments(data.attachments ?? []);
       setMaintenance(data.maintenance ?? null);
       setRecalls(data.profile?.recalls ?? null);
@@ -207,59 +246,72 @@ export default function MyVehiclePanel() {
     } else if (vin.length === 17 && !VIN_SHAPE.test(vin)) {
       setVinDecode({ status: "invalid", vin, message: "A VIN never contains the letters I, O, or Q." });
     } else if (vin.length !== 17) {
+      // Editing the VIN re-arms the decoder, so retyping the same VIN decodes again.
+      lastDecodedVin.current = null;
       setVinDecode(null);
     }
   };
 
-  // VIN decoder: once a well-formed 17-character VIN is typed or pasted, ask
-  // NHTSA vPIC for year/make/model and fill the fields. The decode is the
-  // higher authority, so it replaces what was typed; manual entry stays the
-  // fallback whenever the VIN is missing or cannot be decoded.
+  /**
+   * Ask NHTSA vPIC for year/make/model. "override" (a typed or pasted VIN, or
+   * the Decode button) replaces the fields because the decode outranks what
+   * was typed; "fill-missing" (the saved VIN on load) only fills empty ones.
+   */
+  const runVinDecode = useCallback(async (vin: string, mode: "override" | "fill-missing") => {
+    lastDecodedVin.current = vin;
+    setVinDecode({ status: "decoding", vin });
+    try {
+      const res = await fetch("/api/vehicle/decode-vin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vin }),
+      });
+      if (res.status === 401) {
+        setState("unauthorized");
+        return;
+      }
+      // A newer VIN was typed while this decode was in flight: drop it.
+      if (lastDecodedVin.current !== vin) return;
+      const body = (await res.json().catch(() => null)) as
+        | { decoded?: VpicDecodeResult; fields?: DecodedVinProfileFields; error?: string }
+        | null;
+      if (!res.ok || !body?.decoded || !body.fields) {
+        setVinDecode({ status: "error", vin, message: body?.error ?? "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
+        return;
+      }
+      if (!body.decoded.isValid) {
+        setVinDecode({ status: "invalid", vin, message: `${body.decoded.errorText ?? "VIN could not be decoded."} Enter the year, make, and model manually.` });
+        return;
+      }
+      const fields = body.fields;
+      const pick = (decoded: string | null, current: string) =>
+        decoded && (mode === "override" || !current.trim()) ? decoded : current;
+      setForm((f) => ({
+        ...f,
+        vin,
+        year: pick(fields.year !== null ? String(fields.year) : null, f.year),
+        make: pick(fields.make, f.make),
+        model: pick(fields.model, f.model),
+      }));
+      setVinDecode({ status: "decoded", vin, decoded: body.decoded, fields });
+    } catch {
+      if (lastDecodedVin.current !== vin) return;
+      setVinDecode({ status: "error", vin, message: "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
+    }
+  }, []);
+
+  // VIN decoder: once a well-formed 17-character VIN is present (typed,
+  // pasted, or loaded with fields missing) and has not been decoded yet, ask
+  // NHTSA after a short pause. Manual entry stays the fallback whenever the
+  // VIN is missing or cannot be decoded.
   useEffect(() => {
+    if (state !== "ready") return;
     const vin = form.vin.trim().toUpperCase();
     if (!VIN_SHAPE.test(vin) || vin === lastDecodedVin.current) return;
-    const handle = setTimeout(async () => {
-      lastDecodedVin.current = vin;
-      setVinDecode({ status: "decoding", vin });
-      try {
-        const res = await fetch("/api/vehicle/decode-vin", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vin }),
-        });
-        if (res.status === 401) {
-          setState("unauthorized");
-          return;
-        }
-        // A newer VIN was typed while this decode was in flight: drop it.
-        if (lastDecodedVin.current !== vin) return;
-        const body = (await res.json().catch(() => null)) as
-          | { decoded?: VpicDecodeResult; fields?: DecodedVinProfileFields; error?: string }
-          | null;
-        if (!res.ok || !body?.decoded || !body.fields) {
-          setVinDecode({ status: "error", vin, message: body?.error ?? "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
-          return;
-        }
-        if (!body.decoded.isValid) {
-          setVinDecode({ status: "invalid", vin, message: `${body.decoded.errorText ?? "VIN could not be decoded."} Enter the year, make, and model manually.` });
-          return;
-        }
-        const fields = body.fields;
-        setForm((f) => ({
-          ...f,
-          vin,
-          year: fields.year !== null ? String(fields.year) : f.year,
-          make: fields.make ?? f.make,
-          model: fields.model ?? f.model,
-        }));
-        setVinDecode({ status: "decoded", vin, decoded: body.decoded, fields });
-      } catch {
-        if (lastDecodedVin.current !== vin) return;
-        setVinDecode({ status: "error", vin, message: "NHTSA could not decode the VIN right now. Enter the year, make, and model manually." });
-      }
-    }, 400);
+    const mode = vin === savedVinRef.current ? "fill-missing" : "override";
+    const handle = setTimeout(() => void runVinDecode(vin, mode), 400);
     return () => clearTimeout(handle);
-  }, [form.vin]);
+  }, [form.vin, state, runVinDecode]);
 
   const checkRecalls = useCallback(async () => {
     setCheckingRecalls(true);
@@ -283,6 +335,30 @@ export default function MyVehiclePanel() {
     }
   }, []);
 
+  /**
+   * Copy the last analysed vehicle into the form. Nothing is saved until the
+   * owner presses Save, and the saved vehicle keeps driving recalls and
+   * maintenance until then. Year, make and model come from the analysis when
+   * present; a VIN with any of them missing decodes to fill only the gaps.
+   */
+  const useAnalyzedVehicle = () => {
+    if (!lastAnalyzed) return;
+    const vin = lastAnalyzed.vin ?? "";
+    const complete = !!(vin && lastAnalyzed.year && lastAnalyzed.make && lastAnalyzed.model);
+    savedVinRef.current = vin || null;
+    lastDecodedVin.current = complete ? vin : null;
+    setVinDecode(null);
+    setSavedAt(null);
+    setForm((f) => ({
+      ...f,
+      vin,
+      year: lastAnalyzed.year !== null ? String(lastAnalyzed.year) : vin ? "" : f.year,
+      make: lastAnalyzed.make ?? (vin ? "" : f.make),
+      model: lastAnalyzed.model ?? (vin ? "" : f.model),
+    }));
+    setView("mine");
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -299,6 +375,7 @@ export default function MyVehiclePanel() {
       const data = (await res.json()) as { profile: VehicleProfile; maintenance: VehicleMaintenanceSummary };
       const nextForm = profileToForm(data.profile);
       setForm(nextForm);
+      setSavedVehicle(identityOf(data.profile));
       setMaintenance(data.maintenance);
       setSavedAt(Date.now());
       // A new or changed vehicle identity gets an immediate NHTSA recall check
@@ -379,10 +456,27 @@ export default function MyVehiclePanel() {
 
   return (
     <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-y-auto p-5">
-      <div className="flex items-center gap-2">
-        <Car size={18} className="text-[var(--accent)]" />
-        <h2 className="text-lg font-semibold text-foreground">My Vehicle</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Car size={18} className="text-[var(--accent)]" />
+          <h2 className="text-lg font-semibold text-foreground">My Vehicle</h2>
+        </div>
+        {lastAnalyzed ? (
+          <VehicleViewSwitch view={view} onChange={setView} savedLabel={savedVehicleLabel(savedVehicle)} analyzedLabel={lastAnalyzed.label} />
+        ) : null}
       </div>
+      {view === "analyzed" && lastAnalyzed ? (
+        <LastAnalyzedCard
+          vehicle={lastAnalyzed}
+          savedLabel={savedVehicleLabel(savedVehicle)}
+          isSaved={isSameVehicle(lastAnalyzed, savedVehicle)}
+          onUse={useAnalyzedVehicle}
+          onShowMine={() => setView("mine")}
+        />
+      ) : null}
+      {/* The saved vehicle stays mounted (form state, decoder, uploads) and is
+          only hidden while the analysed vehicle is in front. */}
+      <div className={view === "analyzed" ? "hidden" : "contents"}>
       <p className="mt-1 text-sm text-muted-foreground">
         Enter your VIN and we decode the year, make, and model from NHTSA — or type them in if you don&apos;t have
         it. We track your average mileage and project upcoming maintenance, or count down from the service date when
@@ -399,16 +493,28 @@ export default function MyVehiclePanel() {
           <Field label="Current mileage"><input className={inputClass} inputMode="numeric" value={form.mileage} onChange={update("mileage")} placeholder="42,000" /></Field>
           <div className="col-span-2 sm:col-span-4">
             <Field label="VIN">
-              <input
-                className={inputClass}
-                value={form.vin}
-                onChange={handleVinChange}
-                placeholder="1C4SJVFP1RS133438"
-                maxLength={17}
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-              />
+              <div className="flex gap-2">
+                <input
+                  className={`${inputClass} min-w-0 flex-1`}
+                  value={form.vin}
+                  onChange={handleVinChange}
+                  placeholder="1C4SJVFP1RS133438"
+                  maxLength={17}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={() => void runVinDecode(form.vin.trim().toUpperCase(), "override")}
+                  disabled={vinDecode?.status === "decoding" || !VIN_SHAPE.test(form.vin.trim().toUpperCase())}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:border-[var(--accent)]/50 disabled:opacity-60"
+                  title="Decode this VIN with NHTSA and fill in year, make, and model"
+                >
+                  {vinDecode?.status === "decoding" ? <Loader2 size={12} className="animate-spin" /> : <ScanSearch size={12} />}
+                  Decode VIN
+                </button>
+              </div>
             </Field>
             <VinDecodeStatus state={vinDecode} />
           </div>
@@ -556,6 +662,112 @@ export default function MyVehiclePanel() {
           <p className="mt-2 text-[11px] text-muted-foreground">Up to {MAX_FILES} images or PDFs (registration, insurance, service records), 4 MB each.</p>
         )}
       </div>
+      </div>
+    </div>
+  );
+}
+
+function VehicleViewSwitch({
+  view, onChange, savedLabel, analyzedLabel,
+}: {
+  view: VehicleView;
+  onChange: (view: VehicleView) => void;
+  savedLabel: string | null;
+  analyzedLabel: string;
+}) {
+  const base = "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition";
+  const on = "bg-[var(--accent)] text-white shadow-sm";
+  const off = "text-muted-foreground hover:text-foreground";
+  return (
+    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="tablist" aria-label="Which vehicle to show">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "mine"}
+        onClick={() => onChange("mine")}
+        className={`${base} ${view === "mine" ? on : off}`}
+        title={savedLabel ? `Your saved vehicle: ${savedLabel}` : "Your saved vehicle"}
+      >
+        <Car size={13} /> My vehicle
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "analyzed"}
+        onClick={() => onChange("analyzed")}
+        className={`${base} ${view === "analyzed" ? on : off}`}
+        title={`Last analyzed: ${analyzedLabel}`}
+      >
+        <FileSearch size={13} /> Last analyzed
+      </button>
+    </div>
+  );
+}
+
+function fmtAnalyzedAt(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+const dtClass = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+
+/**
+ * The vehicle from the owner's most recent analysis. Reference only: recalls
+ * and maintenance keep tracking the saved vehicle until the owner copies this
+ * one in with "Use as my vehicle" and saves.
+ */
+function LastAnalyzedCard({
+  vehicle, savedLabel, isSaved, onUse, onShowMine,
+}: {
+  vehicle: LastAnalyzedVehicle;
+  savedLabel: string | null;
+  isSaved: boolean;
+  onUse: () => void;
+  onShowMine: () => void;
+}) {
+  const when = fmtAnalyzedAt(vehicle.analyzedAt);
+  return (
+    <div className="mt-3">
+      <p className="text-sm text-muted-foreground">
+        The vehicle from your most recent analysis{when ? ` on ${when}` : ""}. It is shown for reference and is not saved
+        as your vehicle.
+      </p>
+      <div className="ci-card mt-3 rounded-lg border border-border bg-card p-4">
+        <div className="ci-eyebrow">Last analyzed</div>
+        <div className="mt-1 text-lg font-semibold text-foreground">{vehicle.label}</div>
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+          <div><dt className={dtClass}>Year</dt><dd className="text-foreground">{vehicle.year ?? "—"}</dd></div>
+          <div><dt className={dtClass}>Make</dt><dd className="text-foreground">{vehicle.make ?? "—"}</dd></div>
+          <div><dt className={dtClass}>Model</dt><dd className="text-foreground">{vehicle.model ?? "—"}</dd></div>
+          <div><dt className={dtClass}>Trim</dt><dd className="text-foreground">{vehicle.trim ?? "—"}</dd></div>
+          <div className="col-span-2 sm:col-span-4"><dt className={dtClass}>VIN</dt><dd className="font-mono text-foreground">{vehicle.vin ?? "—"}</dd></div>
+        </dl>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {isSaved ? (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">This is your saved vehicle.</span>
+          ) : (
+            <button
+              type="button"
+              onClick={onUse}
+              className="ci-btn-primary inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold"
+              title="Copy this vehicle into the form; nothing changes until you save"
+            >
+              <ArrowRightLeft size={14} /> Use as my vehicle
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onShowMine}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:border-[var(--accent)]/50"
+          >
+            <Car size={12} /> {savedLabel ? `Show my vehicle (${savedLabel})` : "Set up my vehicle"}
+          </button>
+        </div>
+      </div>
+      <p className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground">
+        Recalls, maintenance, and documents on this page belong to your saved vehicle
+        {savedLabel ? ` (${savedLabel})` : ""}. Switch to My vehicle to see them.
+      </p>
     </div>
   );
 }

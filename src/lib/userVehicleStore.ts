@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { VehicleProfile, MileageReading } from "@/lib/vehicleMaintenance";
 import type { VehicleRecallSnapshot } from "@/lib/nhtsa/types";
+import { getLatestActiveAnalysisReport } from "@/lib/analysisReportStore";
+import { lastAnalyzedVehicleFromReport, type LastAnalyzedVehicle } from "@/lib/lastAnalyzedVehicle";
 
 // The vehicle profile + its attachments are persisted as rows in the existing
 // UploadedAttachment table (which is present on every deployment) using only
@@ -137,6 +139,17 @@ export async function saveVehicleRecallSnapshot(
     });
   }
   return merged;
+}
+
+/**
+ * The vehicle from the user's most recent analysis, for the "Last analyzed"
+ * view of My Vehicle. Read-only and never written into the saved profile:
+ * the owner's vehicle stays the one recalls and maintenance track. Scoped to
+ * the user's own reports, like the History tab.
+ */
+export async function getLastAnalyzedVehicle(userId: string): Promise<LastAnalyzedVehicle | null> {
+  const latest = await getLatestActiveAnalysisReport({ ownerUserId: userId });
+  return lastAnalyzedVehicleFromReport(latest);
 }
 
 export type StoredVehicleProfile = { userId: string; profile: VehicleProfile };
