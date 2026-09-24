@@ -60,6 +60,80 @@ export function averageAdjusted(adjustments: DvCompAdjustment[]): number {
   return roundCents(averageAdjustedRaw(adjustments));
 }
 
+/** A clean comp whose mileage-adjusted value sits more than this fraction
+ *  below the candidate median is not a like-kind unit (live failure: 2024 Ford
+ *  Escape, $10,995 averaged in against $20,588 / $30,479 peers — 47% under the
+ *  median — pulling the ACV down ~$4,600). The ceiling is the mirror ratio
+ *  (median ÷ 0.65, ≈54% above) so the screen never only removes comps that
+ *  hurt the claimant; a one-sided screen would not survive a carrier's review. */
+export const COMP_OUTLIER_BELOW_MEDIAN_PCT = 35;
+
+export type CompOutlierRejection = {
+  comp: DvComp;
+  comparedValue: number;
+  direction: "below" | "above";
+};
+
+export type CompOutlierScreen = {
+  selected: DvComp[];
+  rejected: CompOutlierRejection[];
+  /** Median of the candidate pool's compared values; null when the pool was
+   *  too small (< 3) to tell an outlier from a real spread. */
+  median: number | null;
+};
+
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
+ * Pick `count` comps from an already-RANKED candidate pool, skipping any whose
+ * mileage-adjusted value falls outside the band around the pool median and
+ * pulling the next-ranked in-band candidate in its place. Rank order is kept.
+ * `rejected` lists only the out-of-band candidates that ranked ahead of the
+ * last selected comp — the ones that would otherwise have been averaged in.
+ */
+export function screenCompPriceOutliers(params: {
+  candidates: DvComp[];
+  subjectMileage?: number;
+  count?: number;
+  perMileRate?: number;
+}): CompOutlierScreen {
+  const count = params.count ?? 3;
+  const compared = params.candidates.map((comp) =>
+    typeof params.subjectMileage === "number"
+      ? adjustCompForMileage(comp, params.subjectMileage, params.perMileRate).adjustedValue
+      : comp.askingPrice
+  );
+
+  if (params.candidates.length < 3) {
+    return { selected: params.candidates.slice(0, count), rejected: [], median: null };
+  }
+
+  const median = medianOf(compared);
+  const floor = median * (1 - COMP_OUTLIER_BELOW_MEDIAN_PCT / 100);
+  const ceiling = median / (1 - COMP_OUTLIER_BELOW_MEDIAN_PCT / 100);
+
+  const selected: DvComp[] = [];
+  const rejected: CompOutlierRejection[] = [];
+  for (let index = 0; index < params.candidates.length && selected.length < count; index += 1) {
+    const value = compared[index];
+    if (value < floor || value > ceiling) {
+      rejected.push({
+        comp: params.candidates[index],
+        comparedValue: value,
+        direction: value < floor ? "below" : "above",
+      });
+      continue;
+    }
+    selected.push(params.candidates[index]);
+  }
+
+  return { selected, rejected, median: roundCents(median) };
+}
+
 /**
  * Projected market-stigma percentage when no CarFax HBV or 1-loss comp set is
  * available yet. Calibrated to the settled house files: QX60 4.7% of ACV,

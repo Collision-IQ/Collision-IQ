@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { PLAN_CAPS, PRO_TRIAL_DAYS } from "@/lib/billing/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +14,16 @@ export default async function BillingPage() {
         <h1 className="mt-3 text-3xl font-semibold">Upgrade and manage your plan</h1>
 
         <p className="mt-3 text-sm text-white/65">
-          Collision IQ is subscription-based. Subscribe to Starter or Pro and get immediate access
-          — no trial period, no waiting. Subscriptions renew monthly and can be modified or
-          canceled at any time through the billing portal.
+          Every new account starts with {PRO_TRIAL_DAYS} days of Pro, free, one time. Subscribe to
+          Starter or Pro at any point and access is immediate. Subscriptions renew monthly and can
+          be modified or canceled at any time through the billing portal.
         </p>
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <PlanCard
             name="Starter"
             price="$50/month"
-            description="Chat + document upload + basic analysis + 1 main report export per billing period."
+            description={`Research answers (OEM procedures, position statements) • ${PLAN_CAPS.starter} uploads per month • Scan iQ • Snapshot customer report • My Vehicle.`}
           />
           <PlanCard
             name="Pro"

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { PLAN_CAPS } from "@/lib/billing/plans";
 
 type LeadFormState = {
   name: string;
@@ -40,7 +41,12 @@ const SUBSCRIPTIONS = [
     priceLabel: "$50/month",
     logo: "/iq/iq-app.png",
     logoAlt: "Collision iQ",
-    features: ["Chat access", "1 upload", "1 export", "Best for lighter usage after trial"],
+    features: [
+      "Research answers (OEM procedures, position statements)",
+      `${PLAN_CAPS.starter} uploads per month`,
+      "Scan iQ + Snapshot customer report",
+      "Best for lighter usage after trial",
+    ],
   },
   {
     title: "Pro",
