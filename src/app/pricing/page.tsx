@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { PLAN_CAPS, PRO_TRIAL_DAYS } from "@/lib/billing/plans";
 
 export default function PricingPage() {
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-16 text-white">
       <div className="rounded-[2rem] border border-white/10 bg-black/70 p-8 shadow-[0_24px_70px_rgba(0,0,0,0.45)] md:p-10">
         <div className="text-xs uppercase tracking-[0.24em] text-white/45">Membership</div>
-        <h1 className="mt-3 text-4xl font-semibold md:text-5xl">30 days of Pro. Free, at sign-up.</h1>
+        <h1 className="mt-3 text-4xl font-semibold md:text-5xl">{PRO_TRIAL_DAYS} days of Pro. Free, at sign-up.</h1>
         <p className="mt-4 max-w-3xl text-base leading-7 text-white/68 md:text-lg">
           Every new Collision iQ account starts with the full system for a month, one time. After that, stay on Free, or pick Starter or Pro. Your account activates the moment you subscribe.
         </p>
@@ -14,13 +15,13 @@ export default function PricingPage() {
           <PricingCard
             name="Free"
             eyebrow="$0"
-            description="Quick-answer chat • Read aloud • History • Knowledge Base • 5 photo/document uploads per month • 3 image generations per month"
+            description={`Quick-answer chat • Read aloud • History • Knowledge Base • ${PLAN_CAPS.free} photo/document uploads per month • 3 image generations per month`}
             features={[
               "Quick-answer chat",
               "Read aloud",
               "History",
               "Knowledge Base",
-              "5 uploads per month",
+              `${PLAN_CAPS.free} uploads per month`,
               "3 image generations per month",
             ]}
             ctaText="Create account"
@@ -28,10 +29,10 @@ export default function PricingPage() {
           <PricingCard
             name="Starter"
             eyebrow="$50 / month"
-            description="Everything in Free, plus: Research answers (OEM procedures, position statements, industry references) • 15 uploads per month • 10 image generations per month • Scan iQ • Snapshot customer report • My Vehicle"
+            description={`Everything in Free, plus: Research answers (OEM procedures, position statements, industry references) • ${PLAN_CAPS.starter} uploads per month • 10 image generations per month • Scan iQ • Snapshot customer report • My Vehicle`}
             features={[
               "Research answers (OEM procedures, position statements)",
-              "15 uploads per month",
+              `${PLAN_CAPS.starter} uploads per month`,
               "10 image generations per month",
               "Scan iQ",
               "Snapshot customer report",
@@ -52,7 +53,7 @@ export default function PricingPage() {
               "10% off other apps & services",
             ]}
             featured
-            ctaText="Start 30 days free"
+            ctaText={`Start ${PRO_TRIAL_DAYS} days free`}
           />
         </div>
 

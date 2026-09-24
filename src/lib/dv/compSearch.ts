@@ -18,6 +18,7 @@
 // Every comp records source + date accessed; ad snapshots remain a manual
 // open item because listing pages die fast.
 
+import { COMP_OUTLIER_BELOW_MEDIAN_PCT, screenCompPriceOutliers } from "./acvMath";
 import type { DvComp, DvCompResearch, DvSweepRecord, DvTrimMatch, DvVehicle } from "./types";
 
 const SEARCH_TIMEOUT_MS = 8000;
@@ -426,13 +427,34 @@ export async function runDvCompResearch(params: {
             comp.askingPrice > params.cleanMinAsking
         );
       clean.push(...comps);
-      const detailCount = dedupeComps(clean).filter(
-        (comp) => comp.listingQuality === "detail"
-      ).length;
+      // Count only detail listings that survive the price-outlier screen, so
+      // a rejected lowball keeps the sweep going for a replacement.
+      const detailCount = screenCompPriceOutliers({
+        candidates: sortCleanComps(dedupeComps(clean)),
+        subjectMileage: params.subjectMileage,
+      }).selected.filter((comp) => comp.listingQuality === "detail").length;
       if (detailCount >= 3) break;
     }
 
-    const cleanSelected = sortCleanComps(dedupeComps(clean)).slice(0, 3);
+    const cleanScreen = screenCompPriceOutliers({
+      candidates: sortCleanComps(dedupeComps(clean)),
+      subjectMileage: params.subjectMileage,
+    });
+    const cleanSelected = cleanScreen.selected;
+    for (const rejection of cleanScreen.rejected) {
+      const usd = (value: number) =>
+        value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+      notes.push(
+        `Comp excluded as a price outlier: ${rejection.comp.title} (${usd(rejection.comparedValue)}` +
+          `${typeof params.subjectMileage === "number" ? " mileage-adjusted" : ""}) sits ` +
+          `${rejection.direction === "below" ? `more than ${COMP_OUTLIER_BELOW_MEDIAN_PCT}% below` : "far above"} ` +
+          `the ${usd(cleanScreen.median ?? 0)} median of the candidate listings, outside normal trim and ` +
+          `condition variance. ` +
+          (cleanSelected.length >= 3
+            ? "The next-ranked listing was used in its place."
+            : "No in-band replacement listing was found.")
+      );
+    }
     const indexCompCount = cleanSelected.filter(
       (comp) => comp.listingQuality !== "detail"
     ).length;

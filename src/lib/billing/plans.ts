@@ -8,7 +8,8 @@ export const PLAN_CAPS = {
   free: 5,
 
   // Starter = paid subscription. Basic upload + export, limited analysis capacity.
-  starter: 10,
+  // This is the number /pricing, /billing and /technical-systems advertise.
+  starter: 15,
 
   // Trial kept for any grandfathered TRIALING subscriptions.
   trial: 200,

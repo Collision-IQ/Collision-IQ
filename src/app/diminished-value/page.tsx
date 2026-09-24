@@ -961,7 +961,7 @@ function DiminishedValueFlow() {
               disabled={busy}
               onClick={() => void handleCheckout()}
             >
-              {consultType !== "self-service" ? "Schedule Consultation" : "Pay &amp; generate"}
+              {consultType !== "self-service" ? "Schedule Consultation" : "Pay & generate"}
             </button>
           </div>
           {request?.paidAt && (

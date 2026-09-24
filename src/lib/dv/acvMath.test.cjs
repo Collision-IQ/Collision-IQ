@@ -39,6 +39,7 @@ const {
   computeDvCalculation,
   mileageMultiplier17c,
   projectStigmaPct,
+  screenCompPriceOutliers,
 } = require("./acvMath.ts");
 const { defaultTaxRatePctForState } = require("./salesTax.ts");
 
@@ -283,6 +284,57 @@ run("state tax defaults: PA 6, NJ 6.625, OR 0, unknown falls back to 6", () => {
   assert.equal(defaultTaxRatePctForState("OR"), 0);
   assert.equal(defaultTaxRatePctForState(undefined), 6);
   assert.equal(defaultTaxRatePctForState("ZZ"), 6);
+});
+
+run("comp screen: the Ford Escape lowball is rejected and replaced by the next-ranked comp", () => {
+  // Live failure (Sept 18, 2026): $10,995 averaged in against $30,479 and
+  // $20,588, pulling the ACV down ~$4,600. With a fourth candidate in the
+  // pool the lowball is skipped and the next-ranked listing takes its place.
+  const candidates = [comp(30479), comp(20588), comp(10995), comp(24900)];
+  const screen = screenCompPriceOutliers({ candidates });
+  assert.equal(screen.median, 22744);
+  assert.deepEqual(screen.selected.map((c) => c.askingPrice), [30479, 20588, 24900]);
+  assert.equal(screen.rejected.length, 1);
+  assert.equal(screen.rejected[0].comp.askingPrice, 10995);
+  assert.equal(screen.rejected[0].direction, "below");
+});
+
+run("comp screen: with no replacement available the lowball is still never averaged in", () => {
+  const screen = screenCompPriceOutliers({ candidates: [comp(30479), comp(20588), comp(10995)] });
+  assert.equal(screen.median, 20588);
+  assert.deepEqual(screen.selected.map((c) => c.askingPrice), [30479, 20588]);
+  assert.equal(screen.rejected[0].comp.askingPrice, 10995);
+});
+
+run("comp screen: the settled RO 22210 comp set passes untouched (no regression)", () => {
+  const candidates = [comp(38498, 4961), comp(36791, 1616), comp(38985, 833)];
+  const screen = screenCompPriceOutliers({ candidates, subjectMileage: 1495 });
+  assert.deepEqual(screen.selected, candidates);
+  assert.equal(screen.rejected.length, 0);
+});
+
+run("comp screen: compares MILEAGE-ADJUSTED value, so a cheap high-mile comp is kept", () => {
+  // $13,000 asking at 90k over the subject adjusts to $19,300 — a real comp,
+  // not an outlier. Judged on raw asking price it would have been dropped.
+  const candidates = [comp(22000, 30000), comp(21500, 31000), comp(13000, 120000)];
+  const screen = screenCompPriceOutliers({ candidates, subjectMileage: 30000 });
+  assert.equal(screen.rejected.length, 0);
+  assert.equal(screen.selected.length, 3);
+  const raw = screenCompPriceOutliers({ candidates });
+  assert.equal(raw.rejected.length, 1);
+});
+
+run("comp screen: symmetric — a far-above-median comp is rejected too", () => {
+  const screen = screenCompPriceOutliers({ candidates: [comp(20000), comp(21000), comp(34000), comp(19500)] });
+  assert.deepEqual(screen.selected.map((c) => c.askingPrice), [20000, 21000, 19500]);
+  assert.equal(screen.rejected[0].direction, "above");
+});
+
+run("comp screen: fewer than 3 candidates cannot identify an outlier and pass through", () => {
+  const screen = screenCompPriceOutliers({ candidates: [comp(30000), comp(10000)] });
+  assert.equal(screen.median, null);
+  assert.equal(screen.selected.length, 2);
+  assert.equal(screen.rejected.length, 0);
 });
 
 if (failures > 0) {
