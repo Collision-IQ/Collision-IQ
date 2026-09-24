@@ -12,6 +12,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { getAppUrl } from "@/lib/auth/config";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { UnauthorizedError } from "@/lib/auth/require-current-user";
 import { BILLING_CATALOG, isBillingPlanKey } from "@/lib/billing/catalog";
@@ -29,15 +30,8 @@ function isServiceType(serviceType: string): serviceType is keyof typeof BILLING
 }
 
 function getAppBaseUrl(): string | null {
-  const explicitUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL;
-
-  const candidate = explicitUrl
-    ? explicitUrl
-    : process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : null;
-
-  if (!candidate) return null;
+  // Shared resolver: on a deployed build it never returns a loopback URL.
+  const candidate = getAppUrl();
 
   if (!candidate.startsWith("http://") && !candidate.startsWith("https://")) {
     return null;

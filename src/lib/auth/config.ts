@@ -60,10 +60,39 @@ export function hasStripeConfig() {
   );
 }
 
+const PRODUCTION_APP_ORIGIN = "https://www.collision-iq.ai";
+
+function isLoopbackUrl(value: string) {
+  try {
+    const { hostname } = new URL(value);
+    return ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Public origin used for links that leave the app and come back (Stripe
+ * success/cancel URLs). On a deployed Vercel build a loopback value in
+ * NEXT_PUBLIC_APP_URL / APP_BASE_URL is ignored: live Stripe sessions were
+ * created with success_url http://localhost:3000/..., sending paying
+ * customers to a dead page. Locally (no VERCEL_ENV) behavior is unchanged.
+ */
 export function getAppUrl() {
+  const deployed = Boolean(process.env.VERCEL_ENV);
+  const configured = [process.env.NEXT_PUBLIC_APP_URL, process.env.APP_BASE_URL]
+    .map((value) => value?.trim() || "")
+    .filter(Boolean);
+  const usable = configured.find((value) => !(deployed && isLoopbackUrl(value)));
+  if (deployed && configured.length > 0 && usable !== configured[0]) {
+    console.warn("[app-url] ignoring loopback app URL on a deployed build", {
+      vercelEnv: process.env.VERCEL_ENV,
+    });
+  }
+
   return (
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.APP_BASE_URL?.trim() ||
+    usable ||
+    (process.env.VERCEL_ENV === "production" ? PRODUCTION_APP_ORIGIN : "") ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
     "http://localhost:3000"
   );
