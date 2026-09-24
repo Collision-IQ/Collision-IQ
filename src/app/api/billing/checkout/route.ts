@@ -14,7 +14,19 @@ export const runtime = "nodejs";
 type CheckoutPayload = {
   plan: BillingPlanKey | null;
   claimId: string | null;
+  foundingPilot: boolean;
 };
+
+/**
+ * Founding Shop Pilot: Pro at $99/month for the first 3 billing months, then
+ * the standard $200/month. Implemented as a Stripe promotion code (coupon
+ * `founding-shop-pilot`, $101 off, repeating 3 months, 10 redemptions, Pro
+ * product only) on the regular Pro price — NOT a separate price — so the
+ * webhook's price→plan lookup always resolves the subscription to PRO and
+ * Stripe itself returns it to $200 with no code involved at day 90.
+ */
+const FOUNDING_PILOT_PROMO_CODE = "FOUNDINGSHOP";
+const FOUNDING_PILOT_ALIASES = new Set(["founding-pilot", "founding_pilot"]);
 
 const CHECKOUT_PLAN_ALIASES: Record<string, BillingPlanKey> = {
   "executive-onboarding": "executive_onboarding",
@@ -36,9 +48,11 @@ async function resolveCheckoutPayload(req: Request): Promise<CheckoutPayload> {
 
   if (contentType.includes("application/json")) {
     const body = (await req.json().catch(() => null)) as { plan?: string; claimId?: string } | null;
+    const foundingPilot = FOUNDING_PILOT_ALIASES.has(body?.plan?.trim() ?? "");
     return {
-      plan: resolveBillingPlanKey(body?.plan),
+      plan: foundingPilot ? "pro" : resolveBillingPlanKey(body?.plan),
       claimId: body?.claimId?.trim() || null,
+      foundingPilot,
     };
   }
 
@@ -46,9 +60,12 @@ async function resolveCheckoutPayload(req: Request): Promise<CheckoutPayload> {
   const value = formData.get("plan");
   const claimIdValue = formData.get("claimId");
 
+  const rawPlan = typeof value === "string" ? value : undefined;
+  const foundingPilot = FOUNDING_PILOT_ALIASES.has(rawPlan?.trim() ?? "");
   return {
-    plan: resolveBillingPlanKey(typeof value === "string" ? value : undefined),
+    plan: foundingPilot ? "pro" : resolveBillingPlanKey(rawPlan),
     claimId: typeof claimIdValue === "string" ? claimIdValue.trim() || null : null,
+    foundingPilot,
   };
 }
 
@@ -85,7 +102,7 @@ export async function POST(req: Request) {
     return NextResponse.redirect(new URL("/sign-in", req.url));
   }
 
-  const { plan, claimId } = await resolveCheckoutPayload(req);
+  const { plan, claimId, foundingPilot } = await resolveCheckoutPayload(req);
   if (!plan) {
     return NextResponse.json({ error: "Plan not available" }, { status: 400 });
   }
@@ -98,17 +115,41 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "This checkout price is not configured yet." }, { status: 500 });
   }
 
+  // Stripe rejects `discounts` alongside `allow_promotion_codes`, so the pilot
+  // pre-applies its code and every other checkout keeps the code field.
+  let pilotPromotionCodeId: string | null = null;
+  if (foundingPilot) {
+    const promo = await stripe.promotionCodes.list({
+      code: FOUNDING_PILOT_PROMO_CODE,
+      active: true,
+      limit: 1,
+    });
+    pilotPromotionCodeId = promo.data[0]?.id ?? null;
+    if (!pilotPromotionCodeId) {
+      // All 10 spots redeemed (Stripe deactivates the code) — never silently
+      // send a pilot click to a full-price checkout.
+      const fullUrl = getBillingReturnUrl("/billing?offer=founding-pilot&pilot=full");
+      if (wantsJson) {
+        return NextResponse.json({ url: fullUrl, error: "The Founding Shop Pilot is full." }, { status: 409 });
+      }
+      return NextResponse.redirect(fullUrl, 303);
+    }
+  }
+
   const customerId = await ensureStripeCustomerId(dbUser.id);
   const session = await stripe.checkout.sessions.create({
     mode: catalogEntry.mode,
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    allow_promotion_codes: true,
+    ...(pilotPromotionCodeId
+      ? { discounts: [{ promotion_code: pilotPromotionCodeId }] }
+      : { allow_promotion_codes: true }),
     success_url: getBillingReturnUrl("/billing?checkout=success"),
     cancel_url: getBillingReturnUrl("/billing?checkout=cancelled"),
     metadata: {
       type: catalogEntry.mode,
       plan,
+      offer: foundingPilot ? "founding_pilot" : "",
       claimId: claimId ?? "",
       userId: dbUser.id,
     },

@@ -4,8 +4,14 @@ import { PLAN_CAPS, PRO_TRIAL_DAYS } from "@/lib/billing/plans";
 
 export const dynamic = "force-dynamic";
 
-export default async function BillingPage() {
+type BillingPageProps = {
+  searchParams?: Promise<{ offer?: string; pilot?: string }>;
+};
+
+export default async function BillingPage({ searchParams }: BillingPageProps) {
   const access = await getCurrentEntitlements();
+  const params = (await searchParams) ?? {};
+  const showFoundingPilot = params.offer === "founding-pilot";
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-16 text-white">
@@ -18,6 +24,13 @@ export default async function BillingPage() {
           Starter or Pro at any point and access is immediate. Subscriptions renew monthly and can
           be modified or canceled at any time through the billing portal.
         </p>
+
+        {showFoundingPilot && (
+          <FoundingPilotCard
+            isAuthenticated={access.isAuthenticated}
+            isFull={params.pilot === "full"}
+          />
+        )}
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <PlanCard
@@ -109,5 +122,55 @@ function PlanCard({
       <div className="mt-3 text-xl font-semibold text-white">{price}</div>
       <p className="mt-3 text-sm leading-6 text-white/65">{description}</p>
     </div>
+  );
+}
+
+function FoundingPilotCard({
+  isAuthenticated,
+  isFull,
+}: {
+  isAuthenticated: boolean;
+  isFull: boolean;
+}) {
+  return (
+    <section className="mt-8 rounded-2xl border border-[var(--accent)]/50 bg-[var(--accent)]/10 p-6">
+      <div className="text-xs uppercase tracking-[0.2em] text-white/55">Founding Shop Pilot</div>
+      <div className="mt-3 text-2xl font-semibold text-white">
+        Pro at $99/month for your first 3 months
+      </div>
+      <p className="mt-3 text-sm leading-6 text-white/75">
+        Full Pro access, a guided onboarding session, and your first estimate reviewed together,
+        live. After 3 months it continues as standard Pro at $200/month. Cancel anytime. Limited
+        to the first 10 shops.
+      </p>
+      {isFull ? (
+        <p className="mt-5 text-sm font-semibold text-white">
+          All 10 pilot spots have been taken. Standard Pro is available below.
+        </p>
+      ) : isAuthenticated ? (
+        <form action="/api/billing/checkout" method="post" className="mt-5">
+          <input type="hidden" name="plan" value="founding-pilot" />
+          <button
+            type="submit"
+            className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
+          >
+            Claim a pilot spot ($99/month)
+          </button>
+        </form>
+      ) : (
+        <div className="mt-5">
+          <Link
+            href="/sign-up"
+            className="inline-block rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
+          >
+            Create your account to claim a spot
+          </Link>
+          <p className="mt-3 text-xs text-white/60">
+            Already have an account? <Link href="/sign-in" className="underline">Sign in</Link>, then
+            return to this link to claim your spot.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
