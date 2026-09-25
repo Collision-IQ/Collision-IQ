@@ -18,6 +18,9 @@ import {
 import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
 import { LedgerNotClosedError } from "./appraisalSummary/gapLedger";
+import type { MatcherPair } from "./appraisalSummary/argueItems";
+import { buildLowerEstimateFindings } from "./appraisalSummary/lowerEstimateFindings";
+import { buildLowerEstimateCitationPdf } from "./lowerEstimateCitationDensity";
 import { NonLaborParseError } from "./appraisalSummary/nonLaborBuckets";
 import { adaptForensicToPlainSummary } from "./plainLanguageSummaryAdapter";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
@@ -789,6 +792,19 @@ export type AnnotatedEstimateResult = {
   plainSummaryExportId?: string;
   plainSummaryBytes?: Uint8Array;
   plainSummaryPageCount?: number;
+  /**
+   * The Delta Citation Density copy of the LOWER (comparison) estimate: its
+   * own pages with our values stamped beside theirs and a findings index.
+   * When present it is THE Citation Density deliverable; absent (with a
+   * warning) the annotated copy of our estimate above is delivered instead.
+   */
+  lowerEstimate?: {
+    exportId: string;
+    bytes: Uint8Array;
+    pageCount: number;
+    badgeCount: number;
+    fileName: string;
+  };
 };
 
 export type CitationDensityDebugTrace = {
@@ -1548,6 +1564,59 @@ const exportCache = new Map<string, {
   reportType?: string;
 }>();
 const EXPORT_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * The Delta Citation Density copy of the lower estimate. Any failure is a
+ * warning and the annotated copy of our estimate stands in; it never fails
+ * the run, and it never ships unredacted pages (redaction failure throws).
+ */
+async function buildLowerEstimateDeliverable(input: {
+  model: ReturnType<typeof buildPlainSummaryModel>;
+  pairs: MatcherPair[];
+  comparisonPdf: ComparisonEstimatePdf | undefined;
+  comparisonWords: { fileName: string; words: PdfWord[] } | undefined;
+  higherName: string;
+  redactionScope: RasterRedactionScope;
+  redact: boolean;
+  reportIdentity: AnnotatedEstimateReportIdentity;
+  warnings: string[];
+}): Promise<AnnotatedEstimateResult["lowerEstimate"]> {
+  if (!input.comparisonPdf || !input.comparisonWords?.words.length) {
+    input.warnings.push(
+      "The Citation Density copy of the comparison estimate was not built: its PDF word layer was not available, so the annotated copy of our estimate is delivered instead."
+    );
+    return undefined;
+  }
+  try {
+    const set = buildLowerEstimateFindings(input.model, input.pairs);
+    const built = await buildLowerEstimateCitationPdf({
+      lowerPdfBytes: input.comparisonPdf.bytes.slice(),
+      words: input.comparisonWords.words,
+      set,
+      model: input.model,
+      lowerName: input.comparisonPdf.fileName,
+      higherName: input.higherName,
+      redactionScope: input.redactionScope,
+      redact: input.redact,
+    });
+    const exportId = putAnnotatedEstimateExport(built.bytes, input.reportIdentity.artifactFilename, [], {
+      artifactVersion: input.reportIdentity.artifactVersion,
+      reportType: input.reportIdentity.reportType,
+    });
+    return {
+      exportId,
+      bytes: built.bytes,
+      pageCount: built.pageCount,
+      badgeCount: built.badges,
+      fileName: `${input.comparisonPdf.fileName.replace(/\.pdf$/i, "")} - Delta Citation Density.pdf`,
+    };
+  } catch (error) {
+    input.warnings.push(
+      `The Citation Density copy of the comparison estimate could not be built (${error instanceof Error ? error.message : "unknown error"}); the annotated copy of our estimate is delivered instead.`
+    );
+    return undefined;
+  }
+}
 
 export function putAnnotatedEstimateExport(
   bytes: Uint8Array,
@@ -2906,6 +2975,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let plainSummaryExportId: string | undefined;
   let plainSummaryBytes: Uint8Array | undefined;
   let plainSummaryPageCount = 0;
+  let lowerEstimate: AnnotatedEstimateResult["lowerEstimate"];
   // THE SECOND DOCUMENT IS THE FORENSIC REPORT, NOT A CARD DUMP.
   //
   // The Citation Density Report produces exactly two PDFs: the annotated delta
@@ -3058,7 +3128,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           scrub: resolveExportScrub(request.redactSensitive !== false, redactionScope),
         });
         if (adapted.ok) {
-          const rendered = await renderPlainSummaryPdf(buildPlainSummaryModel(adapted.input));
+          const appraisalModel = buildPlainSummaryModel(adapted.input);
+          // The lower-estimate citation copy rests on the same model, so it is
+          // built before the summary's wording gate can refuse the summary.
+          lowerEstimate = await buildLowerEstimateDeliverable({
+            model: appraisalModel,
+            pairs: adapted.input.pairs,
+            comparisonPdf: params.comparisonEstimatePdfs?.find((pdf) => pdf.estimateRole === "carrier") ?? params.comparisonEstimatePdfs?.[0],
+            comparisonWords: comparisonEstimateWords.find((entry) => entry.estimateRole === "carrier") ?? comparisonEstimateWords[0],
+            higherName: sourcePdfName,
+            redactionScope,
+            redact: params.redactSourcePages !== false,
+            reportIdentity,
+            warnings,
+          });
+          appraisalModel.citationCopy = lowerEstimate ? "theirs" : "ours";
+          const rendered = await renderPlainSummaryPdf(appraisalModel);
           plainSummaryBytes = rendered.bytes;
           plainSummaryPageCount = rendered.pageCount;
           plainSummaryExportId = putAnnotatedEstimateExport(
@@ -3285,6 +3370,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     plainSummaryExportId,
     plainSummaryBytes,
     plainSummaryPageCount,
+    lowerEstimate,
   };
 }
 

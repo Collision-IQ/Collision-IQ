@@ -507,7 +507,11 @@ export async function POST(request: Request) {
           enforceReleaseGate: process.env.CITATION_DENSITY_RELEASE_GATE !== "off",
         },
       });
-      const artifactId = result.exportId;
+      // The Delta Citation Density deliverable is the LOWER estimate marked
+      // with our values when that copy was built; otherwise (with a warning on
+      // the run) the annotated copy of the selected estimate stands in.
+      const citationCopy = result.lowerEstimate;
+      const artifactId = citationCopy?.exportId ?? result.exportId;
       const downloadUrl = `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(artifactId)}`;
       const findingsReportArtifactId = result.findingsReportExportId;
       const findingsReportUrl = findingsReportArtifactId
@@ -518,12 +522,14 @@ export async function POST(request: Request) {
         ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
         : undefined;
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
-      annotatedFindingCount += result.annotatedFindingCount;
+      annotatedFindingCount += citationCopy?.badgeCount ?? result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
       outputs.push({
         artifactId,
         exportId: artifactId,
-        pdfBase64: Buffer.from(result.bytes).toString("base64"),
+        pdfBase64: Buffer.from(citationCopy?.bytes ?? result.bytes).toString("base64"),
+        citationDensityDocument: citationCopy ? "comparison_estimate" : "selected_estimate",
+        citationDensityFileName: citationCopy?.fileName,
         estimateRole,
         sourceDocumentId: selection.selectedSourceDocumentId,
         downloadUrl,
@@ -539,7 +545,7 @@ export async function POST(request: Request) {
           ? Buffer.from(result.plainSummaryBytes).toString("base64")
           : undefined,
         plainSummaryPageCount: result.plainSummaryPageCount,
-        annotatedFindingCount: result.annotatedFindingCount,
+        annotatedFindingCount: citationCopy?.badgeCount ?? result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
         annotationMetadata: result.annotationMetadata,

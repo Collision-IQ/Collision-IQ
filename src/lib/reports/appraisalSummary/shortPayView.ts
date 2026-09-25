@@ -30,6 +30,13 @@ export interface ShortPayUnit {
   diff: number;
 }
 
+export interface UnitAssignment {
+  /** Every nonzero unit, including paint materials and any open rate gap. */
+  units: ShortPayUnit[];
+  /** Each one-to-one paired shop line and its carrier line (zero-difference pairs included). */
+  shopToCarrier: Map<number, number>;
+}
+
 export interface ShortPayView {
   /** Σ positive units. */
   shortPaid: number;
@@ -48,7 +55,34 @@ export function buildShortPayView(params: {
   groups: GroupDelta[];
   pairs: MatcherPair[];
 }): ShortPayView | null {
+  const { ledger } = params;
+  const { units } = assignUnits(params);
+  const total = round2(units.reduce((sum, u) => sum + u.diff, 0) + ledger.tax);
+  // The line read must account for every printed hour and dollar, or the
+  // gross figures would be describing a different estimate.
+  if (Math.abs(total - ledger.gap) > 0.01) return null;
+  const short = units.filter((u) => u.diff > 0).sort((a, b) => b.diff - a.diff);
+  const over = units.filter((u) => u.diff < 0).sort((a, b) => a.diff - b.diff);
+  return {
+    shortPaid: round2(short.reduce((sum, u) => sum + u.diff, 0)),
+    carrierOver: round2(-over.reduce((sum, u) => sum + u.diff, 0)),
+    tax: ledger.tax,
+    gap: ledger.gap,
+    over,
+    short,
+  };
+}
+
+/** Assign every line on both sheets to one unit, valued at our rates. */
+export function assignUnits(params: {
+  shop: Estimate;
+  carrier: Estimate;
+  ledger: GapLedger;
+  groups: GroupDelta[];
+  pairs: MatcherPair[];
+}): UnitAssignment {
   const { shop, carrier, ledger, groups, pairs } = params;
+  const shopToCarrier = new Map<number, number>();
   const paintRate = shopRateFor(shop, "paint", 0);
   const value = (l: EstimateLine) =>
     (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) +
@@ -62,6 +96,10 @@ export function buildShortPayView(params: {
   const add = (label: string, s: EstimateLine[], c: EstimateLine[]) => {
     s.forEach((l) => usedShop.add(l.line));
     c.forEach((l) => usedCarrier.add(l.line));
+    // Only a one-to-one pair locates a line: a group spans many lines on both
+    // sheets, and a neighbour inside it says nothing about where on the other
+    // sheet the next line sits.
+    if (c.length === 1 && s.length === 1) shopToCarrier.set(s[0].line, c[0].line);
     const diff = round2(s.reduce((sum, l) => sum + value(l), 0) - c.reduce((sum, l) => sum + value(l), 0));
     // A negative line on our sheet alone (an overlap deduction) lowers ours; it
     // is not something the carrier wrote, and the label says so.
@@ -135,21 +173,7 @@ export function buildShortPayView(params: {
   for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(c.desc, [], [c]);
   if (ledger.paintMaterials !== 0) units.push({ label: "Paint materials", shopLines: [], carrierLines: [], diff: ledger.paintMaterials });
   if (ledger.laborRate !== 0) units.push({ label: "Labor rate", shopLines: [], carrierLines: [], diff: ledger.laborRate });
-
-  const total = round2(units.reduce((sum, u) => sum + u.diff, 0) + ledger.tax);
-  // The line read must account for every printed hour and dollar, or the
-  // gross figures would be describing a different estimate.
-  if (Math.abs(total - ledger.gap) > 0.01) return null;
-  const short = units.filter((u) => u.diff > 0).sort((a, b) => b.diff - a.diff);
-  const over = units.filter((u) => u.diff < 0).sort((a, b) => a.diff - b.diff);
-  return {
-    shortPaid: round2(short.reduce((sum, u) => sum + u.diff, 0)),
-    carrierOver: round2(-over.reduce((sum, u) => sum + u.diff, 0)),
-    tax: ledger.tax,
-    gap: ledger.gap,
-    over,
-    short,
-  };
+  return { units, shopToCarrier };
 }
 
 const STOP = new Set(["for", "and", "the", "of", "to", "into", "per", "on", "with", "from", "plus", "rt", "lt", "assy", "repl", "rpr"]);

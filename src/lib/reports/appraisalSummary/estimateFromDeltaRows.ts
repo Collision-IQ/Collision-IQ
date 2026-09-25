@@ -30,7 +30,7 @@ const SUPPLEMENT = /^(S\d{2})\s+/;
 /** A part number printed at the end of the description ("Subframe bolt sc00006965-a"). */
 const TRAILING_PART_NUMBER = /\s([A-Za-z]{0,3}\d{6,}-?[A-Za-z0-9]{0,3})$/;
 
-function labelCat(label: string): LaborCat {
+export function labelCat(label: string): LaborCat {
   if (/alum|steel\s+repair/i.test(label)) return "aluminum";
   if (/struct/i.test(label)) return "structural";
   if (/frame/i.test(label)) return "frame";

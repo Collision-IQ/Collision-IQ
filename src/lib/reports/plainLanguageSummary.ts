@@ -83,6 +83,8 @@ export interface PlainSummaryModel {
   shortPay: ShortPayView | null;
   /** The deductible a document states (the carrier's first); null when neither says. */
   deductible: number | null;
+  /** Which estimate the delivered Citation Density copy marks up; set by the pipeline before render. */
+  citationCopy?: "theirs" | "ours";
   lint: LintContext;
 }
 
@@ -352,7 +354,14 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       columns: [{ header: "Report", weight: 24 }, { header: "What it holds", weight: 76 }],
       rows: [
         { cells: ["Forensic Estimate Analysis", "Every line-level difference the matcher found, including the ones this report groups as the same work written under another name. Line numbers refer to our estimate."] },
-        { cells: ["Delta Citation Density", "Our estimate with the differences painted on: yellow highlight where a line differs, the carrier's figure in the red footnotes, the legend on the last page."] },
+        {
+          cells: [
+            "Delta Citation Density",
+            model.citationCopy === "theirs"
+              ? `${model.header.theirs} with every value we wrote differently highlighted and our value stamped beside it, a numbered badge (D1, D2 ...) on each line worth raising, and a findings index at the end.`
+              : "Our estimate with the differences painted on: yellow highlight where a line differs, the carrier's figure in the red footnotes, the legend on the last page.",
+          ],
+        },
         { cells: ["The two estimates", `${shop.fileName} (${shop.lines.length} lines read) and ${carrier.fileName} (${carrier.lines.length} lines read). Every L-number above is a line on one of these.`] },
       ],
     },
