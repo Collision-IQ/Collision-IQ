@@ -40,6 +40,7 @@ import { integrityChecks, type Flag } from "./appraisalSummary/integrityChecks";
 import { classifyNonLabor } from "./appraisalSummary/nonLaborBuckets";
 import { groupEquivalents, type GroupDelta } from "./appraisalSummary/operationEquivalence";
 import { partTypeEvidence, type PartTypeEvidence } from "./appraisalSummary/partTypeEvidence";
+import { buildShortPayView, type ShortPayView } from "./appraisalSummary/shortPayView";
 import { buildSummaryFacts, lintSummaryUnits, type LintContext, type SummaryFacts } from "./appraisalSummary/summaryGuards";
 import type { Estimate } from "./appraisalSummary/types";
 
@@ -78,6 +79,12 @@ export interface PlainSummaryModel {
   flags: Flag[];
   facts: SummaryFacts;
   items: ArgueItem[];
+  /** Short-paid vs carrier-only, gross; null when the lines do not reconcile to the gap. */
+  shortPay: ShortPayView | null;
+  /** The deductible a document states (the carrier's first); null when neither says. */
+  deductible: number | null;
+  /** Which estimate the delivered Citation Density copy marks up; set by the pipeline before render. */
+  citationCopy?: "theirs" | "ours";
   lint: LintContext;
 }
 
@@ -112,6 +119,8 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
     flags,
     facts,
     items,
+    shortPay: buildShortPayView({ shop, carrier, ledger, groups, pairs: input.pairs }),
+    deductible: carrier.deductible ?? shop.deductible ?? null,
     lint: { ledger, partType, hasDealerCalibrationSublet },
   };
 }
@@ -164,6 +173,9 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
         { cells: ["Our estimate", `${model.header.ours}: ${money(L.shopTotal)}`] },
         { cells: ["Their estimate", `${model.header.theirs}: ${money(L.carrierTotal)}`] },
         { cells: ["The gap", money(L.gap)], variant: "total" },
+        ...(model.deductible !== null
+          ? [{ cells: ["Deductible (owner)", `${money(model.deductible)}, as the estimate states it. It applies whichever estimate is paid.`] }]
+          : []),
         { cells: ["Audience", "Internal. For the front desk, estimators and anyone who has to explain this to the owner. Not for the carrier, not for the customer's file as-is."] },
       ],
     },
@@ -196,6 +208,47 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
     },
   ]);
 
+  // 2b. The gross view behind the net.
+  if (model.shortPay && model.shortPay.carrierOver > 0) {
+    const v = model.shortPay;
+    const top = v.over.slice(0, 6);
+    const rest = v.over.slice(6);
+    const blocks: ForensicBlock[] = [
+      {
+        kind: "paragraph",
+        text: `The ${money(v.gap)} gap is a net. At our rates, the carrier short-pays ${money(v.shortPaid)} of our lines, and its sheet carries ${money(v.carrierOver)} of lines ours does not have or pays more on them. ${money(v.shortPaid)} short-paid, less ${money(v.carrierOver)} carrier-only, plus ${money(v.tax)} tax, is ${money(v.gap)}.`,
+      },
+      {
+        kind: "table",
+        columns: [
+          { header: "Theirs is higher", weight: 46 },
+          { header: "Their line", weight: 18 },
+          { header: "Our line", weight: 18 },
+          { header: "Amount", weight: 18, align: "right" },
+        ],
+        rows: [
+          ...top.map((u) => ({
+            cells: [
+              u.label,
+              u.carrierLines.length ? u.carrierLines.map((n) => `L${n}`).join(", ") : "none",
+              u.shopLines.length ? u.shopLines.map((n) => `L${n}`).join(", ") : "none",
+              money(-u.diff),
+            ],
+          })),
+          ...(rest.length
+            ? [{ cells: [`${rest.length} smaller lines`, "", "", money(-rest.reduce((sum, u) => sum + u.diff, 0))] }]
+            : []),
+          { cells: ["Total", "", "", money(v.carrierOver)], variant: "total" as const },
+        ],
+      },
+      {
+        kind: "note",
+        text: "Lines are matched as the same work written under another name, then by the delta matcher, part number, and shared description; a line with no match counts on one side only. The net is fixed by the printed totals; how it splits between the two sides depends on that matching.",
+      },
+    ];
+    section("Short-paid vs. what only they wrote", blocks);
+  }
+
   // 3. Check this first.
   section("Check this first", [
     facts.checkFirst.length
@@ -209,7 +262,9 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
   const itemBlocks: ForensicBlock[] = [
     {
       kind: "paragraph",
-      text: "Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first. WEAK: likely included in an operation they already pay; argue only with a P-page that says otherwise.",
+      text: `Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first.${
+        model.items.some((i) => i.strength === "Weak") ? " WEAK: a retrieved P-page shows it is included in an operation they already pay." : ""
+      }`,
     },
   ];
   if (shown.length) {
@@ -299,7 +354,14 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       columns: [{ header: "Report", weight: 24 }, { header: "What it holds", weight: 76 }],
       rows: [
         { cells: ["Forensic Estimate Analysis", "Every line-level difference the matcher found, including the ones this report groups as the same work written under another name. Line numbers refer to our estimate."] },
-        { cells: ["Delta Citation Density", "Our estimate with the differences painted on: yellow highlight where a line differs, the carrier's figure in the red footnotes, the legend on the last page."] },
+        {
+          cells: [
+            "Delta Citation Density",
+            model.citationCopy === "theirs"
+              ? `${model.header.theirs} with every value we wrote differently highlighted and our value stamped beside it, a numbered badge (D1, D2 ...) on each line worth raising, and a findings index at the end.`
+              : "Our estimate with the differences painted on: yellow highlight where a line differs, the carrier's figure in the red footnotes, the legend on the last page.",
+          ],
+        },
         { cells: ["The two estimates", `${shop.fileName} (${shop.lines.length} lines read) and ${carrier.fileName} (${carrier.lines.length} lines read). Every L-number above is a line on one of these.`] },
       ],
     },
@@ -441,7 +503,9 @@ export function buildOwnerNote(model: PlainSummaryModel): string {
     );
   }
   return [
-    `Thank you for trusting us with your ${model.header.vehicle}. Two repair plans have been written for it. Ours comes to ${money(L.shopTotal)}, and the insurance company's appraiser has written ${money(L.carrierTotal)}, a difference of ${money(L.gap)}.`,
+    `Thank you for trusting us with your ${model.header.vehicle}. Two repair plans have been written for it. Ours comes to ${money(L.shopTotal)}, and the insurance company's appraiser has written ${money(L.carrierTotal)}, a difference of ${money(L.gap)}.${
+      model.deductible !== null ? ` Your ${money(model.deductible)} deductible is the same under either one.` : ""
+    }`,
     ...drivers,
     "A gap like this is common at this stage and does not mean anyone has acted in bad faith; two appraisers looked at the same vehicle and reached different conclusions.",
     "The next step is a supplement and, where needed, a joint reinspection with the damaged parts removed, which is where most of these differences get settled. We will keep you updated as that happens, and we will keep every estimate, supplement and invoice on file for you. Please call us with any questions.",

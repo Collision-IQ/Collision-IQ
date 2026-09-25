@@ -10,10 +10,13 @@
  *   Needs proof — an operation with no counterpart, or fewer hours on the
  *                 paired line; it needs a P-page, an invoice or an OEM
  *                 procedure before it is argued.
- *   Weak        — likely included in a database operation the carrier wrote
- *                 on the same assembly (caliper R&I under a hub replacement or
- *                 a suspension overhaul). Argue only with a P-page that says
- *                 otherwise.
+ *   Weak        — reserved for an operation a retrieved P-page shows is
+ *                 included in a database operation the carrier wrote.
+ *
+ * An operation that MAY be included in the carrier's operation on the same
+ * assembly (caliper R&I under a hub replacement or a suspension overhaul) is
+ * "Needs proof" with the P-page named: neither "included" nor "not included"
+ * is printed until the guide text is retrieved.
  *
  * The pairing is the delta matcher's (passed in as `pairs`); this module never
  * re-pairs lines. It only removes what the equivalence groups already
@@ -45,8 +48,16 @@ export interface ArgueItem {
 }
 
 /** A child part the carrier leaves off while paying its parent. */
-const PARENT_PARTS: Array<{ child: RegExp; exclude: RegExp; parent: RegExp; label: string }> = [
-  { child: /\b(tires?|pirelli|michelin|goodyear|continental|bridgestone)\b/i, exclude: /disposal|balance|mount/i, parent: /\bwheel\b/i, label: "tires" },
+const PARENT_PARTS: Array<{ child: RegExp; exclude: RegExp; parent: RegExp; companion: RegExp; label: string }> = [
+  {
+    child: /\b(tires?|pirelli|michelin|goodyear|continental|bridgestone)\b/i,
+    exclude: /disposal|balance|mount/i,
+    parent: /\bwheel\b/i,
+    // Work that exists only because the child part is replaced: it rides with
+    // the child, net of whatever the carrier already pays for it.
+    companion: /\b(balance|tire\s+disposal)\b/i,
+    label: "tires",
+  },
 ];
 
 /** A component operation that database time on a parent operation usually includes. */
@@ -128,18 +139,27 @@ export function argueItems(params: {
     const carrierHasChild = carrier.lines.some((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc));
     const parents = carrier.lines.filter((l) => rule.parent.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0);
     if (!children.length || carrierHasChild || !parents.length) continue;
-    children.forEach((l) => claimed.add(l.line));
+    const ourCompanions = shop.lines.filter((l) => rule.companion.test(l.desc) && !claimed.has(l.line) && (l.price ?? 0) > 0);
+    const theirCompanions = carrier.lines.filter((l) => rule.companion.test(l.desc) && (l.price ?? 0) > 0);
+    [...children, ...ourCompanions].forEach((l) => claimed.add(l.line));
     const price = round2(children.reduce((sum, l) => sum + (l.price ?? 0), 0));
+    const companionNet = round2(
+      ourCompanions.reduce((sum, l) => sum + (l.price ?? 0), 0) - theirCompanions.reduce((sum, l) => sum + (l.price ?? 0), 0)
+    );
     items.push({
       strength: "Strong",
-      title: `${rule.label[0].toUpperCase()}${rule.label.slice(1)}`,
+      title: `${rule.label[0].toUpperCase()}${rule.label.slice(1)}${ourCompanions.length ? ", with balance and disposal" : ""}`,
       detail: `They pay the ${parents.length === 1 ? "part" : "parts"} the ${rule.label} mount on (${parents
         .map((l) => `L${l.line}`)
-        .join(", ")}) but no ${rule.label}; ours ${children.map((l) => `L${l.line}`).join(", ")}.`,
+        .join(", ")}) but no ${rule.label}; ours ${children.map((l) => `L${l.line}`).join(", ")} (${money(price)})${
+        ourCompanions.length
+          ? `, plus ${ourCompanions.map((l) => `L${l.line}`).join(", ")}${theirCompanions.length ? ` less their ${theirCompanions.map((l) => `L${l.line}`).join(", ")}` : ""} (${money(companionNet)})`
+          : ""
+      }.`,
       hours: 0,
-      value: price,
-      shopLines: children.map((l) => l.line),
-      carrierLines: parents.map((l) => l.line),
+      value: round2(price + (ourCompanions.length ? companionNet : 0)),
+      shopLines: [...children, ...ourCompanions].map((l) => l.line),
+      carrierLines: [...parents, ...theirCompanions].map((l) => l.line),
     });
   }
 
@@ -156,7 +176,7 @@ export function argueItems(params: {
     if (value <= 0 || hours < 0) continue;
     lines.forEach((l) => claimed.add(l.line));
     const head = lines[0];
-    const weak = !theirs
+    const pPage = !theirs
       ? INCLUDED_UNDER.find(
           (rule) =>
             rule.component.test(head.desc) &&
@@ -165,10 +185,10 @@ export function argueItems(params: {
       : undefined;
     const lineRefs = lines.map((l) => `L${l.line}`).join(", ");
     items.push({
-      strength: weak ? "Weak" : "Needs proof",
+      strength: "Needs proof",
       title: `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
-      detail: weak
-        ? `No counterpart (${lineRefs}, ${ourHours.toFixed(1)} hr), but likely included in ${weak.label}. Argue only with a P-page that says otherwise.`
+      detail: pPage
+        ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : theirs
           ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
           : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,

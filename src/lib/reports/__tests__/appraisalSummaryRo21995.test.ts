@@ -302,8 +302,10 @@ describe("RO 21995 from the production-path rows (strict line guard on)", () => 
 
   it("ranks the items: STRONG from their own documents first", () => {
     const top = model.items.slice(0, 3).map((i) => [i.strength, i.title, i.value]);
+    // Tires ride with their road-force balance and disposal, net of the
+    // carrier's own mount-and-balance line: 1,192.60 + 200 + 16 − 60.
     expect(top).toEqual([
-      ["Strong", "Tires", 1192.6],
+      ["Strong", "Tires, with balance and disposal", 1348.6],
       ["Strong", "ADAS calibration & diagnostics", 525],
       ["Strong", "Oil pump: install labor", 175],
     ]);
@@ -346,6 +348,45 @@ describe("RO 21995 from the production-path rows (strict line guard on)", () => 
     expect(body).not.toMatch(/\bL\d+\b|will pay|within \d+ days|by (Monday|Friday)/i);
   });
 
+  it("every printed hour is on a line: summary history dropped, user category read before paint", () => {
+    // The SOR's SUPPLEMENT SUMMARY repeats "16 R&I RT Ft fender liner -0.4";
+    // it is history, not a line of this estimate.
+    expect(input.carrier.lines.filter((l) => l.line === 16)).toEqual([]);
+    // "RT Door shell (ALU)1.012.1" = 1.0 hr, category 1, 2.1 paint.
+    expect(input.shop.lines.find((l) => l.line === 166)?.laborCat).toBe("aluminum");
+    for (const e of [input.shop, input.carrier]) {
+      for (const total of e.totals.labor.filter((t) => t.cat !== "paint")) {
+        const onLines = e.lines.filter((l) => (l.laborCat ?? "body") === total.cat).reduce((sum, l) => sum + (l.hours ?? 0), 0);
+        expect(Math.round(onLines * 10) / 10).toBe(total.hours);
+      }
+    }
+  });
+
+  it("reads the deductible the carrier's estimate states", () => {
+    expect(input.carrier.deductible).toBe(2500);
+    expect(model.deductible).toBe(2500);
+    expect(text).toContain("$2,500.00, as the estimate states it");
+  });
+
+  it("the gross view reconciles to the cent and leads with the carrier-only damper", () => {
+    const v = model.shortPay!;
+    expect(v).not.toBeNull();
+    expect(Math.round((v.shortPaid - v.carrierOver + v.tax) * 100) / 100).toBe(2712.8);
+    expect(v.over[0]).toMatchObject({ label: "Damper Module Assembly", carrierLines: [169], shopLines: [], diff: -1980 });
+    // Same work in different words pairs by best match: the 4.0 hr set-back
+    // lines meet each other, not the 0.3 hr "Set back, secure wiring".
+    const all = [...v.short, ...v.over];
+    expect(all.some((u) => u.carrierLines.includes(55) && u.shopLines.includes(22))).toBe(false);
+    expect(text).toContain("Short-paid vs. what only they wrote");
+  });
+
+  it("never asserts a P-page it has not retrieved", () => {
+    const caliper = model.items.find((i) => /caliper/i.test(i.title));
+    expect(caliper?.strength).toBe("Needs proof");
+    expect(caliper?.detail).toMatch(/P-page question/);
+    expect(text).not.toMatch(/likely included|not included/i);
+  });
+
   it("renders through the shared forensic renderer", async () => {
     const pdf = await renderPlainSummaryPdf(model);
     expect(pdf.pageCount).toBeGreaterThanOrEqual(3);
@@ -359,7 +400,7 @@ describe("the ship gate refuses, it never softens", () => {
     // A description that would print a Forensic finding number in the items table.
     input.shop = {
       ...input.shop,
-      lines: input.shop.lines.map((l) => (l.line === 148 ? { ...l, desc: "Measure ride height per Finding 12" } : l)),
+      lines: input.shop.lines.map((l) => (l.line === 9 ? { ...l, desc: "bumper assy per Finding 12" } : l)),
     };
     const model = buildPlainSummaryModel(input);
     await expect(renderPlainSummaryPdf(model)).rejects.toBeInstanceOf(SummaryLintError);
