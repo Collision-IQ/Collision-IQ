@@ -4164,7 +4164,7 @@ export function buildRequiredEstimatorDeltaFindings(
           currentSupportSummary:
             extraction.gateReason === "source_not_read"
               ? `What was read: ${extraction.parsedRows} line item(s) of ${deltaMatch.comparisonName}. A document of this size carries far more, so its line items were not recovered — typically an image-only PDF with no machine-readable text layer. ` +
-                `No line-level delta verdict is rendered over this comparison. In particular, no operation is described as absent from it: with its line items unread, every operation on the annotated estimate would appear to have no counterpart, and that appearance is an artefact of the extraction, not a fact about the claim.`
+                `No line-level delta verdict is rendered over this comparison. In particular, no operation is described as absent from it: with its line items unread, every operation on the higher-cost estimate would appear to have no counterpart, and that appearance is an artefact of the extraction, not a fact about the claim.`
               : `What was read: ${extraction.parsedRows} line(s) of ${deltaMatch.comparisonName} across a line-number span of ${extraction.impliedRows} — ` +
                 `${Math.round(extraction.coverage * 100)}% coverage. What could not be read: approximately ${Math.max(0, extraction.impliedRows - extraction.parsedRows)} line(s) implied by the document's own numbering. ` +
                 `No line-level delta verdict is rendered over this comparison — a demand built on a mostly-unread document is not defensible.`,
@@ -4395,7 +4395,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
         category: profile.category,
         estimateGapType: "present_but_under_documented",
         missingProof:
-          "This line is documented on the annotated estimate but was not located on the comparison estimate. " +
+          "This line is documented on the higher-cost estimate but was not located on the comparison estimate. " +
           provenance.proof +
           "Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
         nextAction: provenance.next,
@@ -7141,7 +7141,7 @@ function buildLineItemDeltaSupportSummary(params: {
     : `not present on ${params.comparisonName}`;
   return [
     `Delta category: ${signedDeltaCategory(params.delta)}.`,
-    `Annotated estimate (higher-cost): ${annotatedLocation}.`,
+    `Higher-cost estimate: ${annotatedLocation}.`,
     `Comparison estimate (lower-cost): ${comparisonLocation}.`,
     `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
     `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
