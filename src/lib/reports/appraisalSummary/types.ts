@@ -71,6 +71,8 @@ export interface Estimate {
   lines: EstimateLine[];
   /** CCC "ALTERNATE PARTS USAGE" page, when printed and readable. */
   altPartsUsage?: AltPartsUsage;
+  /** The deductible the document states under its Total Cost of Repairs; absent when it does not say. */
+  deductible?: number;
 }
 
 export const round2 = (n: number): number => Math.round(n * 100) / 100;

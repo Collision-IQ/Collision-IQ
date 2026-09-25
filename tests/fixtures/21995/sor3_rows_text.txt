@@ -240,6 +240,10 @@ $2768.00] + [Frame $135 - $75 = $60 x 1 = $60] = $3728.00
 174#S03Cavity wax115.400.3
 SUBTOTALS
 ESTIMATE TOTALS
+Total Cost of Repairs33,466.89
+Deductible2,500.00
+Total Adjustments2,500.00
+Net Cost of Repairs30,966.89
 ALTERNATE PARTS USAGE
 AftermarketAutomatically List00
 Optional OEMManually List00

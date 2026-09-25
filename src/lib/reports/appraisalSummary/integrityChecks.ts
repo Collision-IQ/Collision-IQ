@@ -50,7 +50,7 @@ const baseStem = (s: string) =>
 /** The full component name with drivetrain/suspension qualifiers removed: the
  *  cross-sheet identity for part-number and reuse checks. (baseStem's first two
  *  words are too coarse there — "air guide clip" and "air guide" would meet.) */
-const qualifierStem = (s: string) =>
+export const qualifierStem = (s: string) =>
   stem(s).replace(/\b(dual|tri|quad|motor|susp|suspension|external)\b/g, "").replace(/\s+/g, " ").trim();
 /** Same-sheet repeat key. Keeps the side and the operation (RT and LT wheels,
  *  or Rpr and R&I battery, are two operations), folds "lug"/"wheel" and the

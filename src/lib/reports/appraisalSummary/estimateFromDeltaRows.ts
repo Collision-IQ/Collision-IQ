@@ -159,6 +159,14 @@ export function altPartsUsageFromText(text: string): AltPartsUsage | undefined {
   return { aftermarket, optionalOem, reconditioned, recycled };
 }
 
+/** The deductible printed under the first "Total Cost of Repairs"; undefined when the document states none. */
+export function deductibleFromText(text: string): number | undefined {
+  const start = text.search(/Total Cost of Repairs/i);
+  if (start < 0) return undefined;
+  const match = text.slice(start, start + 400).match(/^\s*Deductible\s*\$?\s*([\d,]+\.\d{2})\s*$/im);
+  return match ? Number(match[1].replace(/,/g, "")) : undefined;
+}
+
 /** The vehicle line the estimate prints ("2026 RIVI R1S w/Dual Motor …"). */
 export function vehicleLineFromText(text: string): string {
   for (const raw of text.split(/\r?\n/).slice(0, 120)) {
@@ -177,7 +185,19 @@ export function estimateFromDeltaRows(params: {
   text: string;
 }): Estimate {
   const annotations = lineAnnotationsFromText(params.text);
-  const lines: EstimateLine[] = params.rows.map((row, index) => {
+  // Rows arrive in document order. A Supplement of Record ends with a
+  // SUPPLEMENT SUMMARY whose Changed / Deleted / Added items reuse earlier
+  // line numbers ("16 R&I RT Ft fender liner -0.4" after line 174); those are
+  // history, not lines of this estimate, so the read stops where the
+  // numbering restarts.
+  let highest = 0;
+  const rows = params.rows.filter((row) => {
+    if (row.lineNumber === null) return true;
+    if (row.lineNumber <= highest) return false;
+    highest = row.lineNumber;
+    return true;
+  });
+  const lines: EstimateLine[] = rows.map((row, index) => {
     let desc = row.description.trim();
     let supplement = row.supplementTag ?? undefined;
     let oper = row.opCode ?? "";
@@ -203,9 +223,12 @@ export function estimateFromDeltaRows(params: {
     const letter = (row.laborType ?? "").trim().toUpperCase();
     let laborCat: LaborCat | undefined = hours ? LETTER_CAT[letter] ?? "body" : undefined;
     // A user-category digit is accepted only when the printed row ends in
-    // exactly this row's hours followed by the digit, and prints no paint.
-    if (hours && !letter && !row.paint && annotation) {
-      const digit = annotation.rowText.replace(/\s+/g, "").match(new RegExp(`${hours.toFixed(1).replace(".", "\\.")}([1-4])$`));
+    // exactly this row's hours, the digit, and then this row's paint hours if
+    // it prints any ("RT Door shell (ALU)1.012.1" = 1.0 hr, category 1, 2.1 paint).
+    if (hours && !letter && annotation) {
+      const escape = (n: number) => n.toFixed(1).replace(".", "\\.");
+      const tail = row.paint ? escape(row.paint) : "";
+      const digit = annotation.rowText.replace(/\s+/g, "").match(new RegExp(`${escape(hours)}([1-4])${tail}$`));
       if (digit) laborCat = params.userCategory;
     }
     return {
@@ -231,6 +254,7 @@ export function estimateFromDeltaRows(params: {
     totals: params.totals,
     lines,
     altPartsUsage: altPartsUsageFromText(params.text),
+    deductible: deductibleFromText(params.text),
   };
 }
 
