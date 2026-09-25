@@ -1,29 +1,32 @@
 /**
- * APPRAISAL DISPUTE REPORT — model builder and document builder.
+ * APPRAISAL DISPUTE REPORT — model builder, document builder and ship gate.
  *
  * Third output of the Delta pipeline: a shop-staff-only, plain-English
  * companion to the Forensic Estimate Analysis and the Delta Citation Density
- * annotated estimate. It consumes the SAME data the Forensic report is
- * rendered from — the reconciled category totals and the numbered findings —
- * and produces a `DeltaForensicReportModel` that the existing forensic PDF
- * renderer draws, so it shares the masthead, footer and pagination of the
- * report it accompanies.
+ * annotated estimate. It is drawn by the existing forensic PDF renderer, so it
+ * shares the masthead, footer and pagination of the report it accompanies.
  *
- * Pure functions, no I/O:
- *
- *   const model = buildPlainSummaryModel(input);      // numbers + selected lines
+ *   const model = buildPlainSummaryModel(input);      // closed ledger + evidence
  *   const doc   = buildPlainSummaryDocument(model);   // sections and blocks
- *   const pdf   = await renderPlainSummaryPdf(model); // via renderDeltaForensicReport
+ *   const pdf   = await renderPlainSummaryPdf(model); // lint gate, then render
  *
- * Every dollar and hour in the output is read from `input`; nothing is
- * inferred. If a bucket cannot be computed from the input it is omitted or
- * printed as "not shown", never guessed (the rules file's nullIsNotZero).
+ * EVERY NUMBER COMES FROM ONE CLOSED LEDGER (appraisalSummary/gapLedger.ts):
+ * labor hours at our rates, any open rate gap, paint materials, parts/sublet/
+ * supplies net of the carrier's rate adjustment, and tax — summing to the
+ * printed grand-total difference to the cent, or the model is not built.
  *
- * Fixed copy — the say/don't-say table, the "not bad faith" sentence, the
- * caveat that findings are estimate-difference evidence only, and the four
- * resolution steps — is the compliance guardrail. It mirrors the Forensic
- * report's "What the vehicle owner should know" and "Recommended path" and
- * should change only together with those.
+ * EVERY CLAIM SENTENCE IS EVIDENCE-GATED (appraisalSummary/summaryGuards.ts):
+ * a part-type sentence only when a document shows a non-OEM part, a rate
+ * argument only when the rates are not settled, an ADAS sentence only from
+ * the carrier's own exclusion note or the group hours. The rendered text is
+ * then linted unit by unit and the PDF is refused on any violation
+ * (SummaryLintError), the same way the R24 release gate refuses a run.
+ *
+ * RO 21995 is why: the previous version of this report told staff the carrier
+ * wrote "used, aftermarket or reconditioned" parts (both sheets are 100% OEM),
+ * that the rate gap was worth $1,212.70 (a $3,728.00 concession already pays
+ * our rates), and that "23 of our lines have no match" (most were the same
+ * operations under other names).
  *
  * Audience: internal shop staff. Never surfaced in the customer-facing
  * Snapshot report or in anything carrier-facing.
@@ -31,119 +34,31 @@
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { DeltaForensicReportModel, ForensicBlock, ForensicSection, ForensicTableRow } from "./deltaForensicReport";
 import { loadCollisionIqLogo, renderDeltaForensicReport } from "./deltaForensicReportRenderer";
+import { argueItems, type ArgueItem, type MatcherPair } from "./appraisalSummary/argueItems";
+import { buildGapLedger, type GapLedger } from "./appraisalSummary/gapLedger";
+import { integrityChecks, type Flag } from "./appraisalSummary/integrityChecks";
+import { classifyNonLabor } from "./appraisalSummary/nonLaborBuckets";
+import { groupEquivalents, type GroupDelta } from "./appraisalSummary/operationEquivalence";
+import { partTypeEvidence, type PartTypeEvidence } from "./appraisalSummary/partTypeEvidence";
+import { buildSummaryFacts, lintSummaryUnits, type LintContext, type SummaryFacts } from "./appraisalSummary/summaryGuards";
+import type { Estimate } from "./appraisalSummary/types";
 
 // ---------------------------------------------------------------------------
-// Input contract — the narrow slice of the delta this module needs. Mapped
-// from the Forensic report's input in plainLanguageSummaryAdapter.ts.
+// Input and model
 // ---------------------------------------------------------------------------
-
-export type DeltaCategory =
-  | "missing_operation"        // on higher estimate, no counterpart on lower
-  | "part_or_price_difference" // paired, different price
-  | "reduced_labor"            // paired, lower estimate allows fewer hours
-  | "rate_difference"          // category rate differs
-  | "category_amount"          // category total differs (parts, misc)
-  | "total_difference"         // grand total finding
-  | "lower_only_lines"         // lines present only on the lower estimate
-  | "support_review";          // e.g. sand & polish needing P-page support
-
-export type FindingSection = "structural" | "adas" | "refinish" | "other";
-
-export interface Finding {
-  id: number;                  // finding number, same as the badge on the Citation Density copy
-  category: DeltaCategory;
-  section: FindingSection;
-  title: string;               // "RT Mirror assy power folding w/side camera"
-  lineA?: number;              // line number on the higher (shop) estimate
-  lineB?: number;              // line number on the lower (comparison) estimate
-  amountDelta?: number;        // $ (positive = higher estimate is more)
-  laborDelta?: number;         // hours
-  paintDelta?: number;         // hours
-  priceA?: number;             // printed price on higher estimate (for placeholder detection)
-  priceB?: number;
-  lowerOnlyCount?: number;     // only for lower_only_lines
-  lowerOnlySamples?: string[]; // a few human-readable examples, already formatted
-}
-
-/** A labor-type category. `hours`/`rate` are null when the document prints a
- *  flat figure with no basis — an absent basis is not a zero basis. */
-export interface LaborCategory {
-  hours: number | null;
-  rate: number | null;
-  total: number;
-}
-
-export interface EstimateTotals {
-  parts: number | null;
-  bodyLabor: LaborCategory | null;
-  paintLabor: LaborCategory | null;
-  paintSupplies: LaborCategory | null; // "hours" = paint hours the materials ride on
-  miscellaneous: number | null;
-  /** Categories outside the five buckets (mechanical, frame, sublet…), summed. */
-  other?: { label: string; total: number } | null;
-  subtotal: number | null;
-  tax: number | null;
-  total: number;
-}
-
-export interface EstimateDoc {
-  title: string;               // "Shop Post-TD 22264.pdf"
-  label?: string;              // "Coast National" etc. Optional carrier/author label
-  lineCount: number | null;
-  totals: EstimateTotals;
-}
 
 export interface PlainSummaryInput {
-  preparedDate: string;        // "2026-09-17"
-  vehicle: string;             // "2023 Audi Q5 45 S Line Prestige"
+  preparedDate: string;        // "2026-09-25"
+  vehicle: string;             // for the masthead and the owner note, already redacted
   roNumber?: string;
-  docA: EstimateDoc;           // higher-cost estimate (the shop's)
-  docB: EstimateDoc;           // comparison estimate (the carrier's)
-  findings: Finding[];
-  missingLineCount: number;    // Appendix A count (107 on RO 22264)
-  /** Categories the reconciliation could not price on one document; named, not zeroed. */
-  unpricedCategories?: string[];
   /** Identity rows for the masthead, already redacted to the export policy. */
   identity?: Array<{ label: string; value: string }>;
-}
-
-// ---------------------------------------------------------------------------
-// Model
-// ---------------------------------------------------------------------------
-
-export type BucketKey = "parts" | "bodyLabor" | "paintLabor" | "paintSupplies" | "misc" | "other" | "tax" | "total";
-
-export interface Bucket {
-  key: BucketKey;
-  label: string;
-  ours: string;
-  theirs: string;
-  /** null when one side's figure is not printed — "not quantified", never zero. */
-  gap: number | null;
-  plain: string;
-}
-
-export interface NamedLine {
-  finding: number;
-  line?: number;
-  title: string;
-  amount?: number;
-  hours?: number;
-  kind: "labor" | "paint";
-}
-
-export interface RateEffect {
-  body: number | null;
-  paint: number | null;
-  supplies: number | null;
-  total: number;
-  bodyRateGap: number | null;
-  paintRateGap: number | null;
-  suppliesRateGap: number | null;
-  /** Labor + paint + supplies gap (over the categories with a basis) minus the rate effect. */
-  hoursEffect: number;
-  /** Categories left out of the split because one document prints no hours or rate. */
-  excluded: string[];
+  shop: Estimate;              // the annotated (higher) estimate
+  carrier: Estimate;           // the comparison estimate
+  /** The delta matcher's differences, by line number. */
+  pairs: MatcherPair[];
+  /** Line prices must reproduce the printed non-labor totals. Default on; off only for partial fixtures. */
+  strictLines?: boolean;
 }
 
 export interface PlainSummaryModel {
@@ -153,219 +68,67 @@ export interface PlainSummaryModel {
     preparedDate: string;
     ours: string;
     theirs: string;
-    gap: number;
   };
   identity: Array<{ label: string; value: string }>;
-  buckets: Bucket[];
-  rateEffect: RateEffect | null;
-  hoursGap: { body: number | null; paint: number | null };
-  parts: { top: NamedLine[]; lowerOnly?: Finding };
-  paintHours: NamedLine[];      // blends, clear coat adds, feather/prime/block
-  bodyHours: NamedLine[];       // door shells, test fits, R&I trim
-  bumperOverhaul?: Finding;     // the reduced_labor bumper finding, if present
-  adas: {
-    /** ADAS lines with NO counterpart on the comparison estimate. */
-    lines: NamedLine[];
-    /** ADAS lines the comparison estimate DOES price, at a different figure. */
-    priced: Array<NamedLine & { priceA?: number; priceB?: number }>;
-    placeholders: NamedLine[];
-    scanPriceDiff?: Finding;
+  shop: Estimate;
+  carrier: Estimate;
+  ledger: GapLedger;
+  partType: PartTypeEvidence;
+  groups: GroupDelta[];
+  flags: Flag[];
+  facts: SummaryFacts;
+  items: ArgueItem[];
+  lint: LintContext;
+}
+
+/** Builds the closed ledger and the evidence objects. Throws LedgerNotClosedError
+ *  or NonLaborParseError when the numbers cannot be stated; the caller turns
+ *  that into a run warning and ships no summary. */
+export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryModel {
+  const { shop, carrier } = input;
+  const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
+  const partType = partTypeEvidence(shop, carrier);
+  const { groups, usedShop } = groupEquivalents(shop, carrier);
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs });
+  const facts = buildSummaryFacts(ledger, partType, groups, flags);
+  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs });
+  const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
+    (l) => classifyNonLabor(l) === "sublet" && /calibrat|adas/i.test(l.desc)
+  );
+  return {
+    header: {
+      vehicle: input.vehicle,
+      roNumber: input.roNumber,
+      preparedDate: input.preparedDate,
+      ours: shop.fileName,
+      theirs: carrier.fileName,
+    },
+    identity: input.identity ?? [],
+    shop,
+    carrier,
+    ledger,
+    partType,
+    groups,
+    flags,
+    facts,
+    items,
+    lint: { ledger, partType, hasDealerCalibrationSublet },
   };
-  misc: NamedLine[];
-  supportReview: Finding[];
-  missingLineCount: number;
-  lowerOnlyCount: number;
-  unpricedCategories: string[];
 }
 
 export const money = (n: number): string =>
   (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const hrs = (n: number) => n.toFixed(1).replace(/\.0$/, "") + " hr";
-const laborCell = (c: LaborCategory | null): string => {
-  if (!c) return "not shown";
-  if (c.hours !== null && c.rate !== null) return `${c.hours.toFixed(1)} hr @ $${c.rate.toFixed(0)}`;
-  return `flat ${money(c.total)}, no hrs/rate shown`;
-};
-const moneyCell = (n: number | null): string => (n === null ? "not shown" : money(n));
-const r2 = (n: number) => Math.round(n * 100) / 100;
-const gapOf = (a: number | null | undefined, b: number | null | undefined): number | null =>
-  typeof a === "number" && typeof b === "number" ? r2(a - b) : null;
-
-export const PAINT_OP = /\b(blnd|blend|clear coat|feather|prime|block|edging|refinish)\b/i;
-export const BODY_OP = /\b(door shell|test fit|r&i|r & i|remove|install|weatherstrip|run channel|trim|glass|molding|mldg|liner)\b/i;
-// ADAS *procedures* (calibrations, scans, measurements) — not physical parts that happen to carry a camera.
-export const ADAS_OP = /(calibrat|scan\b|adas|control points|function test)/i;
-export const MISC_OP = /\b(alignment|transport|mount|balance|tire disposal|cavity wax|masking|primer|urethane|adhesive|mask for|protect wiring|wash|debris|waste|nozzle|acid brush|flex additive|interior protection|static charge)\b/i;
-const SCAN_PRE = /pre-?repair scan/i;
-const BUMPER_OH = /o\/h bumper|overhaul bumper|bumper assy/i;
-
-export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryModel {
-  const A = input.docA.totals, B = input.docB.totals;
-  const gap = r2(A.total - B.total);
-
-  const buckets: Bucket[] = [];
-  const bucket = (b: Bucket) => buckets.push(b);
-
-  if (A.parts !== null || B.parts !== null) {
-    bucket({ key: "parts", label: "Parts", ours: moneyCell(A.parts), theirs: moneyCell(B.parts), gap: gapOf(A.parts, B.parts),
-      plain: "Biggest single bucket when part type differs: new OEM on ours; used, aftermarket, reconditioned or nothing on theirs." });
-  }
-  if (A.bodyLabor || B.bodyLabor) {
-    bucket({ key: "bodyLabor", label: "Body labor", ours: laborCell(A.bodyLabor), theirs: laborCell(B.bodyLabor),
-      gap: gapOf(A.bodyLabor?.total, B.bodyLabor?.total), plain: describeLabor(A.bodyLabor, B.bodyLabor, "") });
-  }
-  if (A.paintLabor || B.paintLabor) {
-    bucket({ key: "paintLabor", label: "Paint labor", ours: laborCell(A.paintLabor), theirs: laborCell(B.paintLabor),
-      gap: gapOf(A.paintLabor?.total, B.paintLabor?.total),
-      plain: describeLabor(A.paintLabor, B.paintLabor, " Blends and clear-coat adds are usually where the hours went.") });
-  }
-  if (A.paintSupplies || B.paintSupplies) {
-    bucket({ key: "paintSupplies", label: "Paint supplies", ours: laborCell(A.paintSupplies), theirs: laborCell(B.paintSupplies),
-      gap: gapOf(A.paintSupplies?.total, B.paintSupplies?.total),
-      plain: "Materials ride on paint hours, so fewer hours plus a lower materials rate hits twice." });
-  }
-  if (A.miscellaneous !== null || B.miscellaneous !== null) {
-    bucket({ key: "misc", label: "Miscellaneous / sublet", ours: moneyCell(A.miscellaneous), theirs: moneyCell(B.miscellaneous),
-      gap: gapOf(A.miscellaneous, B.miscellaneous),
-      plain: "Alignment, transport to and from sublet, mount & balance, and shop materials they did not write." });
-  }
-  if (A.other || B.other) {
-    const label = A.other?.label ?? B.other?.label ?? "Other categories";
-    bucket({ key: "other", label, ours: moneyCell(A.other?.total ?? null), theirs: moneyCell(B.other?.total ?? null),
-      gap: gapOf(A.other?.total, B.other?.total), plain: "Categories outside the five above, taken from the printed totals." });
-  }
-  if (A.tax !== null || B.tax !== null) {
-    bucket({ key: "tax", label: "Sales tax", ours: moneyCell(A.tax), theirs: moneyCell(B.tax), gap: gapOf(A.tax, B.tax), plain: "Follows the rest." });
-  }
-  bucket({ key: "total", label: "Total", ours: money(A.total), theirs: money(B.total), gap, plain: "" });
-
-  // Rate-only effect, computed on OUR hours (so it's the "before anyone argues
-  // an hour" number). Only categories both documents price with a basis take
-  // part; a flat figure with no rate is named as excluded, not treated as $0/hr.
-  let rateEffect: RateEffect | null = null;
-  {
-    const split = (ours: LaborCategory | null, theirs: LaborCategory | null) => {
-      if (!ours || !theirs || ours.hours === null || ours.rate === null || theirs.rate === null) return null;
-      const rateGap = r2(ours.rate - theirs.rate);
-      return { rateGap, effect: r2(ours.hours * rateGap), gap: r2(ours.total - theirs.total) };
-    };
-    const body = split(A.bodyLabor, B.bodyLabor);
-    const paint = split(A.paintLabor, B.paintLabor);
-    const supplies = split(A.paintSupplies, B.paintSupplies);
-    const included = [body, paint, supplies].filter((x): x is NonNullable<typeof x> => x !== null);
-    const excluded = [
-      !body && (A.bodyLabor || B.bodyLabor) ? "body labor" : "",
-      !paint && (A.paintLabor || B.paintLabor) ? "paint labor" : "",
-      !supplies && (A.paintSupplies || B.paintSupplies) ? "paint supplies" : "",
-    ].filter(Boolean);
-    if (included.some((x) => x.rateGap !== 0)) {
-      const total = r2(included.reduce((sum, x) => sum + x.effect, 0));
-      const laborGap = r2(included.reduce((sum, x) => sum + x.gap, 0));
-      rateEffect = {
-        body: body?.effect ?? null,
-        paint: paint?.effect ?? null,
-        supplies: supplies?.effect ?? null,
-        total,
-        bodyRateGap: body?.rateGap ?? null,
-        paintRateGap: paint?.rateGap ?? null,
-        suppliesRateGap: supplies?.rateGap ?? null,
-        hoursEffect: r2(laborGap - total),
-        excluded,
-      };
-    }
-  }
-
-  const F = input.findings;
-  const named = (f: Finding, kind: "labor" | "paint"): NamedLine => ({
-    finding: f.id, line: f.lineA, title: f.title, amount: f.amountDelta, hours: kind === "paint" ? f.paintDelta : f.laborDelta, kind,
-  });
-
-  const missing = F.filter((f) => f.category === "missing_operation" || f.category === "part_or_price_difference");
-  const isAdas = (f: Finding) => ADAS_OP.test(f.title);
-
-  // Parts: biggest dollar lines that are not ADAS/misc/sublet.
-  const partsTop = missing
-    .filter((f) => (f.amountDelta ?? 0) > 0 && !isAdas(f) && !MISC_OP.test(f.title))
-    .sort((a, b) => (b.amountDelta ?? 0) - (a.amountDelta ?? 0))
-    .slice(0, 8)
-    .map((f) => named(f, "labor"));
-
-  const paintHours = missing
-    .filter((f) => (f.paintDelta ?? 0) > 0 && PAINT_OP.test(f.title))
-    .sort((a, b) => (b.paintDelta ?? 0) - (a.paintDelta ?? 0))
-    .slice(0, 8)
-    .map((f) => named(f, "paint"));
-
-  const bodyHours = missing
-    .filter((f) => (f.laborDelta ?? 0) > 0 && !isAdas(f) && (BODY_OP.test(f.title) || (f.amountDelta ?? 0) === 0))
-    .sort((a, b) => (b.laborDelta ?? 0) - (a.laborDelta ?? 0))
-    .slice(0, 8)
-    .map((f) => named(f, "labor"));
-
-  const adasAll = F.filter((f) => isAdas(f) && f.category !== "support_review" && f.category !== "lower_only_lines");
-  // Read from the SAME computed findings the forensic report prints: a
-  // priced-differently ADAS line is priced on both estimates and is never
-  // "missing on theirs" (RO 21336: five sublet calibrations at +25% vs +34%
-  // were narrated as "the insurer wrote none of them at a real price").
-  const adasMissing = adasAll.filter((f) => f.category === "missing_operation");
-  const adasPriced = adasAll.filter((f) => f.category !== "missing_operation");
-  const adasLines = adasMissing.map((f) => named(f, "labor"));
-  const adasPricedLines = adasPriced.map((f) => ({ ...named(f, "labor"), priceA: f.priceA, priceB: f.priceB }));
-  const placeholders = adasAll
-    .filter((f) => f.priceA !== undefined && f.priceA > 0 && f.priceA <= 0.01)
-    .map((f) => named(f, "labor"));
-  const scanPriceDiff = adasAll.find((f) => f.category === "part_or_price_difference" && SCAN_PRE.test(f.title));
-
-  const misc = missing
-    .filter((f) => MISC_OP.test(f.title) && !isAdas(f) && (f.amountDelta ?? 0) > 0)
-    .sort((a, b) => (b.amountDelta ?? 0) - (a.amountDelta ?? 0))
-    .slice(0, 10)
-    .map((f) => named(f, "labor"));
-
-  const lowerOnly = F.find((f) => f.category === "lower_only_lines");
-
-  return {
-    header: { vehicle: input.vehicle, roNumber: input.roNumber, preparedDate: input.preparedDate, ours: input.docA.title, theirs: input.docB.title, gap },
-    identity: input.identity ?? [],
-    buckets,
-    rateEffect,
-    hoursGap: {
-      body: gapOf(A.bodyLabor?.hours, B.bodyLabor?.hours),
-      paint: gapOf(A.paintLabor?.hours, B.paintLabor?.hours),
-    },
-    parts: { top: partsTop, lowerOnly },
-    paintHours,
-    bodyHours,
-    bumperOverhaul: F.find((f) => f.category === "reduced_labor" && BUMPER_OH.test(f.title)),
-    adas: { lines: adasLines, priced: adasPricedLines, placeholders, scanPriceDiff },
-    misc,
-    supportReview: F.filter((f) => f.category === "support_review"),
-    missingLineCount: input.missingLineCount,
-    lowerOnlyCount: lowerOnly?.lowerOnlyCount ?? 0,
-    unpricedCategories: input.unpricedCategories ?? [],
-  };
-}
-
-function describeLabor(a: LaborCategory | null, b: LaborCategory | null, tail: string): string {
-  if (!a || !b) return "Printed on one document only; see the note under the table.";
-  const dh = gapOf(a.hours, b.hours);
-  const dr = gapOf(a.rate, b.rate);
-  const parts: string[] = [];
-  if (dh !== null && dh > 0) parts.push(`${hrs(dh)} fewer hours`);
-  if (dr !== null && dr > 0) parts.push(`$${dr.toFixed(0)}/hr less`);
-  if (dh === null && dr === null) return "One side prints a flat figure with no hours or rate, so the split cannot be stated.";
-  if (!parts.length) return "No difference in this category.";
-  return parts.join(" and ") + "." + tail;
-}
+const hr = (n: number) => `${n.toFixed(1)} hr`;
+const rate = (n: number) => `$${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(2)}/hr`;
 
 // ---------------------------------------------------------------------------
 // Document — sections and blocks for the shared forensic renderer
 // ---------------------------------------------------------------------------
 
 const REPORT_TITLE = "Appraisal Dispute Report";
+const MAX_ITEMS = 12;
 
-/** Footer line stamped on every page: title | RO | vehicle | audience. The
- *  renderer appends the page number. */
+/** Footer line stamped on every page: title | RO | vehicle | audience. */
 export function plainSummaryFooterLine(model: PlainSummaryModel): string {
   return [REPORT_TITLE, model.header.roNumber ? `RO ${model.header.roNumber}` : "", model.header.vehicle, "Shop staff only"]
     .filter(Boolean)
@@ -373,16 +136,8 @@ export function plainSummaryFooterLine(model: PlainSummaryModel): string {
 }
 
 export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForensicReportModel {
+  const { ledger: L, facts, shop, carrier } = model;
   const ro = model.header.roNumber ? ` | RO ${model.header.roNumber}` : "";
-  const byKey = (key: BucketKey) => model.buckets.find((b) => b.key === key);
-  const total = byKey("total")!;
-  const list = (xs: NamedLine[], fmt: (x: NamedLine) => string) => xs.map(fmt).join(", ");
-  const amt = (x: NamedLine) => `${x.title} (${money(x.amount ?? 0)})`;
-  const hr = (x: NamedLine) => `${x.title} (${(x.hours ?? 0).toFixed(1)})`;
-  const gapText = (b: Bucket | undefined) => (b && b.gap !== null ? money(b.gap) : "not quantified");
-  const priced = model.adas.scanPriceDiff;
-  const pricedBoth = priced && typeof priced.priceA === "number" && typeof priced.priceB === "number" ? priced : undefined;
-
   const sections: ForensicSection[] = [];
   let number = 0;
   const section = (title: string, blocks: ForensicBlock[]) => {
@@ -390,277 +145,167 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
     sections.push({ number, title, blocks });
   };
 
-  // Header table: the two documents, the gap, the companions, the audience.
-  const orientation: ForensicBlock = {
-    kind: "table",
-    columns: [{ header: "Orientation", weight: 22 }, { header: "Detail", weight: 78 }],
-    rows: [
-      { cells: ["Our estimate", `${model.header.ours} — ${total.ours}`] },
-      { cells: ["Their estimate", `${model.header.theirs} — ${total.theirs}`] },
-      { cells: ["The gap", money(model.header.gap)], variant: "total" },
-      { cells: ["Companion reports", "Forensic Estimate Analysis & Repair Cost Gap Report (the narrative) and the Delta Citation Density copy of our estimate (the highlighted version)"] },
-      { cells: ["Audience", "Internal. For the front desk, estimators and anyone who has to explain this to the owner. Not for the carrier, not for the customer's file as-is."] },
-    ],
-  };
-
-  section("A note for the customer (copy and paste)", [
+  // 1. What it is / what it isn't.
+  const carrierPaysMore = model.groups.filter((g) => g.carrierHours > g.shopHours);
+  const isnt: string[] = [
+    facts.notParts ? `Not a parts-type dispute. ${facts.notParts}` : "",
+    facts.notRates ? `Not a labor-rate dispute. ${facts.notRates}` : "",
+    carrierPaysMore.length
+      ? `Not "they left it off". Some work they wrote under another name, and on ${carrierPaysMore
+          .map((g) => `${g.label.toLowerCase()} (${hr(g.carrierHours)} theirs vs ${hr(g.shopHours)} ours)`)
+          .join("; ")} they pay more than we wrote.`
+      : "",
+  ].filter(Boolean);
+  section("What this is, and what it isn't", [
     {
-      kind: "note",
-      text: "Written for the vehicle owner, in the shop's voice. Paste it into an email or a text as-is, or edit it. It uses only the figures on the two estimates and stays inside the say / don't-say rules further down: no promise about what the carrier will pay, no date, no comment on anyone's intent.",
+      kind: "table",
+      columns: [{ header: "Orientation", weight: 22 }, { header: "Detail", weight: 78 }],
+      rows: [
+        { cells: ["Our estimate", `${model.header.ours}: ${money(L.shopTotal)}`] },
+        { cells: ["Their estimate", `${model.header.theirs}: ${money(L.carrierTotal)}`] },
+        { cells: ["The gap", money(L.gap)], variant: "total" },
+        { cells: ["Audience", "Internal. For the front desk, estimators and anyone who has to explain this to the owner. Not for the carrier, not for the customer's file as-is."] },
+      ],
     },
-    { kind: "callout", tone: "owner", paragraphs: [buildCustomerNote(model)] },
-  ]);
-
-  section("The thirty-second version", [
-    orientation,
     {
       kind: "callout",
       tone: "owner",
       paragraphs: [
-        `Two people looked at the same car and wrote two very different repair plans. Ours is ${total.ours}. The insurer's is ${total.theirs}. The difference is ${money(model.header.gap)}, and it comes from three things: parts (they priced cheaper part types or left parts off), labor rates and hours (${model.rateEffect ? "they pay less per hour and allow fewer hours" : "they allow fewer hours"}), and a long list of operations they simply did not write (${model.missingLineCount} of our lines have no match on their sheet). Nothing in the two reports says anyone acted in bad faith. This is a disagreement between two appraisers, and most of it gets settled at the car, not on paper.`,
+        [facts.headline + ".", facts.mostlyHours ?? "", "Nothing in the two estimates says anyone acted in bad faith; this is two appraisers disagreeing, and most of it gets settled at the car."]
+          .filter(Boolean)
+          .join(" "),
       ],
     },
+    ...(isnt.length ? [{ kind: "bullets" as const, items: isnt }] : []),
   ]);
 
-  const bucketRows: ForensicTableRow[] = model.buckets.map((b) => ({
-    cells: [b.label, b.ours, b.theirs, gapText(b), b.plain],
-    variant: b.key === "total" ? "total" : "body",
-  }));
-  const moneyBlocks: ForensicBlock[] = [
-    { kind: "paragraph", text: "Every dollar below comes straight off the printed totals of the two estimates. Tax is left out of the buckets because it just follows whatever the rest settles at." },
+  // 2. Where the money comes from — the closed ledger.
+  section("Where the money comes from", [
+    {
+      kind: "paragraph",
+      text: "Every figure below comes from the two estimates' printed totals and lines. The rows add up to the printed difference to the cent; if they did not, this report would not have been produced.",
+    },
     {
       kind: "table",
       columns: [
-        { header: "Bucket", weight: 16 },
-        { header: "Ours", weight: 15, align: "right" },
-        { header: "Theirs", weight: 15, align: "right" },
-        { header: "Gap (ours − theirs)", weight: 12, align: "right" },
-        { header: "What that means in plain words", weight: 42 },
+        { header: "Bucket", weight: 22 },
+        { header: "Amount", weight: 14, align: "right" },
+        { header: "How it is computed", weight: 64 },
       ],
-      rows: bucketRows,
+      rows: ledgerRows(model),
+    },
+  ]);
+
+  // 3. Check this first.
+  section("Check this first", [
+    facts.checkFirst.length
+      ? { kind: "bullets", items: facts.checkFirst.map((f) => f.text) }
+      : { kind: "paragraph", text: "Nothing on either sheet needs resolving before the items below." },
+  ]);
+
+  // 4. Items worth arguing.
+  const shown = model.items.slice(0, MAX_ITEMS);
+  const rest = model.items.slice(MAX_ITEMS);
+  const itemBlocks: ForensicBlock[] = [
+    {
+      kind: "paragraph",
+      text: "Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first. WEAK: likely included in an operation they already pay; argue only with a P-page that says otherwise.",
     },
   ];
-  if (model.unpricedCategories.length) {
-    moneyBlocks.push({
+  if (shown.length) {
+    itemBlocks.push({
+      kind: "table",
+      columns: [
+        { header: "Strength", weight: 13 },
+        { header: "Item", weight: 25 },
+        { header: "What the sheets show", weight: 44 },
+        { header: "Worth", weight: 18, align: "right" },
+      ],
+      rows: shown.map((item) => ({
+        cells: [item.strength.toUpperCase(), item.title, item.detail, money(item.value)],
+      })),
+    });
+  } else {
+    itemBlocks.push({ kind: "paragraph", text: "No hours or parts difference is left once equivalent operations are grouped." });
+  }
+  if (rest.length) {
+    itemBlocks.push({
       kind: "note",
-      text: `Not quantified: ${model.unpricedCategories.join(", ")}. One document's printed total for that category could not be read, so the gap is left blank rather than assumed to be zero.`,
+      text: `${rest.length} smaller ${rest.length === 1 ? "item" : "items"} worth ${money(rest.reduce((sum, i) => sum + i.value, 0))} in total are not listed; the Forensic Estimate Analysis lists every line.`,
     });
   }
-  if (model.rateEffect) {
-    const r = model.rateEffect;
-    const gaps = [
-      r.bodyRateGap ? `body x $${r.bodyRateGap}` : "",
-      r.paintRateGap ? `paint x $${r.paintRateGap}` : "",
-      r.suppliesRateGap ? `materials x $${r.suppliesRateGap}` : "",
-    ].filter(Boolean).join(", ");
-    moneyBlocks.push({
-      kind: "paragraph",
-      text: `The rate piece by itself. Before anyone argues about a single hour, the rate difference alone is worth about ${money(r.total)} on our hours (${gaps}). The other roughly ${money(r.hoursEffect)} of the labor-and-materials gap is hours. Keep those two arguments separate; they get settled by different people with different evidence.${
-        r.excluded.length ? ` ${capitalize(r.excluded.join(" and "))} ${r.excluded.length === 1 ? "is" : "are"} left out of this split because one document prints a flat figure with no hours or rate.` : ""
-      }`,
-    });
-  }
-  section("Where the money is", moneyBlocks);
+  section("Items worth arguing", itemBlocks);
 
-  section("The four kinds of difference you will see", [
-    { kind: "paragraph", text: "The Forensic report labels each finding with one of these. Knowing which one you are looking at tells you what proof it needs." },
+  // 5. Clean up our own sheet (and what to ask the carrier to fix on theirs).
+  const cleanUp: ForensicBlock[] = [];
+  const cleanUpItems = mergeCategoryFlags(facts.cleanUpOurs);
+  cleanUp.push(
+    cleanUpItems.length
+      ? { kind: "bullets", items: cleanUpItems }
+      : { kind: "paragraph", text: "Nothing on our sheet to fix before it goes back." }
+  );
+  if (facts.askCarrier.length) {
+    cleanUp.push({ kind: "subheading", text: "Ask the carrier to correct on theirs" });
+    cleanUp.push({ kind: "bullets", items: facts.askCarrier.map((f) => f.text) });
+  }
+  section("Clean up our own sheet", cleanUp);
+
+  // 6. Owner note.
+  section("A note for the owner (copy and paste)", [
     {
-      kind: "table",
-      columns: [
-        { header: "Label on the report", weight: 18 },
-        { header: "Plain English", weight: 22 },
-        { header: "Example on this car", weight: 32 },
-        { header: "What settles it", weight: 28 },
-      ],
-      rows: [
-        {
-          cells: [
-            "Missing from comparison estimate",
-            "We wrote it. They did not write it at all.",
-            `${[model.parts.top.slice(0, 3).map(amt).join(", "), model.paintHours.length ? "blends, clear-coat adds" : ""].filter(Boolean).join(", ")}${model.parts.top.length || model.paintHours.length ? ". " : ""}This is ${model.missingLineCount} lines.`,
-            "Show it is needed: photos, OEM procedure, the part actually installed, the sublet invoice.",
-          ],
-        },
-        {
-          cells: [
-            "Priced differently",
-            "Both wrote it. They put a different number on it.",
-            pricedBoth
-              ? `${pricedBoth.title}: ${money(pricedBoth.priceA!)} on ours, ${money(pricedBoth.priceB!)} on theirs.`
-              : "See findings marked 'priced differently'.",
-            "Supplier or sublet invoice.",
-          ],
-        },
-        {
-          cells: [
-            "Rate / amount difference",
-            "Same category, different hourly rate or category total.",
-            model.rateEffect ? describeRateGaps(model.rateEffect) : "No rate difference on this loss.",
-            "Our posted rate and what this market actually pays. A rate argument, not a repair argument.",
-          ],
-        },
-        {
-          cells: [
-            "Lines only on the lower estimate",
-            "They wrote something we did not.",
-            `${model.lowerOnlyCount} lines${model.parts.lowerOnly?.lowerOnlySamples?.length ? ": " + model.parts.lowerOnly.lowerOnlySamples.join(", ") : ""}.`,
-            "Usually the cheaper-part version of something we wrote as OEM. Match them up before assuming anything is \"extra.\"",
-          ],
-        },
-      ],
+      kind: "note",
+      text: "Written for the vehicle owner, in the shop's voice. It uses only the figures on the two estimates and stays inside the say / don't-say rules below: no promise about what the carrier will pay, no date, no comment on anyone's intent.",
     },
+    { kind: "callout", tone: "owner", paragraphs: [buildOwnerNote(model)] },
   ]);
 
-  const bucketBlocks: ForensicBlock[] = [];
-  bucketBlocks.push({ kind: "subheading", text: `Parts (${gapText(byKey("parts"))} gap)` });
-  if (model.parts.top.length) {
-    bucketBlocks.push({
-      kind: "paragraph",
-      text: `This is mostly a part-type disagreement, not a "did the part get hit" disagreement. Our biggest lines with no match on their sheet: ${list(model.parts.top, amt)}.${
-        model.parts.lowerOnly?.lowerOnlySamples?.length ? ` Their sheet has ${model.parts.lowerOnly.lowerOnlySamples.join(", ")} in roughly the same spots.` : ""
-      }`,
-    });
-  }
-  bucketBlocks.push({
-    kind: "bullets",
-    items: [
-      "Say: \"We wrote new factory parts. The insurer wrote used, aftermarket or reconditioned. That is where most of the parts money is.\"",
-      "Do not say the used or aftermarket parts are unsafe or illegal. The reports do not say that, and OEM position statements are guidance, not law.",
-      "Keep the parts-type question separate from the labor question. Bundling a small parts argument with a big labor argument tends to stall both.",
-    ],
-  });
-
-  if (model.rateEffect) {
-    bucketBlocks.push({ kind: "subheading", text: "Labor rates" });
-    bucketBlocks.push({
-      kind: "paragraph",
-      text: `Their estimate pays less per hour in the labor categories that print a rate. A rate gap compounds across every hour, which is why it is worth about ${money(model.rateEffect.total)} by itself. This is a shop-versus-carrier business question, not something the estimator proves with photos.`,
-    });
-    bucketBlocks.push({
-      kind: "bullets",
-      items: [
-        "Say: \"Our posted rate is what we wrote. The insurer's estimate is written at a lower rate. That difference alone is real money on a job this size.\"",
-        "Do not promise the customer the carrier will pay our rate.",
-      ],
-    });
-  }
-
-  const hoursLabel = [
-    model.hoursGap.body !== null ? `${model.hoursGap.body.toFixed(1)} body` : "",
-    model.hoursGap.paint !== null ? `${model.hoursGap.paint.toFixed(1)} paint` : "",
-  ].filter(Boolean).join(", ");
-  bucketBlocks.push({ kind: "subheading", text: hoursLabel ? `Labor hours (${hoursLabel})` : "Labor hours" });
-  const hoursText = [
-    model.paintHours.length ? `The missing paint hours are mostly ${list(model.paintHours, hr)}.` : "",
-    model.bodyHours.length ? `The missing body hours are ${list(model.bodyHours, hr)}.` : "",
-  ].filter(Boolean).join(" ");
-  if (hoursText) bucketBlocks.push({ kind: "paragraph", text: hoursText });
-  const hoursItems = [
-    "Say: \"The insurer's sheet skips the blend panels and most of the trim removal. Those hours are real work; they are on the sheet because that is how the car goes back together.\"",
+  // 7. Say / don't say.
+  const sayRows: ForensicTableRow[] = [
+    { cells: ["\"Two appraisers disagree about how many hours the repair takes. That is normal, and most of it gets settled at the car.\"", "Anything about intent: no \"lowballing\", no \"bad faith\". Nothing in the estimates supports it."] },
+    { cells: ["\"You choose the repair shop. Nobody can require you to use a particular one.\"", "\"The carrier has to pay whatever we write.\" They do not, and this is not a number we can promise."] },
+    { cells: ["\"A supplement is a step in the process, not the final answer.\"", "\"This will be fixed in a week.\" Supplements and reinspections take time; do not set a date."] },
+    { cells: ["\"Your policy has a section on what happens when the two sides cannot agree on the amount. Read it, or ask your agent.\"", "Explaining the appraisal clause, quoting it, or telling the owner to invoke it. That is legal territory and not the shop's role."] },
   ];
-  if (model.bumperOverhaul) {
-    hoursItems.push(
-      `The single largest hours line to defend: ${model.bumperOverhaul.title}${findingRef(model.bumperOverhaul.id)}. The report flags it as a quantity shortfall against the comparison estimate, so expect pushback.`
-    );
+  if (facts.notParts) {
+    sayRows.push({ cells: ["\"Both estimates use new factory parts.\"", "Any claim about part type. The carrier's parts-usage page lists nothing but new factory parts."] });
   }
-  bucketBlocks.push({ kind: "bullets", items: hoursItems });
-
-  if (model.adas.lines.length || model.adas.priced.length) {
-    bucketBlocks.push({ kind: "subheading", text: "Safety systems / ADAS (small dollars now, big dollars later)" });
-    const pricedText = model.adas.priced.length
-      ? `The insurer priced ${model.adas.priced.length === 1 ? "this one" : `${model.adas.priced.length} of them`} at a different figure: ${model.adas.priced
-          .map((x) =>
-            typeof x.priceA === "number" && typeof x.priceB === "number"
-              ? `${x.title} (${money(x.priceA)} on ours, ${money(x.priceB)} on theirs)`
-              : x.title
-          )
-          .join(", ")}. `
-      : "";
-    const missingText = model.adas.lines.length
-      ? `${model.adas.priced.length ? "" : "The insurer wrote none of them at a real price. "}Missing on theirs: ${model.adas.lines.map((x) => x.title).join(", ")}.`
-      : "";
-    bucketBlocks.push({
-      kind: "paragraph",
-      text: `${model.adas.placeholders.length ? `${model.adas.placeholders.length} calibration and scan lines on our sheet are written at $0.01 as a placeholder, cost open to the dealer invoice. ` : ""}${
-        pricedBoth && !model.adas.priced.length ? `${pricedBoth.title}: ${money(pricedBoth.priceA!)} on ours, ${money(pricedBoth.priceB!)} on theirs. ` : ""
-      }${pricedText}${missingText}`.trim(),
-    });
-    bucketBlocks.push({
-      kind: "bullets",
-      items: [
-        "Say: \"The car has cameras and radar on the side that was hit. The manufacturer requires those be recalibrated after the repair. That cost is not on the insurer's estimate yet because we do not have the dealer invoice yet.\"",
-        "Tell the owner in writing that the systems will be calibrated and that they will get the post-repair scan report.",
-      ],
-    });
+  if (facts.notRates) {
+    sayRows.push({ cells: ["\"The rates are agreed. The difference is labor time.\"", "Arguing our hourly rate. The carrier's rate adjustment already pays it."] });
   }
-
-  if (model.misc.length) {
-    bucketBlocks.push({ kind: "subheading", text: `Miscellaneous and sublet (${gapText(byKey("misc"))} gap)` });
-    bucketBlocks.push({
-      kind: "paragraph",
-      text: `${list(model.misc, amt)}, plus small shop-supply lines. Individually tiny; together ${gapText(byKey("misc"))}.`,
-    });
-    bucketBlocks.push({
-      kind: "bullets",
-      items: ["Say: \"These are the shop-supply and sublet items. They are on our sheet because we buy them or pay someone for them. Each one has a receipt.\""],
-    });
-  }
-  section("Bucket by bucket: what to say", bucketBlocks);
-
+  sayRows.push({ cells: ["\"Keep every document: both estimates, every supplement, scan reports, parts invoices.\"", "Handing the owner the highlighted Citation Density copy. It is a working document, not a customer document."] });
   section("Things to say, things not to say", [
-    {
-      kind: "table",
-      columns: [{ header: "Say this", weight: 50 }, { header: "Not this", weight: 50 }],
-      rows: [
-        { cells: ["\"Two appraisers disagree. That is normal. Most of it gets resolved when the damaged panels come off and both sides look at the car.\"", "\"The insurance company is lowballing you\" or anything about intent or bad faith. The reports say the opposite."] },
-        { cells: ["\"You choose the repair shop. Nobody can require you to use a particular one.\"", "\"The carrier has to pay whatever we write.\" They do not, and this is not a number we can promise."] },
-        { cells: ["\"A supplement is a step in the process, not the final answer.\"", "\"This will be fixed in a week.\" Supplements and reinspections take time; do not set a date."] },
-        { cells: ["\"Your policy has a section on what happens when the two sides cannot agree on the amount. Read it, or ask your agent.\"", "Explaining the appraisal clause, quoting it, or telling the owner to invoke it. That is legal territory and not the shop's role."] },
-        { cells: ["\"Keep every document: both estimates, every supplement, scan reports, parts invoices.\"", "Handing the owner the highlighted Citation Density copy. It is a working document, not a customer document."] },
-      ],
-    },
+    { kind: "table", columns: [{ header: "Say this", weight: 50 }, { header: "Not this", weight: 50 }], rows: sayRows },
   ]);
 
-  const proofItems = [
-    "Parts: supplier invoices and the part-type authorization for every OEM part.",
-    "Labor and paint hours: the OEM repair procedure for each disputed operation, and CCC/MOTOR P-page support for anything the database does not include automatically.",
-    ...model.supportReview.map((f) => `${f.title}${findingRef(f.id)} is specifically flagged as needing CCC/MOTOR P-page or database support.`),
-    "ADAS: scan reports, the dealer calibration invoice, and completion proof for each calibration.",
-    "Sublet and misc: the alignment, transport, and tire-supplier invoices.",
-  ];
-  section("The honest caveat: what these reports prove and what they do not", [
-    {
-      kind: "paragraph",
-      text: "Every finding rests on the two estimates themselves. The reports prove that a difference exists and put a dollar figure on it. They do not yet prove that our side of each difference is the correct one. Every finding is stamped \"support needed, not retrieved.\" Nothing external (an OEM repair procedure, a P-page, an invoice) is attached to any line yet.",
-    },
-    { kind: "paragraph", text: "The report is the map, not the ammunition. The ammunition still has to be collected:" },
-    { kind: "bullets", items: proofItems },
-  ]);
-
+  // 8. Next steps.
   section("What happens next", [
     {
       kind: "steps",
       items: [
-        "Reinspection at the car with both appraisers present and the damaged assemblies off. The biggest items are far easier to settle in person than by email.",
-        "Clean up our own sheet first. Fix any internal inconsistencies (a part with no labor to install it, an operation denied while a dependent one is allowed) before the hard items.",
-        "Attach the OEM procedure to every disputed labor operation before it goes back to the carrier.",
-        "Argue parts type and labor separately.",
+        facts.checkFirst.length
+          ? "Resolve the \"Check this first\" items with the carrier before anything else; a high-dollar line nobody can explain undermines every other argument."
+          : "Confirm both sheets are the latest versions before anything else.",
+        "Clean up our own sheet and send the corrected version, so the carrier is answering our final numbers.",
+        "Send the STRONG items first, each with the carrier's own line or note quoted. Then the NEEDS PROOF items, each with its P-page, OEM procedure or invoice attached.",
+        "Ask for a reinspection with both appraisers present and the damaged assemblies off for anything still open.",
       ],
     },
   ]);
 
-  section("Reading the two companion reports", [
+  // 9. Where the detail lives.
+  section("Where the detail lives", [
     {
       kind: "table",
-      columns: [{ header: "Report", weight: 24 }, { header: "How to read it", weight: 76 }],
+      columns: [{ header: "Report", weight: 24 }, { header: "What it holds", weight: 76 }],
       rows: [
-        { cells: ["Forensic Estimate Analysis", `The narrative. Section 3 is the plain-language summary; Section 4 is the money table above. Findings are numbered and grouped into structural, ADAS, refinish and "other." Appendix A lists all ${model.missingLineCount} of our lines that have no match on theirs. Line numbers refer to our estimate, not theirs.`] },
-        { cells: ["Delta Citation Density", "Our estimate with the differences painted on. Yellow highlight on a line means it differs from the insurer's sheet. The red numbered badge in the left margin is the finding number from the Forensic report. The red footnotes at the bottom of each page say what the insurer wrote instead. The legend is on the last page."] },
+        { cells: ["Forensic Estimate Analysis", "Every line-level difference the matcher found, including the ones this report groups as the same work written under another name. Line numbers refer to our estimate."] },
+        { cells: ["Delta Citation Density", "Our estimate with the differences painted on: yellow highlight where a line differs, the carrier's figure in the red footnotes, the legend on the last page."] },
+        { cells: ["The two estimates", `${shop.fileName} (${shop.lines.length} lines read) and ${carrier.fileName} (${carrier.lines.length} lines read). Every L-number above is a line on one of these.`] },
       ],
     },
     {
       kind: "note",
-      text: `Source figures: Forensic Estimate Analysis & Repair Cost Gap Report and Delta Citation Density Report${ro}, both prepared ${model.header.preparedDate}. The vehicle was not physically inspected for either report; hidden damage may change both estimates. This summary is not legal advice.`,
+      text: `Source figures: ${shop.fileName} and ${carrier.fileName}${ro}, prepared ${model.header.preparedDate}. The vehicle was not physically inspected for this report; hidden damage may change both estimates. This summary is not legal advice.`,
     },
   ]);
 
@@ -675,108 +320,184 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
 }
 
 /**
- * The customer-facing paragraph a manager can paste into an email.
- *
- * Customer wording, so it names no line numbers, no finding numbers and no
- * internal report. Every figure is one the two estimates print; each driver
- * of the gap is named only when the estimates show it (a parts gap, a rate
- * or hours difference, operations with no counterpart, ADAS lines). It makes
- * no claim about part quality, the carrier's intent, or what will be paid.
+ * Our under-coded lines read as one item with what they are worth at our
+ * rates ("coded body where the carrier codes mechanical: 3.3 hr, $280.50"),
+ * not as one bullet per line. Every other flag prints as written.
  */
-export function buildCustomerNote(model: PlainSummaryModel): string {
-  const total = model.buckets.find((b) => b.key === "total")!;
-  const parts = model.buckets.find((b) => b.key === "parts");
-  const drivers: string[] = [];
-  if (parts && parts.gap !== null && parts.gap > 0) {
-    drivers.push("which replacement parts are written and how they are priced");
+function mergeCategoryFlags(flags: Flag[]): string[] {
+  const out: string[] = [];
+  const merged = new Map<string, Flag[]>();
+  for (const flag of flags) {
+    if (flag.kind !== "laborCategoryMismatch") {
+      out.push(flag.text);
+      continue;
+    }
+    const cats = flag.text.match(/ours is coded (\w+), theirs (\w+)/);
+    const key = cats ? `${cats[1]}→${cats[2]}` : flag.text;
+    merged.set(key, [...(merged.get(key) ?? []), flag]);
   }
-  const hoursShort = (model.hoursGap.body ?? 0) > 0 || (model.hoursGap.paint ?? 0) > 0;
-  if (model.rateEffect && hoursShort) {
-    drivers.push("the hourly labor rate and the number of labor hours allowed");
-  } else if (model.rateEffect) {
-    drivers.push("the hourly labor rate");
-  } else if (hoursShort) {
-    drivers.push("the number of labor hours allowed");
-  }
-  if (model.missingLineCount > 0) {
-    drivers.push(
-      `${model.missingLineCount} ${model.missingLineCount === 1 ? "operation" : "operations"} on our estimate that the insurance estimate does not include yet`
+  for (const [key, group] of merged) {
+    const [ours, theirs] = key.split("→");
+    if (group.length === 1 || !theirs) {
+      out.push(...group.map((f) => f.text));
+      continue;
+    }
+    const names = group.map((f) => `${f.text.replace(/: ours is coded.*$/, "")} L${f.lines.shop?.[0]}`);
+    const dollars = group.reduce((sum, f) => sum + (f.dollars ?? 0), 0);
+    out.push(
+      `Coded ${ours} on our sheet where the carrier codes ${theirs}: ${names.join(", ")}.${
+        dollars > 0 ? ` Recoding is worth ${money(dollars)} at our rates.` : ""
+      }`
     );
   }
-  const driverSentence = drivers.length
-    ? ` The difference comes mainly from ${sentenceList(drivers)}.`
-    : "";
-  const adasSentence = model.adas.lines.length
-    ? " Your vehicle has driver-assistance cameras or sensors on the damaged side, and the manufacturer requires them to be recalibrated after the repair. That work is on our estimate, and we will make sure it is completed and documented for you."
-    : "";
-  return (
-    `Thank you for trusting us with your ${model.header.vehicle}. Two repair plans have been written for it. Ours comes to ${total.ours}, and the insurance company's appraiser has written ${total.theirs}, a difference of ${money(model.header.gap)}. A gap like this is common at this stage and does not mean anyone has acted in bad faith; two appraisers looked at the same vehicle and reached different conclusions.` +
-    driverSentence +
-    adasSentence +
-    " The next step is a supplement and a joint reinspection with the damaged panels removed, which is where most of these differences get settled. We will keep you updated as that happens, and we will keep every estimate, supplement and invoice on file for you. Please call us with any questions."
-  );
+  return out;
 }
 
-function sentenceList(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
+  const { ledger: L, shop, carrier, items, facts } = model;
+  const rows: ForensicTableRow[] = [];
+  const adj = L.rate.adjustmentAmount;
+  rows.push({
+    cells: [
+      "Labor hours",
+      money(L.laborHours.dollars),
+      `Both sides' hours valued at our category rates${
+        L.rate.settledByAdjustment
+          ? ` (valid because the carrier's ${money(adj)} rate adjustment equals the ${money(L.rate.impliedAdjustment)} rate difference)`
+          : ""
+      }. ${hr(L.laborHours.shop)} ours vs ${hr(L.laborHours.carrier)} theirs.`,
+    ],
+  });
+  if (L.laborRate !== 0) {
+    const labor = L.rate.openRateItems.filter((i) => i.label !== "Paint materials");
+    rows.push({
+      cells: [
+        "Labor rate",
+        money(L.laborRate),
+        `(our rate − their rate) × their hours${
+          labor.length ? `: ${labor.map((i) => `${i.label} ${hr(i.hours)} × ${rate(i.shopRate - i.carrierRate)}`).join("; ")}` : ""
+        }${adj > 0 ? `, less the carrier's ${money(adj)} rate adjustment` : ""}.`,
+      ],
+    });
+  } else if (adj > 0) {
+    rows.push({ cells: ["Labor rate", money(0), `Settled by the carrier's ${money(adj)} rate adjustment.`] });
+  }
+  const ps = shop.totals.paintSupplies;
+  const pc = carrier.totals.paintSupplies;
+  const materialsRate = L.rate.openRateItems.find((i) => i.label === "Paint materials");
+  const materialsHours = Math.round((ps.hours - pc.hours) * 10) / 10;
+  const materialsSplit =
+    materialsRate && Math.abs(materialsRate.dollars + materialsHours * ps.rate - L.paintMaterials) <= 0.01
+      ? `, which is the ${rate(materialsRate.shopRate - materialsRate.carrierRate)} rate (${money(materialsRate.dollars)}) plus ${hr(materialsHours)} × ${rate(ps.rate)} (${money(materialsHours * ps.rate)})`
+      : "";
+  rows.push({ cells: ["Paint materials", money(L.paintMaterials), `${money(ps.cost)} − ${money(pc.cost)}${materialsSplit}.`] });
+  const largest = [
+    ...items.filter((i) => i.hours === 0 && i.strength === "Strong").map((i) => `${i.title.toLowerCase()} ${money(i.value)} on ours`),
+    ...facts.checkFirst
+      .filter((f) => f.kind === "carrierOnlyHighDollar" && f.dollars)
+      .map((f) => `the ${money(f.dollars!)} line only they wrote (see Check this first)`),
+  ];
+  rows.push({
+    cells: [
+      "Parts, sublet, supplies (net)",
+      money(L.nonLaborNet),
+      `${shop.totals.misc ? `(${money(shop.totals.parts)} + ${money(shop.totals.misc)})` : money(shop.totals.parts)} − (${money(carrier.totals.parts + carrier.totals.misc)}${
+        adj > 0 ? ` − ${money(adj)} rate adjustment` : ""
+      }). Sublet and supplies are compared line by line, wherever each sheet prints them.${
+        largest.length ? ` Includes ${largest.join(" and ")}.` : ""
+      }`,
+    ],
+  });
+  rows.push({ cells: ["Tax", money(L.tax), `${money(shop.totals.tax)} − ${money(carrier.totals.tax)}.`] });
+  rows.push({ cells: ["Total", money(L.gap), `${money(L.shopTotal)} − ${money(L.carrierTotal)}.`], variant: "total" });
+  return rows;
 }
 
-function describeRateGaps(r: RateEffect): string {
-  const parts = [
-    r.bodyRateGap ? `$${r.bodyRateGap}/hr body` : "",
-    r.paintRateGap ? `$${r.paintRateGap}/hr paint` : "",
-    r.suppliesRateGap ? `$${r.suppliesRateGap}/hr materials` : "",
-  ].filter(Boolean);
-  return parts.length ? `${parts.join("; ")}.` : "Rates agree; the difference is category totals.";
+/**
+ * The owner paragraph. Customer wording: no line numbers, no internal report
+ * names. Figures come from the ledger; the ADAS sentence appears only when the
+ * evidence-gated staff sentence exists. Never states intent, a date, or what
+ * the carrier will pay.
+ */
+export function buildOwnerNote(model: PlainSummaryModel): string {
+  const { ledger: L, facts } = model;
+  const share = L.gap > 0 ? Math.round((L.laborHours.dollars / L.gap) * 100) : 0;
+  const drivers: string[] = [];
+  if (L.laborHours.diff > 0 && share > 0) {
+    drivers.push(
+      `Most of that difference (${share}%) is labor time: we wrote ${L.laborHours.diff.toFixed(1)} more hours of repair work than their appraiser did.`
+    );
+  }
+  if (facts.notParts && facts.notRates) {
+    drivers.push("Both estimates use new factory parts, and the two agree on labor rates.");
+  } else if (facts.notParts) {
+    drivers.push("Both estimates use new factory parts.");
+  } else if (facts.notRates) {
+    drivers.push("The two estimates agree on labor rates.");
+  }
+  if (facts.adasSentence) {
+    drivers.push(
+      "Your vehicle's driver-assistance cameras and sensors must be calibrated after the repair. That work is on our estimate, and we will make sure it is completed and documented for you."
+    );
+  }
+  return [
+    `Thank you for trusting us with your ${model.header.vehicle}. Two repair plans have been written for it. Ours comes to ${money(L.shopTotal)}, and the insurance company's appraiser has written ${money(L.carrierTotal)}, a difference of ${money(L.gap)}.`,
+    ...drivers,
+    "A gap like this is common at this stage and does not mean anyone has acted in bad faith; two appraisers looked at the same vehicle and reached different conclusions.",
+    "The next step is a supplement and, where needed, a joint reinspection with the damaged parts removed, which is where most of these differences get settled. We will keep you updated as that happens, and we will keep every estimate, supplement and invoice on file for you. Please call us with any questions.",
+  ].join(" ");
 }
 
-function capitalize(value: string): string {
-  return value ? value[0].toUpperCase() + value.slice(1) : value;
-}
-
-/** " (Finding 27)" when the finding carries a badge number; nothing otherwise —
- *  an unnumbered finding is never given a number here. */
-function findingRef(id: number): string {
-  return id > 0 ? ` (Finding ${id})` : "";
-}
-
-/** Every string the document prints, for tests and wording checks. */
-export function plainSummaryDocumentText(doc: DeltaForensicReportModel): string {
-  const parts: string[] = [doc.title, doc.subtitle, doc.footerLine, ...doc.identity.map((row) => `${row.label} ${row.value}`)];
+/** Every rendered unit of text (a paragraph, a bullet, a table cell), in order. */
+export function plainSummaryDocumentUnits(doc: DeltaForensicReportModel): string[] {
+  const units: string[] = [doc.title, doc.subtitle, doc.footerLine, ...doc.identity.map((row) => `${row.label} ${row.value}`)];
   for (const section of doc.sections) {
-    parts.push(section.title);
+    units.push(section.title);
     for (const block of section.blocks) {
       switch (block.kind) {
         case "paragraph":
         case "note":
         case "subheading":
-          parts.push(block.text);
+          units.push(block.text);
           break;
         case "bullets":
         case "steps":
-          parts.push(...block.items);
+          units.push(...block.items);
           break;
         case "callout":
-          parts.push(...block.paragraphs);
+          units.push(...block.paragraphs);
           break;
         case "table":
-          parts.push(...block.columns.map((column) => column.header));
-          for (const row of block.rows) parts.push(...row.cells);
+          units.push(...block.columns.map((column) => column.header));
+          for (const row of block.rows) units.push(...row.cells);
           break;
       }
     }
   }
-  return parts.join("\n");
+  return units;
 }
 
-/** Render the summary as a standalone PDF through the shared forensic renderer. */
+/** Every string the document prints, for tests and wording checks. */
+export function plainSummaryDocumentText(doc: DeltaForensicReportModel): string {
+  return plainSummaryDocumentUnits(doc).join("\n");
+}
+
+/** The ship gate refused the rendered text. `violations` is shown on the run. */
+export class SummaryLintError extends Error {
+  constructor(readonly violations: string[]) {
+    super(`the rendered summary failed ${violations.length} wording check(s)`);
+  }
+}
+
+/** Lint the rendered text, then render through the shared forensic renderer. */
 export async function renderPlainSummaryPdf(model: PlainSummaryModel): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const document = buildPlainSummaryDocument(model);
+  const violations = lintSummaryUnits(plainSummaryDocumentUnits(document), model.lint);
+  if (violations.length) throw new SummaryLintError(violations);
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
   const logo = await loadCollisionIqLogo(doc);
-  const pageCount = renderDeltaForensicReport(doc, buildPlainSummaryDocument(model), { font, boldFont, logo, startPageNumber: 1 });
+  const pageCount = renderDeltaForensicReport(doc, document, { font, boldFont, logo, startPageNumber: 1 });
   return { bytes: await doc.save(), pageCount };
 }

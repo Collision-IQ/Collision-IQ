@@ -1,0 +1,247 @@
+2026 RIVI R1S w/Dual Motor Large Pack 4D UTV Electric- Electric Gray
+1FRONT BUMPER & GRILLE
+2R&I  R&I bumper assy1.6
+3Repl  Add for radar sensor1m0.3M
+4Repl  Aim distance sensor1m0.6M
+5Repl  Aim camera1m2.1M
+Note: LABOR: Time includes calibrate all surround view cameras. Time does not include calibrate windshield
+cameras.
+6S03  R&I  Impact bar0.6
+7S03  R&I  Door0.2
+8   *S03  R&I  Wire harness front bumper0.5M
+9   *S03  R&I  Wire harness surround view0.5M
+10FRONT LAMPS
+11R&I  RT Headlamp assyIncl.
+Note: LABOR: Time is after front bumper cover, storage compartment and light bar are removed.
+12S03  R&I  LT Headlamp assy0.3
+13R&I  Light bar0.3
+14Repl Aim headlamps10.5
+15Repl Aim fog lamps10.3
+16COOLING
+17S03  R&I  Cooling modulem1.6M
+18#S03Air purge cooling system11.0
+19S03  R&I  Water pump powertrainm0.4M
+20#S03  Repl Coolant4106.92
+Note: Subject to invoice for additional cost - no invoice provided.
+21AIR CONDITIONER & HEATER
+22S03  R&I  Condenserm1.3M
+23S03  R&I  Compressor assym1.6M
+24S03  R&I  AC & heater assym0.7M
+25#S03  Subl  1234YF Refrigerant service1399.00
+Note: Subject to invoice - no invoice provided
+26HOOD
+27*S03  Blnd  Hood (ALU)1.6
+28R&I  Storage compart1.0
+Note: LABOR: Time includes surround weatherstrip, sight shield, fender ledge covers, rear panel, floor cover and
+compartment lamp.
+29S03  Repl EmblemPT00879088B175.000.2
+30#S03Adhesive removal12.000.2
+31FENDER
+32S03  Repl RT Fender (ALU)PT01250434B1595.002.32.2
+33S03Add for Clear Coat0.9
+34S03Add for Edging0.5
+35#S03Test fit fender11.0
+36S03  Repl RT Ft fender linerPT00558151B1110.00Incl.
+
+37S03  R&I  LT Ft fender liner0.4
+38S03  Repl RT Rr fender linerPT00890093B1103.00Incl.
+39S03  R&I  LT Rr fender liner0.3
+40R&I  RT Lower shieldIncl.
+41R&I  RT Air deflector0.2
+42*S03  Repl RT FlarePT00604407F1275.00Incl.
+43S03  R&I  LT FlareIncl.
+44R&I  RT Reflector0.1
+45S03  R&I  LT Reflector0.1
+46*S03  Repl RT Air guideC200670075B132.000.2
+47S03  Repl RT Air guide clipSC00013547A13.05
+48S03  Repl RT Air guide sealPT00044384B12.80
+49*S03  Repl RT Stone guardPT00315643D135.000.2
+50S03  R&I  RT Air ventIncl.
+51S03  Repl RT Air vent clipSC00009798A36.15
+52S03  R&I  Upper support0.3
+53FRAME
+54*S03  Rpr  Frame assy (HSS)1.0F0.5
+55#S03Set back wiring/modules for
+frame set up
+14.0M
+56#S03Prep, inspect, and secure all
+grounds and clamps
+12.0
+57#S03Forklift frame from lot1
+58ELECTRICAL
+59Repl High voltage system
+deactivate/activate
+1m2.8M
+60S03  Repl TPMS sensorPT00000742F190.00mIncl.M
+61S02  Repl Oil pumpPT00438287C1207.00
+62#S02  Repl External oil filter119.00
+63#S02  Repl Boltsc00007619-a423.00
+64S02  Repl Heat exchanger bolt
+M6x1.0x30.05
+SC00007574A722.05
+65S02  Repl Heat exchangerPT00311009D1122.00
+66S02  Repl Oil pump o-ringPT01081625A15.10
+67S02  Repl RT Side mountPT00056527G1276.00
+68S02  Repl RT Rear mount bolt M10x1.5x55SC00007385A838.00
+69S02  Repl Outer bracketPT01079451A171.00
+70S03  Repl Outer bracket boltSC00007385A419.00
+71S03  Repl RT Side mount bolt M10x1.5x55SC00007385A419.00
+72#S03  Repl RT Side mount bolt M12x1_75SC00007619A423.00
+73S03  Repl Center pipe retainerPT00043846C6120.00
+74WHEELS
+75*S02  Repl RT/Front Wheel, alloy 22" Sport
+dark
+PT00983789A0021925.00m0.3M
+76S01  Repl LT/Front Wheel, alloy 22" Sport
+dark
+PT00983789A0021925.00m0.3M
+77#S01Mount and balance - oversized260.00
+
+78S02  Repl RT/Front Center cap gloss blackPT01163810B002125.00
+79S03  R&I  RT/Rear R&I wheelm0.2M
+80S03  R&I  LT/Rear R&I wheelm0.2M
+81FRONT SUSPENSION
+82S02  Repl Under cover w/o all-terrainPT01000246D1307.000.3
+83S03O/H frt susp rt & ltm8.0M
+84S03O/H frt susp ltmIncl.
+85S03  R&I  LT R&I front suspension one sidemIncl.M
+86S01O/H frt susp rtmIncl.M
+87*S02  Repl RT Lower cntrl armPT01147635A1845.00mIncl.M
+88S01  Repl RT Lower cntrl arm nut M16x2.0SC00006990B225.08
+Note: Part cannot be reused/reinstalled. 2 of these are required.
+89*S02  Repl RT Lower cntrl arm nut M16x1.5SC00006950C14.25
+Note: PARTS: Part cannot be reused/reinstalled.
+90*S03  Repl RT Strut assyPT00964204A11,980.00mIncl.M
+91*S02  Repl RT Hub assyPT00031233G1490.00mIncl.M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; mount bolt. LABOR: Time includes
+R&R rotor and ABS sensor.
+92*S02  Repl LT Hub assyPT00031233G1490.00mIncl.M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; mount bolt. LABOR: Time includes
+R&R rotor and ABS sensor.
+93*S02  Repl RT Hub assy mount boltSC00006315A421.60
+Note: 4 of these are required.
+94*S02  Repl LT Hub assy mount boltSC00006315A421.60
+Note: 4 of these are required.
+95*S02  Repl RT KnucklePT00415633E1600.00mIncl.M
+96*S02  Repl RT Upper cntrl armPT00001857J1440.00mIncl.M
+97*S02  Repl RT Upper cntrl arm nutSC00023721A414.20
+Note: PARTS: Part cannot be reused/reinstalled.
+98*S02  Repl RT Axle assy quad-motorPT00462054D1770.00m1.6M
+99S01Deduct for Overlap-1.1M
+100*S03  Repl RT Axle boltSC00006346B19.80
+Note: PARTS: Part cannot be reused/reinstalled.
+101S02  Repl LT Axle boltSC00006346B19.80
+102*S02  Repl Susp subframePT00748804J12,000.00m5.5M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; bolt and nut. Part listed is for 2nd
+gen frame that replaces 1st gen frame. Part listed is for estimating purposes only. VIN is required through dealer
+for detailed pricing, as-built data, and recommendations.
+CCC states that all necessary one time use nuts, bolts, etc come with subframe assembly.
+103#S02  Repl Subframe boltsc00006965-a224.60
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+104#S02  Repl Subframe boltsc00022900-a413.00
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+105#S02  Repl Subframe boltsc00002055-a430.20
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+106#S02  Repl Subframe boltsc00007548-a222.60
+
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+107#S02  Repl Subframe boltsc00002059-a217.60
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+108#S02  Repl Subframe boltsc00027027-a419.00
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+109#S02  Repl Subframe nut49.20
+110#S02  Repl Subframe nutsc00024067-a24.10
+Note: CCC states part comes with subframe, but did not per shop. Invoice supplied for part from shop.
+111S02  Repl RT Caliper assy mount boltSC00004333A213.50
+Note: Part cannot be reused/reinstalled. 2 of these are required.
+112S02  Repl LT Caliper assy mount boltSC00004333A213.50
+Note: Part cannot be reused/reinstalled. 2 of these are required.
+113S03  R&I  Crossmember assy
+Note: PARTS: Part included with suspension subframe.
+Subframe being replaced - use new crossmember that comes with new subframe assembly
+114S03  Repl Bleed brake system1m0.6M
+115#S03Brake fluid125.00
+116STEERING GEAR & LINKAGE
+117*S02  Repl Gear assyPT00439050F12,595.00m1.4M
+118S03  Repl RT Outer tie rod nutSC00023721A27.10
+119*S02  Repl Gear assy mount boltSC00007509A318.30
+Note: Part cannot be reused/reinstalled. 3 of these are required.
+120S03  Repl LT Outer tie rod nutSC00023721A27.10
+121PILLARS, ROCKER & FLOOR
+122S03  Repl RT Front shield LFP batteryPT00983557A1132.000.3
+123S03  R&I  LT Front shield LFP battery0.3
+124S03  R&I  RT Center shield0.3
+125S03  R&I  LT Center shield0.3
+126S03  R&I  RT Rear shield0.3
+127S03  R&I  LT Rear shield0.3
+128FRONT DOOR
+129*Rpr  RT Door shell (ALU)0.52.1
+130S03Overlap Major Adj. Panel-0.4
+131Add for Clear Coat0.3
+132Add for Edging0.5
+133#Deduct for partial base coat
+refinish
+1-0.3
+134Repl  RT Water shield upperPT00933930A163.470.2
+Note: PARTS: Part cannot be reused/reinstalled.
+135R&I  RT Belt molding0.3
+136Repl  RT Water shield lowerPT00933929A164.910.2
+Note: PARTS: Part cannot be reused/reinstalled.
+137R&I  RT Lower molding0.3
+138S03  Repl RT Lower molding clip type 2SC00015852A816.40
+Note: PARTS: Part included with lower molding. Part cannot be reused/reinstalled.
+139Repl  RT Nameplate "RIVIAN" chromePT01118811B1109.930.2
+
+140#Adhesive removal on panel12.000.2
+141R&I  RT Applique0.3
+142R&I  RT R&I mirror0.3
+143R&I  RT Door glass Rivian0.4
+144R&I  RT Run channel0.2
+Note: LABOR: Time is after the door glass and fix glass are removed. and applique are removed.
+145R&I  RT Fixed glass Rivian0.3
+Note: PARTS: Part serviced with run channel. Part listed is for estimating purposes only. VIN is required through
+dealer for detailed pricing, as-built data, and recommendations. LABOR: Time is after the door glass, speaker,
+belt molding, and applique are removed.
+146R&I  RT Glass molding0.2
+147*R&I  RT Rear guide0.2
+148R&I  RT Handle, outside0.3
+149R&I  RT Upper trim0.2
+150R&I  RT R&I trim panel0.6
+151VEHICLE DIAGNOSTICS
+152*Rpr  Pre-repair scanm0.5M
+153*Rpr  Post-repair scanm0.5M
+154MISCELLANEOUS OPERATIONS
+155*Repl  Cover car/bag15.000.2
+156#Cover for primer15.000.2
+157#Corrosion protection110.00
+158#Mask door jambs15.000.3
+159#Mix and tint factory color pack10.5
+160#Hazardous waste removal13.00
+161#D&R 12v battery10.2M
+162#Reset electronics10.3
+163#Nib sand and polish110.001.0
+164#S03Align suspension +25%1356.25
+165#S03Concession in an attempt to
+secure an agreed price for rates
+13,728.00
+Note: Shop is Rivian certified.
+Shop's certified rates are: $90/hr body/refinish, $175/hr mech, $135/hr frame/structural, and $135/hr ALUM
+repair. Total sum was obtained by the labor rate differences multiplied by the appropriate labor hours ([BODY
+AND REFINISH $90 - $65 = $25 x (27.6 + 8.4) = $900.00] + [MECHANICAL $175 - $95 = $80 x 34.6 =
+$2768.00] + [Frame $135 - $75 = $60 x 1 = $60] = $3728.00
+166#S01Frame rack set up12.0
+167#S01Add for additional fixtures11.0
+168#S01Measure frame12.0
+169#S02Damper Module Assembly11,980.00
+170#S02Tow into shop for repairs1125.00
+171#S03Tow to sublet1497.00
+172#S03  Subl  Rivian Service +25%12,293.38
+173#S03Tow from sublet1497.00
+174#S03Cavity wax115.400.3
+SUBTOTALS
+ESTIMATE TOTALS
+ALTERNATE PARTS USAGE
+AftermarketAutomatically List00
+Optional OEMManually List00
+ReconditionedManually List00
+RecycledN/A00

@@ -16,7 +16,9 @@ import {
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
-import { buildPlainSummaryModel, renderPlainSummaryPdf } from "./plainLanguageSummary";
+import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
+import { LedgerNotClosedError } from "./appraisalSummary/gapLedger";
+import { NonLaborParseError } from "./appraisalSummary/nonLaborBuckets";
 import { adaptForensicToPlainSummary } from "./plainLanguageSummaryAdapter";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import { normalizeOverprintLine, normalizeOverprintText } from "./overprintNormalize";
@@ -672,6 +674,10 @@ export type AnnotatedEstimateGeneratedFindings = {
      *  failed SUBTOTALS reconciliation): the totals table stands, and the
      *  report must say why it lists no line-level differences. */
     lineItemComparisonWithheld?: string | null;
+    /** Both sides' parsed rows (the rows the pairing used), for the Appraisal
+     *  Dispute Report's closed ledger and integrity pass. Absent or empty when
+     *  the line-item comparison was withheld. */
+    rows?: { higher: EstimateDeltaRow[]; lower: EstimateDeltaRow[]; deltas: EstimateLineItemDelta[] };
   };
 };
 
@@ -3020,9 +3026,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
     // THE THIRD DOCUMENT IS THE APPRAISAL DISPUTE REPORT.
     //
-    // Shop-staff talking points built from the SAME reconciliation, findings
-    // and badge numbers the forensic report was just rendered from — it adds
-    // no facts. Its fixed copy speaks of "our estimate" and "the insurer",
+    // Shop-staff talking points built from the SAME reconciliation, rows and
+    // deltas the forensic report was just rendered from, as one closed ledger
+    // — it adds no facts. Its fixed copy speaks of "our estimate" and "the insurer",
     // so it is produced only when the annotated document is the shop's and
     // the comparison is carrier-authored; any other pair gets nothing, not a
     // document with the wrong nouns in it. It is a companion, never a
@@ -3030,24 +3036,21 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // run, and the two documents above still ship.
     const comparisonRole = params.comparisonEstimateTexts?.[0]?.estimateRole;
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
-      // The summary's fixed copy counts "our lines with no match on their
-      // sheet"; with the line-item comparison withheld that count is not
-      // zero, it is unknown, and a sentence saying zero would be false.
+      // The summary's ledger and items are built from both sheets' lines;
+      // with the line-item comparison withheld those lines are unread, and a
+      // ledger over unread lines would state figures nobody checked.
       warnings.push(
-        "Appraisal Dispute Report not produced: the line-item comparison was withheld for this run, so its line counts would be unknown rather than zero. The annotated estimate and the Forensic Estimate Analysis carry the totals-level findings."
+        "Appraisal Dispute Report not produced: the line-item comparison was withheld for this run, so its line-level figures would be unknown rather than zero. The annotated estimate and the Forensic Estimate Analysis carry the totals-level findings."
       );
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier") {
       try {
         const adapted = adaptForensicToPlainSummary({
           reconciliation: forensicInput.reconciliation,
-          findings,
-          findingNumbers: findingNumberById,
+          rows: forensicInput.rows,
           higherDocumentName: sourcePdfName,
           lowerDocumentName: params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate",
-          lowerDocumentLabel: claimContext.insurer ?? null,
-          higherLineCount: forensicInput.higherLineCount,
-          lowerLineCount: forensicInput.lowerLineCount,
-          noCounterpartRows: forensicInput.noCounterpartRows,
+          higherText: params.sourceText ?? "",
+          lowerText: params.comparisonEstimateTexts?.[0]?.text ?? "",
           vehicleLabel: claimContext.vehicle ?? params.vehicleMake ?? null,
           roNumber: claimContext.roNumber ?? null,
           identity: identity.filter((row) => /^(Vehicle|RO number|Claim number|Insurer)$/i.test(row.label)),
@@ -3071,9 +3074,21 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           warnings.push(`The Appraisal Dispute Report was not produced: ${adapted.reason}.`);
         }
       } catch (error) {
-        warnings.push(
-          `The Appraisal Dispute Report could not be rendered (${error instanceof Error ? error.message : "unknown error"}); the annotated estimate and the Forensic Estimate Analysis are unaffected.`
-        );
+        // Refusals are the ship gate working, not crashes: a ledger that does
+        // not close, an incomplete line read, or rendered text that fails the
+        // wording checks. Each is reported with its reason (and every lint
+        // violation), the same way an R24 refusal is shown on the run.
+        if (error instanceof SummaryLintError) {
+          warnings.push(
+            `The Appraisal Dispute Report was not produced: its text failed ${error.violations.length} wording check(s): ${error.violations.join(" ")}`
+          );
+        } else if (error instanceof LedgerNotClosedError || error instanceof NonLaborParseError) {
+          warnings.push(`The Appraisal Dispute Report was not produced: ${error.message}.`);
+        } else {
+          warnings.push(
+            `The Appraisal Dispute Report could not be rendered (${error instanceof Error ? error.message : "unknown error"}); the annotated estimate and the Forensic Estimate Analysis are unaffected.`
+          );
+        }
       }
     }
   }
@@ -4140,6 +4155,12 @@ export function buildRequiredEstimatorDeltaFindings(
           : deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
         : null,
       lineItemComparisonWithheld: deltaMatch?.lineItemsWithheld ?? null,
+      rows: {
+        higher: deltaMatch?.higherRows ?? [],
+        lower: deltaMatch?.lowerRows ?? [],
+        // Same OCR gate as the no-counterpart rows below.
+        deltas: (deltaMatch?.orderedDeltas ?? []).filter((delta) => !delta.ocrUncertain),
+      },
       // Only confirmed omissions. An OCR-unverified line is not evidence the
       // comparison lacks the operation, so it must not be listed as one.
       //
@@ -4517,6 +4538,10 @@ type StructuredLineItemDeltaMatch = {
    * what "rows read" means once the pairing itself has been withheld. */
   higherRowsRead: number;
   lowerRowsRead: number;
+  /** The rows both sides were read into (the same rows the pairing used), for
+   * the Appraisal Dispute Report's line-level ledger. Empty when withheld. */
+  higherRows: EstimateDeltaRow[];
+  lowerRows: EstimateDeltaRow[];
   /** P0-1: operations withdrawn because the pack asserted both that the
    * comparison omitted them and that only the comparison carried them. */
   contradictionNotes: string[];
@@ -5235,6 +5260,8 @@ function matchStructuredLineItemDeltas(
     lineItemsWithheld,
     higherRowsRead: dedupedHigherRows.length,
     lowerRowsRead: lowerRows.length,
+    higherRows: lineItemsWithheld ? [] : dedupedHigherRows,
+    lowerRows: lineItemsWithheld ? [] : lowerRows,
     // The subject row count and the comparison's own printed total are what
     // let the assessment recognise a document that was not read AT ALL, as
     // opposed to one read with holes — see assessComparisonExtraction.
