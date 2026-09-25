@@ -1,0 +1,356 @@
+2026 RIVI R1S w/Dual Motor Large Pack 4D UTV Electric- Electric Gray
+1   #
+2   #Subl  Paid out-Move vehicle into shop1167.50X
+3   #
+4MODEL IDENTIFICATION
+5   #** Procedure research &
+documentation **
+12.0
+Note: Per shop policy and OEM standards, the owner was provided OEM Position Statements showing that
+non-OEM parts may fail, risk safety, or void warranties. OE docs available via this link:
+[link removed from fixture]
+6UPDATE NOTES
+7   #****Work Authorization
+Secured****
+1
+8FRONT BUMPER & GRILLE
+9O/H bumper assy4.3
+10R&I  R&I bumper assyIncl.
+11R&I  Impact bar0.6
+12*R&I  Grille assyIncl.
+13R&I  Door0.2
+14*R&I  Wire harness front bumperIncl.M
+15*R&I  Wire harness surround view0.5M
+16#Test fit-Front bumper11.01
+Note: Required to ensure panel meets OE gap tolerance and to ensure OE measurements are met for safety and
+avoid damaging newly painted components
+17FRONT LAMPS
+18R&I  RT Headlamp assyIncl.
+Note: LABOR: Time is after front bumper cover, storage compartment and light bar are removed.
+19R&I  LT Headlamp assy0.3
+20R&I  Light bar0.3
+21Repl Aim headlamps10.5
+22#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+23COOLING
+24R&I  Cooling modulem1.6M
+Note: Required for frame replacement
+25R&I  Water pump powertrainm0.4
+26#Cooling system air purge
+procedure
+11.0
+27#Repl  Coolant4106.92T
+28AIR CONDITIONER & HEATER
+29R&I  Condenserm1.3
+30R&I  Compressor assym1.6
+31R&I  AC & heater assym0.7M
+32#Subl  1234YF Refrigerant service
+procedure
+1399.00T
+Note: Rear
+
+RO Number: 21995
+33HOOD
+34*Blnd  Hood (ALU)2.0
+35Repl EmblemPT00879088B175.000.2
+36R&I  Storage compart1.0
+37#Clean adhesive13.00T0.3
+38FENDER
+39*Repl  RT Fender (ALU)PT01250434B1595.002.32.2
+40Add for Clear Coat0.9
+41Add for Edging0.5
+42Add for Clear Coat0.1
+43R&I  RT Air vent0.2
+44*Repl  RT Air vent clipSC00009798A36.15
+45*Repl  RT Ft fender linerPT00558151B1110.00Incl.
+46R&I  LT Ft fender liner0.4
+47*Repl  RT Rr fender linerPT00890093B1103.00Incl.
+48R&I  LT Rr fender liner0.3
+49R&I  RT Lower shieldIncl.
+50*Repl  RT FlarePT00604407F1275.00Incl.
+51R&I  LT FlareIncl.
+52*Repl  RT Air guideC200670075B132.000.2
+53*Repl  RT Air guide clipSC00013547A13.05
+54*Repl  RT Air guide sealPT00044384B12.80
+55*Repl  RT Stone guardPT00315643D135.000.2
+56R&I  RT Reflector0.1
+Note: Removed for access to flare mount
+57R&I  LT Reflector0.1
+Note: Removed for access to flare mount
+58R&I  Upper support0.3
+59#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+60#Test fit-RT Fender11.01
+Note: Required prior to final refinish to ensure replacement panel meets OE gap tolerance and to ensure OE
+measurements are met for safety and avoid damaging newly painted components
+61FRAME
+62*Rpr  Frame assy (HSS)1.00.5
+63#Set up vehicle on frame bench
+(Full frame)
+13.01
+64#Measure-Diagnostic12.01
+65#Set up fixture(s)12.0
+66#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+67#Set back wiring14.0M
+68#Subl  Forklift frame from lot1175.00X
+69#Prep grounds & clamps11.01
+Note: Clean, bare metal required for proper connection
+70#Inspect & secure all gounds11.0M
+71ELECTRICAL
+
+RO Number: 21995
+72*Rpr  Batterym0.3M
+Note: D&R lithium and isolate terminal end
+73R&I  Batterym0.4M
+74#Access RiDE10.2M
+75#Test high voltage
+gloves-Disassembly
+10.4
+Note: Documentation to support glove check operation available in link and attached:
+[link removed from fixture]
+76#Isolate high voltage11.0M
+77#Confirm high voltage isolation10.5M
+78*Repl  Oil pumpPT00438287C1207.001.0M
+79*Repl  Heat exchangerPT00311009D1122.00
+80*Repl  Heat exchanger bolt
+M6x1.0x30.05
+SC00007574A722.05
+81#Repl  Oil pump O-ringPT01081625A15.10
+82#Repl  Oil filterPT00340699C119.000.2M
+83#Subl  HV & LV power up &
+maintenance +34%
+11,350.18T
+84#Subl  Drive Unit Oil, Castrol BOT 350
+M3 (1L) +34%
+1Incl.T
+Note: Open to Rivian invoice
+85Repl TPMS sensorPT00000742F190.00mIncl.M
+Note: RT Front
+86R&I  TPMS sensormIncl.M
+Note: LT Front
+87*Repl  RT Side mountPT00056527G1276.00
+88*Repl  RT Side mount bolt M10x55SC00007385A419.00
+Note: Adhesive fastener; potentially reusable. Refer to Fastener Reuse.|In this application, Non-reusable.
+89#Repl  RT Side mount bolt M12x1_75SC00007619A423.00
+Note: Adhesive fastener; potentially reusable. Refer to Fastener Reuse.|In this application, Non-reusable.
+90*Repl  Outer bracketPT01079451A171.00
+91#Repl  Outer bracket boltSC00007385A419.00
+Note: Service Notes
+|In this application, Non-reusable.
+92*Repl  Center pipe retainerPT00043846C6120.00
+93#Subl  HV Coolant drain & refill +34%1Incl.T
+94#Subl  Oil service +34%1316.24T
+Note: Open to Rivian invoice
+95#Reset electrical components10.3
+96WHEELS
+97*Repl  RT/Front Wheel, alloy 22" Sport
+dark
+PT00983789A0021925.00m0.3M
+Note: Torque spec 190Nm
+98Repl LT/Front Wheel, alloy 22" Sport
+dark
+PT00983789A0021925.00m0.3M
+Note: Torque spec 190Nm
+99R&I  RT/Rear R&I wheelm0.2M
+
+RO Number: 21995
+100R&I  LT/Rear R&I wheelm0.2M
+101Repl  RT/Front Center cap gloss blackPT01163810B002125.00
+102  **Repl  Opt OEM RT & LT Front Pirelli
+Scorpion MS HL275/50R22" 116h
++34%
+ITW21,192.60
+Note: Quote confirmed with ITW
+103#Rpr  Utilize Gunni wheels0.4M
+104#Subl  Four wheel suspension alignment
++34%
+1511.75T
+Note: Open to Rivian invoice
+105#Subl  Transport vehicle to sublet1665.98X
+Note: Sublet: Rivian service to remove "Safe mode", flush & refill hydraulic fluid, perform wheel alignment and fill
+oil
+106#Subl  Transport from sublet1665.98X
+Note: Sublet: Rivian service to remove "Safe mode", flush & refill hydraulic fluid, perform wheel alignment and fill
+oil
+107#Mount & road force balance
+wheel & tire (21" Plus)
+2200.00T
+108#Tire Disposal (SUV/Truck)216.00T
+109#Test wheel torque post-repair test
+drive
+10.2M
+110FRONT SUSPENSION
+111O/H frt susp rt & ltm8.0M
+112O/H frt susp ltmIncl.
+113R&I  LT R&I front suspension one sidemIncl.M
+114O/H frt susp rtmIncl.M
+115*Repl  RT Hub assyPT00031233G1490.00mIncl.M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; mount bolt. LABOR: Time includes
+R&R rotor and ABS sensor.
+116*Repl  LT Hub assyPT00031233G1490.00mIncl.M
+117*Repl  RT Hub assy mount boltSC00006315A421.60
+118*Repl  LT Hub assy mount boltSC00006315A421.60
+119*R&I  RT Caliper assy silverm1.0M
+120*R&I  LT Caliper assy silverm1.0M
+121*Repl  RT Caliper assy mount boltSC00004333A213.50
+Note: Part cannot be reused/reinstalled. 2 of these are required.
+122*Repl  LT Caliper assy mount boltSC00004333A213.50
+Note: Part cannot be reused/reinstalled. 2 of these are required.
+123*Repl  RT KnucklePT00415633E1600.00mIncl.M
+124Deduct for Overlap-0.3M
+125*Repl  RT Upper cntrl armPT00001857J1440.00mIncl.M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; nut.
+126Repl  RT Upper cntrl arm nutSC00023721A13.37
+127*Repl  RT Lower cntrl armPT01147635A1845.00mIncl.M
+Note: PARTS: Part has related component that cannot be reused/reinstalled; nut.
+128*Repl  RT Lower cntrl arm nut M16x1.5SC00006950C14.25
+129*Repl  RT Strut assyPT00964204B11,980.00mIncl.M
+
+RO Number: 21995
+130*Repl  RT Axle assy dual/tri motorPT00087074G1770.00m1.6M
+131Deduct for Overlap-1.1M
+132*Repl  RT Axle boltSC00006346B19.80
+Note: PARTS: Part cannot be reused/reinstalled.
+133*Repl  LT Axle boltSC00006346B19.80
+Note: PARTS: Part cannot be reused/reinstalled.
+134R&I  R&I susp crossmemberm4.8M
+135*Repl  SubframeC200748804J12,000.00
+136*Repl  Susp subframe bolt M10x1.5x70SC00027027A419.00
+Note: Part included with suspension subframe. 4 of these are required.
+137*Repl  Susp subframe bolt M6x1.0x19.45SC00022900A413.00
+Note: Part cannot be reused/reinstalled. 4 of these are required.
+138*Repl  Susp subframe bolt
+M14x2.0x135.25
+SC00007548A222.60
+Note: Part included with suspension subframe. 2 of these are required.
+139*Repl  Susp subframe bolt
+M14x2.0x166.45
+SC00006965A224.60
+Note: Part included with suspension subframe. 2 of these are required.
+140*Repl  Susp subframe bolt M14x2.0x100SC00002059A217.60
+Note: Part included with suspension subframe. 2 of these are required.
+141*Repl  Susp subframe nut M10x1.5SC00004336A49.20
+Note: Part included with suspension subframe. 4 of these are required.
+142*Repl  Susp subframe nut M6x1.0SC00024067A12.05
+143*Repl  Subframe boltSC00002055A430.20
+144*R&I  Crossmember assy1.0
+145*Repl  Under cover w/all-terrainPT01000248D1307.000.3
+146Repl  Bleed brake system1m0.6M
+147#Repl  Rivian DOT4 brake fluidPT01140603A125.00
+148#Measure ride height10.5M
+Note: Vehicles with 22 inch ultra high performance tires44 PSI (3.03 Bar)
+Front subframe height 287-297mm
+Rear subframe height 307-317mm
+149#Subl  Drain & refill hydraulic system
++34%
+1Incl.T
+Note: Open to Rivian invoice
+150#Subl  Hydraulic service +34%1792.07T
+Note: Open to Rivian invoice
+151STEERING GEAR & LINKAGE
+152*Repl  Gear assyPT00439050F12,595.00m1.4M
+153*Repl  Gear assy mount boltSC00007509A318.30
+Note: Part cannot be reused/reinstalled. 3 of these are required.
+154*Repl  RT Outer tie rod nutSC00023721A27.10
+155*Repl  LT Outer tie rod nutSC00023721A27.10
+156COWL
+157R&I  Cowl grilleIncl.
+158PILLARS, ROCKER & FLOOR
+159Repl  RT Front shield LFP batteryPT00983557A1132.000.3
+
+RO Number: 21995
+160R&I  LT Front shield LFP battery0.3
+161R&I  RT Center shield0.3
+162R&I  LT Center shield0.3
+163R&I  RT Rear shield0.3
+164R&I  LT Rear shield0.3
+165FRONT DOOR
+166*Rpr  RT Door shell (ALU)1.012.1
+167Overlap Major Adj. Panel-0.4
+168Add for Clear Coat0.3
+169*R&I  RT Front w'strip0.3
+170*R&I  RT Water shield upper0.2
+171*R&I  RT Water shield lower0.2
+172R&I  RT Belt molding0.3
+173R&I  RT Lower molding0.3
+Note: PARTS: Part has related components that cannot be reused/reinstalled; clip type 2.
+174*Repl  RT Lower molding clip type 1SC00015851A817.60
+175Repl  RT Nameplate "RIVIAN" dark
+chrome
+PT00736055B1125.000.2
+176R&I  RT R&I mirror0.3
+177R&I  RT Door glass Rivian0.4
+178R&I  RT Fixed glass Rivian0.3
+179R&I  RT Run channel0.2
+180R&I  RT Handle, outside0.3
+181R&I  RT Upper trim0.2
+182R&I  RT R&I trim panel0.6
+183#Mask for primer15.00T0.3
+184#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+185VEHICLE DIAGNOSTICS
+186#Rpr  Pre repair scan1.0M
+187#Rpr  Connect vehicle to RiDe0.5M
+188#Rpr  Research DTC's0.5M
+189#Rpr  In-Proc repair scan1.0M
+190#Rpr  Research up to date ADAS
+calibration procedures
+0.5M
+191#Rpr  Set vehicle into
+"AllPurpose"/"Standard"
+0.1M
+192#Rpr  Set ride height calibration # 10.1M
+193#Rpr  TruPoint Set up0.7M
+194#Rpr  Perform vehicle alignmentM
+195#Rpr  Set front camera to "Service
+mode"(Driver assistance camera)
+0.1M
+196#Rpr  Set up targets(Driver assistance
+camera)
+0.3M
+197#Rpr  Blueprint to use service
+calibrations(Driver assistance
+came
+0.3M
+
+RO Number: 21995
+198#Rpr  Set ride height to
+"Precision"(Driver assistance
+camera)
+0.3M
+199#Rpr  Calibrate Drivers Assistant
+camera(Driver assistance camera)
+0.3M
+200#Rpr  Reset vehicle(Driver assistance
+camera)
+0.3M
+201#Rpr  Post repair scan1.0M
+202#Rpr  Research DTC's0.5M
+203#Rpr  Final road test for safety & quality
+check
+0.5M
+204#Test lug torque post safety test10.2M
+205MISCELLANEOUS OPERATIONS
+206#Pre wash vehicle15.00T0.5
+207#Interior Protection kit13.220.1
+208#Mask for refinishing110.00T0.5
+209#Mask jambs (0.3 Hours and $3.00
+per panel)
+26.00T0.6
+210#Tint color10.5
+211#Finish sand & polish (0.5 Refinish
+per panel)
+21.0
+212#Clean vehicle for delivery15.00T0.5
+213#Maintain HV battery state of
+charge
+15.00T0.5
+214#Hazardous waste removal15.00T
+215#Solid waste removal15.00T
+SUBTOTALS
+ESTIMATE TOTALS

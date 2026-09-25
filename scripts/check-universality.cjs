@@ -29,7 +29,7 @@ const { join, relative } = require("node:path");
 // RO numbers use digit-boundary lookarounds (not \b) so camelCase identifiers
 // like resolveRo21896CanonicalDeltaSet cannot smuggle a fixture RO past the guard.
 const FIXTURE_TOKENS =
-  /(?<!\d)(?:22140|22104|22108|22009|22006|21986|21896|21888|21638)(?!\d)|\b(?:USAA|Conestoga)\b/g;
+  /(?<!\d)(?:22140|22104|22108|22009|22006|21995|21986|21896|21888|21638)(?!\d)|\b(?:USAA|Conestoga)\b/g;
 
 const SRC_EXTENSIONS = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 const TEST_FILE = /(?:\.test\.[a-z]+$|[\\/]__tests__[\\/])/;
