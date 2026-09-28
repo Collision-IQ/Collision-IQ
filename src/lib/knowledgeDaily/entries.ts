@@ -708,6 +708,192 @@ const ENTRIES: KnowledgeDailyEntry[] = [
     },
     cardSource: "Source: Cox Automotive, August 2026 used-vehicle report; Autobody News, Sep 16, 2026.",
   },
+  {
+    entryNumber: 17,
+    slug: "insurer-report-card-none-above-c-plus",
+    date: "2026-09-28",
+    category: "Insurance industry data",
+    headline: "Over 1,100 body shops graded the insurers. Not one of the ten biggest scored above a C+.",
+    keyFigure: "C+",
+    keyFigureLabel: "best grade earned by any of the ten largest national auto insurers, per CRASH Network's 2026 Insurer Report Card",
+    summary: [
+      "CRASH Network's 2026 Insurer Report Card asked more than 1,100 U.S. body shops to grade up to 40 carriers on whether their policies, attitude, and payment practices support quality repairs. Seven insurers earned an A- or higher, led by regional and specialty carriers. The ten largest national insurers — the ones writing most of the country's claims — topped out at C+, and 22 companies landed at C- or lower, per Repairer Driven News' February 2, 2026 coverage of the report.",
+      "Shops grade the carrier they invoice, not the one in the commercial. The gap between market share and shop-floor grade is worth knowing before assuming the biggest name handles claims best.",
+    ],
+    whyItMatters:
+      "A grade from the people processing thousands of claims a year is a different signal than brand awareness — it measures how a carrier actually behaves once a claim is open, not how it markets itself beforehand.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the field-reputation reference for the report-card series — context for claim behavior that a policy document alone won't show.",
+    sources: [
+      {
+        label: "Insurer Report Card: Seven receive A- or higher, none of top 10 national insurers receive above C+",
+        publisher: "Repairer Driven News, Feb 2, 2026",
+        url: "https://www.repairerdrivennews.com/2026/02/02/insurer-report-card-seven-receive-a-or-higher-none-of-top-10-national-insurers-receive-above-c/",
+        kind: "primary",
+      },
+    ],
+    tags: ["carinsurance", "insuranceclaim", "bodyshop", "collisionrepair", "autoinsurance"],
+    image: {
+      src: "/daily-iq/kb-017-insurer-report-card.png",
+      alt: "The Daily iQ entry 17 card: none of the ten largest national auto insurers scored above a C+ in the 2026 Insurer Report Card.",
+    },
+    cardSource: "Source: CRASH Network 2026 Insurer Report Card, via Repairer Driven News, Feb 2, 2026.",
+  },
+  {
+    entryNumber: 18,
+    slug: "labor-rate-gap-body-86-mechanical-163",
+    date: "2026-09-29",
+    category: "Repair economics",
+    headline: "Body work: $86 an hour. The mechanical work on the same car: $163. The gap is widening fast.",
+    keyFigure: "$86 vs $163",
+    keyFigureLabel: "national average posted body vs. mechanical labor rate, June 2026, per National Autobody Research",
+    summary: [
+      "National Autobody Research's LaborRateHero data for June 2026 puts the national average posted rate at $86/hour for body, $85 for refinish, and $163 for mechanical — mechanical rose 11.6% year over year, nearly double the pace of the other two, per Autobody News' July 20, 2026 coverage.",
+      "Modern collision repairs are increasingly mechanical: electronics, calibrations, battery handling, suspension. When an estimate prices that work at a body rate instead of a mechanical one, the file is quietly short by the difference on every hour billed.",
+    ],
+    whyItMatters:
+      "A labor-rate mismatch is easy to miss because the estimate still shows a rate — just the wrong one for the work being described. The dollar gap compounds across every mechanical hour on the file.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the reference rate spread Collision iQ checks estimate labor-rate coding against.",
+    sources: [
+      {
+        label: "LaborRateHero national labor rate data, June 2026",
+        publisher: "National Autobody Research, via Autobody News, Jul 20, 2026",
+        url: "https://www.nationalautobodyresearch.com/laborratehero.html",
+        kind: "primary",
+      },
+    ],
+    tags: ["laborrates", "collisionrepair", "autobody", "insuranceestimate", "mechanic"],
+    image: {
+      src: "/daily-iq/kb-018-labor-rate-gap.png",
+      alt: "The Daily iQ entry 18 card: body labor averaging $86/hour versus $163/hour for mechanical, June 2026.",
+    },
+    cardSource: "Source: National Autobody Research (LaborRateHero), via Autobody News, Jul 20, 2026.",
+  },
+  {
+    entryNumber: 19,
+    slug: "massachusetts-appraiser-advisory-ruling-2026-1",
+    date: "2026-09-30",
+    category: "Law & regulation",
+    headline: "Massachusetts: shops don't have to employ a licensed appraiser. They do have to have one.",
+    keyFigure: "Licensed",
+    keyFigureLabel: "Massachusetts Advisory Ruling 2026-1: every shop appraisal needs a licensed appraiser, on staff or retained (adopted July 14, 2026)",
+    summary: [
+      "On July 14, 2026, the Massachusetts Auto Damage Appraiser Licensing Board adopted Advisory Ruling 2026-1: a repair shop can satisfy the state's appraiser requirement by retaining or engaging a licensed appraiser as a subcontractor rather than hiring one on staff — and noncompliance can mean fines and penalties, per CollisionWeek's July 23, 2026 coverage.",
+      "The detail worth sitting with: in Massachusetts, the person who writes the damage appraisal must be licensed, full stop. Most states leave that role to whoever the insurer or shop assigns. Where appraising is a licensed profession, \"who valued your loss, and what are their credentials\" has a paper answer.",
+    ],
+    whyItMatters:
+      "A licensing requirement gives an owner or shop a concrete document to ask for — a credential, not just a company's word — before accepting a valuation.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the Massachusetts-specific licensing reference behind the appraiser-credential questions Collision iQ surfaces.",
+    sources: [
+      {
+        label: "Massachusetts Appraiser Board Adopts Ruling Requiring Repair Shops Keep Licensed Appraisers",
+        publisher: "CollisionWeek, Jul 23, 2026",
+        url: "https://collisionweek.com/2026/07/23/massachusetts-appraiser-board-adopts-ruling-requiring-repair-shops-keep-licensed-appraisers/",
+        kind: "primary",
+      },
+    ],
+    tags: ["massachusetts", "autoappraisal", "collisionrepair", "insuranceclaim", "bodyshop"],
+    image: {
+      src: "/daily-iq/kb-019-massachusetts-appraiser-ruling.png",
+      alt: "The Daily iQ entry 19 card: Massachusetts Advisory Ruling 2026-1 requires a licensed appraiser, on staff or retained, behind every shop appraisal.",
+    },
+    cardSource: "Source: Massachusetts Auto Damage Appraiser Licensing Board, adopted Jul 14, 2026, via CollisionWeek, Jul 23, 2026.",
+  },
+  {
+    entryNumber: 20,
+    slug: "hyundai-scan-position-statement-required",
+    date: "2026-10-01",
+    category: "OEM position statements",
+    headline: "Hyundai changed one word in its collision repair position statement. The word was \"recommended.\"",
+    keyFigure: "Required",
+    keyFigureLabel: "Hyundai's position statement now requires, not recommends, pre- and post-repair scans",
+    summary: [
+      "Hyundai's collision repair position statement now reads \"required\": a pre-repair scan to surface diagnostic trouble codes before work begins — even with no warning light on the dash — and a post-repair scan to verify every system works before the car goes back to its owner. A Hyundai senior manager of wholesale parts sales operations said the change in wording is about repair quality, per Autobody News' coverage.",
+      "A position statement is the manufacturer's written word on what a proper repair includes. When a scan line gets struck from an estimate, this is the document a shop points to. The carmaker has already had the argument.",
+    ],
+    whyItMatters:
+      "Dating note: the Autobody News coverage of this update is dated July 23, 2025 — about 14 months old, not a 2026 story. The position statement itself is still Hyundai's current one; this is flagged for transparency about the source date, not because the substance is stale.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the OEM scan-requirement reference for Hyundai vehicles.",
+    sources: [
+      {
+        label: "Hyundai Updates Position Statement to Require Pre- and Post-Repair Scans",
+        publisher: "Autobody News, Jul 23, 2025",
+        url: "https://www.autobodynews.com/news/hyundai-updates-position-statement-to-require-pre-and-post-repair-scans",
+        kind: "primary",
+      },
+    ],
+    tags: ["hyundai", "adas", "collisionrepair", "diagnosticscan", "insuranceclaim"],
+    image: {
+      src: "/daily-iq/kb-020-hyundai-scan-required.png",
+      alt: "The Daily iQ entry 20 card: Hyundai's position statement changed \"recommended\" to \"required\" for pre- and post-repair diagnostic scans.",
+    },
+    cardSource: "Source: Hyundai Motor America, via Autobody News, Jul 23, 2025.",
+  },
+  {
+    entryNumber: 21,
+    slug: "parsons-v-commerce-insurance-acv-summary-judgment",
+    date: "2026-10-02",
+    category: "Total loss & valuation",
+    headline: "A policyholder challenged the insurer's total-loss math in court. The insurer won. Here's the useful part.",
+    keyFigure: "$10,258",
+    keyFigureLabel: "Commerce Insurance's total-loss valuation, upheld on summary judgment against a roughly $15,142 demand, Parsons v. Commerce Insurance",
+    summary: [
+      "In Parsons v. Commerce Insurance (Massachusetts Superior Court, decided March 13, 2026), the insurer valued a totaled 2014 Ford Focus at $10,258 by blending a vendor market valuation report (75%) with a published guide value (25%). The owner wanted about $15,142 and challenged the valuation method itself. The court granted the insurer summary judgment: the method followed the valuation factors state regulation requires, and the owner offered no expert evidence the car was worth more. An appeal was filed March 26, 2026, per Agency Checklists' April 6, 2026 coverage.",
+      "The lesson isn't that the method can't be challenged. It's that attacking the methodology in the abstract lost here, while nothing in the ruling stops a policyholder from answering the valuation report with real, verifiable comparable vehicles and a documented counter-value. Courts respond to inventory, not indignation.",
+    ],
+    whyItMatters:
+      "This is the losing argument to avoid and the winning one to use: don't argue the method is unfair in general — bring specific comparable listings that undercut the report's own comps.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the case-law reference behind Value iQ's guidance on contesting a total-loss valuation.",
+    sources: [
+      {
+        label: "Massachusetts ACV Ruling Upholds Total Loss Valuation",
+        publisher: "Agency Checklists, Apr 6, 2026",
+        url: "https://agencychecklists.com/2026/04/06/massachusetts-acv-total-loss-ruling-81089/",
+        kind: "primary",
+      },
+    ],
+    tags: ["totalloss", "actualcashvalue", "insuranceclaim", "caraccident", "knowyourrights"],
+    image: {
+      src: "/daily-iq/kb-021-parsons-v-commerce.png",
+      alt: "The Daily iQ entry 21 card: Parsons v. Commerce Insurance, Massachusetts Superior Court, March 13 2026 — insurer's blended ACV method upheld on summary judgment.",
+    },
+    cardSource: "Source: Agency Checklists, Apr 6, 2026.",
+  },
+  {
+    entryNumber: 22,
+    slug: "new-vehicle-atp-crosses-50k-august-2026",
+    date: "2026-10-03",
+    category: "Total loss & valuation",
+    headline: "The average new car sold for $50,089 in August. Your total-loss math just changed with it.",
+    keyFigure: "$50,089",
+    keyFigureLabel: "average new-vehicle transaction price, August 2026, per Kelley Blue Book — first month this year above $50,000",
+    summary: [
+      "Kelley Blue Book's August 2026 report puts the average new-vehicle transaction price at $50,089 — up 1.9% from a year earlier and the first month in 2026 above the $50,000 line. EVs averaged $54,813, and their premium over gas vehicles narrowed to 9.4%, from over 16% a year earlier, per Cox Automotive/KBB's September 10, 2026 release.",
+      "Higher transaction prices flow straight into claims: actual cash value on newer cars rises, which raises total-loss stakes; repair-versus-total decisions shift; and every percentage point of diminished value is worth more dollars on a $50,000 car than on last decade's $35,000 one.",
+    ],
+    whyItMatters:
+      "The size of the check follows the size of the market — a valuation that hasn't kept pace with rising transaction prices is worth checking against current data, not last year's.",
+    howCollisionIqUsesIt:
+      "Filed into the knowledge base as the dated market-price reference Value iQ reads against a total-loss valuation's replacement-cost assumptions.",
+    sources: [
+      {
+        label: "Kelley Blue Book Report: Average New-Vehicle Transaction Price Moves Back Above $50,000 in August",
+        publisher: "Cox Automotive, Sep 10, 2026",
+        url: "https://www.coxautoinc.com/insights/august-2026-atp-report/",
+        kind: "primary",
+      },
+    ],
+    tags: ["carprices", "totalloss", "diminishedvalue", "kbb", "insuranceclaim"],
+    image: {
+      src: "/daily-iq/kb-022-atp-crosses-50k.png",
+      alt: "The Daily iQ entry 22 card: average new-vehicle transaction price reaches $50,089 in August 2026, the first month this year above $50,000.",
+    },
+    cardSource: "Source: Kelley Blue Book, Sep 10, 2026.",
+  },
 ];
 
 /** Entries newest first — the order the page publishes them. */
