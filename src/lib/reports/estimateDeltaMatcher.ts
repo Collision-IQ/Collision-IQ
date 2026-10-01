@@ -579,6 +579,13 @@ export function tokenizeDescription(description: string): string[] {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]{2,})([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
+    // A dotted acronym is ONE word ("E.P.C." ≡ "epc", "L.E.D." ≡ "led").
+    // Split on its periods, every letter fell to the length filter below and
+    // the row had no tokens at all — the parser then discarded it. RO 22299:
+    // the carrier's "152 # E.P.C. 1 3.50" vanished, its line prices fell
+    // $3.50 short of the printed totals, and the Appraisal Dispute Report
+    // was refused as an incomplete line read.
+    .replace(/\b[a-z](?:\.[a-z])+\b\.?/g, (acronym) => acronym.replace(/\./g, ""))
     .replace(/\+\d+%/g, " ")
     // Canonicalize alpha↔digit transitions ("gle350" ≡ "gle 350") so glued and
     // spaced extractions of the same row produce identical token sets.

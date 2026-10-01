@@ -73,6 +73,7 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
         rows: input.rows.higher,
         totals: higher.totals,
         userCategory: higher.userCategory,
+        userCategories: higher.userCategories,
         text: input.higherText,
       })),
       carrier: redact(estimateFromDeltaRows({
@@ -81,6 +82,7 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
         rows: input.rows.lower,
         totals: lower.totals,
         userCategory: lower.userCategory,
+        userCategories: lower.userCategories,
         text: input.lowerText,
       })),
       pairs: pairsFromDeltas(input.rows.deltas),

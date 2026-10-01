@@ -32,7 +32,9 @@ const TRAILING_PART_NUMBER = /\s([A-Za-z]{0,3}\d{6,}-?[A-Za-z0-9]{0,3})$/;
 
 export function labelCat(label: string): LaborCat {
   if (/alum|steel\s+repair/i.test(label)) return "aluminum";
-  if (/struct/i.test(label)) return "structural";
+  // "Bonded Or Welded Panel Replace" (a CCC user-defined category, RO 22299)
+  // is structural panel work, priced like it.
+  if (/struct|weld|bond/i.test(label)) return "structural";
   if (/frame/i.test(label)) return "frame";
   if (/mech/i.test(label)) return "mechanical";
   if (/paint|refinish/i.test(label)) return "paint";
@@ -40,9 +42,12 @@ export function labelCat(label: string): LaborCat {
   return "other";
 }
 const LABOR_LABEL = /labor|repair|refinish|frame|mech|struct|alum|diag|electric|glass/i;
+const NON_LABOR_HOURS_BASIS = /suppl|material/i;
 const STANDARD_LABOR = /^(body|paint|refinish|mechanical|frame|structural|diagnostic|electrical|glass)\b/i;
 
-export type TotalsRead = { ok: true; totals: EstimateTotals; userCategory: LaborCat } | { ok: false; reason: string };
+export type TotalsRead =
+  | { ok: true; totals: EstimateTotals; userCategory: LaborCat; userCategories: LaborCat[] }
+  | { ok: false; reason: string };
 
 /** One side's totals from the reconciliation the Forensic report printed. */
 export function totalsFromReconciliation(reconciliation: ForensicReconciliation, side: "higher" | "lower"): TotalsRead {
@@ -71,7 +76,11 @@ export function totalsFromReconciliation(reconciliation: ForensicReconciliation,
       totals.paintSupplies = { hours: hours ?? 0, rate: rate ?? 0, cost };
     } else if (/^parts$/i.test(row.category.trim())) {
       totals.parts = round2(totals.parts + cost);
-    } else if (LABOR_LABEL.test(row.category) && hours !== null && rate !== null) {
+    } else if (hours !== null && rate !== null && (LABOR_LABEL.test(row.category) || !NON_LABOR_HOURS_BASIS.test(row.category))) {
+      // A category printed as hours @ rate is labor whatever the shop named
+      // it; only materials and supplies print an hours basis without being
+      // labor. Matching labels alone booked RO 22299's "Bonded Or Welded
+      // Panel Replace 24.5 hrs @ $135" as parts money.
       if (own !== null) totals.labor.push({ cat: labelCat(row.category), label: row.category, hours, rate, cost });
     } else {
       // Miscellaneous, sublet, and any flat-priced category with no hours basis.
@@ -79,7 +88,13 @@ export function totalsFromReconciliation(reconciliation: ForensicReconciliation,
     }
   }
   const userCategories = totals.labor.filter((l: LaborTotal) => !STANDARD_LABOR.test(l.label.trim()));
-  return { ok: true, totals, userCategory: userCategories.length === 1 ? userCategories[0].cat : "other" };
+  return {
+    ok: true,
+    totals,
+    userCategory: userCategories.length === 1 ? userCategories[0].cat : "other",
+    // In print order: CCC's labor-category digit N on a line names the Nth.
+    userCategories: userCategories.map((l) => l.cat),
+  };
 }
 
 export interface LineAnnotation {
@@ -182,6 +197,8 @@ export function estimateFromDeltaRows(params: {
   rows: EstimateDeltaRow[];
   totals: EstimateTotals;
   userCategory: LaborCat;
+  /** Every user-defined category in print order; digit N on a line is the Nth. */
+  userCategories?: LaborCat[];
   text: string;
 }): Estimate {
   const annotations = lineAnnotationsFromText(params.text);
@@ -229,7 +246,11 @@ export function estimateFromDeltaRows(params: {
       const escape = (n: number) => n.toFixed(1).replace(".", "\\.");
       const tail = row.paint ? escape(row.paint) : "";
       const digit = annotation.rowText.replace(/\s+/g, "").match(new RegExp(`${escape(hours)}([1-4])${tail}$`));
-      if (digit) laborCat = params.userCategory;
+      if (digit) {
+        laborCat = (params.userCategories?.length ?? 0) > 1
+          ? params.userCategories![Number(digit[1]) - 1] ?? params.userCategory
+          : params.userCategory;
+      }
     }
     return {
       line: lineNumber,
