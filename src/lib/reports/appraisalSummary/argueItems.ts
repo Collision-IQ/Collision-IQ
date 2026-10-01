@@ -92,6 +92,17 @@ export function argueItems(params: {
     if (flag.kind === "duplicateOperation") (flag.lines.shop ?? []).slice(1).forEach((line) => claimed.add(line));
   }
 
+  // Equal hours with a dollar difference is priced lines (sublet, parts), not
+  // labor coding: RO 22335's ADAS group was 0.5 hr each side and $764.45 apart.
+  const priceOf = (lines: number[], byLine: Map<number, EstimateLine>) =>
+    round2(lines.reduce((sum, line) => sum + (byLine.get(line)?.price ?? 0), 0));
+  const pricedDetail = (group: GroupDelta): string | null => {
+    const ours = priceOf(group.shopLines, shopLine);
+    const theirs = priceOf(group.carrierLines, carrierLine);
+    if (ours === theirs) return null;
+    return `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr: the same hours. The difference is in the priced lines: ours ${money(ours)}, theirs ${theirs > 0 ? money(theirs) : "none priced"}.`;
+  };
+
   // Strong — the carrier's own exclusion note on an equivalence group.
   for (const group of groups) {
     const diff = round2(group.shopValue - group.carrierValue);
@@ -101,9 +112,13 @@ export function argueItems(params: {
     const detail = excluded
       ? `${sides}. Their own line says the time ${group.exclusions[0].toLowerCase()}.`
       : group.shopHours === 0 && group.carrierHours === 0
-        ? `Ours ${money(group.shopValue)}, theirs ${money(group.carrierValue)} for the same sublet; the invoices settle it.`
+        ? group.carrierValue === 0 && group.carrierLines.length > 0
+          ? // Written but not priced ("Subl Pre-repair scan 1 m", RO 22335):
+            // open for invoice, which is not a $0.00 allowance.
+            `Ours ${money(group.shopValue)}; theirs lists the same sublet with no price (${group.carrierLines.map((line) => `L${line}`).join(", ")}), left open for invoice. The invoices settle it.`
+          : `Ours ${money(group.shopValue)}, theirs ${money(group.carrierValue)} for the same sublet; the invoices settle it.`
         : group.shopHours === group.carrierHours
-          ? `${sides}: the same hours, coded to a different labor category on each sheet.`
+          ? pricedDetail(group) ?? `${sides}: the same hours, coded to a different labor category on each sheet.`
           : `${sides} for the same work written under different names.`;
     items.push({
       strength: excluded ? "Strong" : "Needs proof",

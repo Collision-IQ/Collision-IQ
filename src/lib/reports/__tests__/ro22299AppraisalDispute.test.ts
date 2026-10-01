@@ -169,3 +169,40 @@ describe("D2 — every hours-at-rate category is labor", () => {
     ]);
   });
 });
+
+/**
+ * D3 — the text lane read the SOR's unpriced manual lines as $10.00 and its
+ * qty-0 R&I lines as $100.00. CCC glues qty, price and hours with no space
+ * ("Service mode entry disable10.000.2M0.0" is qty 1, $0.00, 0.2 M, 0.0), and
+ * the glued-run splitter refuses to manufacture a $0.00 price, so the run
+ * stayed whole. The typed word layer reads every one of these as $0.00.
+ */
+describe("D3 — a glued qty + $0.00 before the hours is not a $10.00 price", () => {
+  const read = (raw: string) => {
+    const row = parseCccEstimateRow(raw);
+    return row && { qty: row.qty, price: row.price, labor: row.labor, paint: row.paint, description: row.description };
+  };
+
+  it.each([
+    ["148#S01Service mode entry disable10.000.2M0.0", { qty: 1, price: 0, labor: 0.2, paint: 0, description: "Service mode entry disable" }],
+    ["147#S01Clean compound sludge debris jambs 10.000.50.0", { qty: 1, price: 0, labor: 0.5, paint: 0, description: "Clean compound sludge debris jambs" }],
+    ["89#Rope Glass10.00T  0.30.0", { qty: 1, price: 0, labor: 0.3, paint: 0, description: "Rope Glass" }],
+    ["133*S01SublCalibrate surround view camera10.00m0.00.0", { qty: 1, price: 0, labor: 0, paint: 0, description: "Calibrate surround view camera" }],
+    ["23S01ReplHigh voltage system deactivate/activate 10.00m0.5M0.0", { qty: 1, price: 0, labor: 0.5, paint: 0, description: "High voltage system deactivate/activate" }],
+    ["45S01R&IRT Upper molding type 100.000.40.0", { qty: 0, price: 0, labor: 0.4, paint: 0, description: "RT Upper molding type 1" }],
+  ])("%s", (raw, expected) => {
+    expect(read(raw)).toEqual(expected);
+  });
+
+  it("leaves real prices alone", () => {
+    // No hours after the run: a price (RO 22140).
+    expect(read("45S01Urethane Kit20.00")).toMatchObject({ price: 20 });
+    // A qty printed in front of the run: the run is the price.
+    expect(read("45# S01Urethane Kit120.00T")).toMatchObject({ qty: 1, price: 20 });
+    expect(read("144#S01Cavity Wax115.40T 0.20.0")).toMatchObject({ qty: 1, price: 15.4, labor: 0.2 });
+    // A spaced qty before a $10.00 / $100.00 / $1,200.00 price.
+    expect(read("12 Repl Bumper cover 1 10.00 0.5 0.0")).toMatchObject({ qty: 1, price: 10, labor: 0.5 });
+    expect(read("12 Repl Bumper cover 1 100.00 0.5 0.0")).toMatchObject({ qty: 1, price: 100, labor: 0.5 });
+    expect(read("12 Repl Bumper cover 1 1,200.00 0.5 0.0")).toMatchObject({ qty: 1, price: 1200, labor: 0.5 });
+  });
+});

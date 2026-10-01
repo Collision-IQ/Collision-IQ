@@ -120,6 +120,8 @@ export interface GapLedger {
   /** Rate gap left open after any carrier rate adjustment. 0 when settled. */
   laborRate: number;
   paintMaterials: number;
+  /** Hours-priced supplies other than paint (Body Supplies), ours − theirs. 0 when neither prints any. */
+  otherMaterials: number;
   /** Parts + sublet + supplies, with the carrier's rate adjustment removed. */
   nonLaborNet: number;
   tax: number;
@@ -128,6 +130,10 @@ export interface GapLedger {
 }
 
 export class LedgerNotClosedError extends Error {}
+
+export function otherMaterialsCost(estimate: Estimate): number {
+  return round2((estimate.totals.otherMaterials ?? []).reduce((sum, m) => sum + m.cost, 0));
+}
 
 export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOptions = {}): GapLedger {
   const rate = resolveRateBasis(shop, carrier, opts);
@@ -143,11 +149,12 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
   const laborHoursDollars = round2(printedLabor(shop) - carrierAtShopRates);
   const laborRate = round2(rate.impliedAdjustment - rate.adjustmentAmount);
   const paintMaterials = round2(shop.totals.paintSupplies.cost - carrier.totals.paintSupplies.cost);
+  const otherMaterials = round2(otherMaterialsCost(shop) - otherMaterialsCost(carrier));
   const carrierNonLabor = carrier.totals.parts + carrier.totals.misc - rate.adjustmentAmount;
   const nonLaborNet = round2(shop.totals.parts + shop.totals.misc - carrierNonLabor);
   const tax = round2(shop.totals.tax - carrier.totals.tax);
   const gap = round2(shop.totals.grandTotal - carrier.totals.grandTotal);
-  const sum = round2(laborHoursDollars + laborRate + paintMaterials + nonLaborNet + tax);
+  const sum = round2(laborHoursDollars + laborRate + paintMaterials + otherMaterials + nonLaborNet + tax);
   if (Math.abs(sum - gap) > 0.01) {
     throw new LedgerNotClosedError(
       `the ledger sums to ${sum.toFixed(2)} but the printed grand totals differ by ${gap.toFixed(2)} (${shop.fileName} vs ${carrier.fileName})`
@@ -165,6 +172,7 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     },
     laborRate,
     paintMaterials,
+    otherMaterials,
     nonLaborNet,
     tax,
     closes: true,

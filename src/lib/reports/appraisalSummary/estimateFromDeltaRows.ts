@@ -74,6 +74,13 @@ export function totalsFromReconciliation(reconciliation: ForensicReconciliation,
     const rate = side === "higher" ? row.higherRate : row.lowerRate;
     if (/paint\s*(supplies|materials)|refinish\s*materials/i.test(row.category)) {
       totals.paintSupplies = { hours: hours ?? 0, rate: rate ?? 0, cost };
+    } else if (NON_LABOR_HOURS_BASIS.test(row.category) && hours !== null && rate !== null) {
+      // "Body Supplies 10.1 hrs @ $3.00" (RO 22335): priced from hours like
+      // paint supplies, with no line of its own. Booked in misc it made the
+      // strict line guard refuse the report as $30.30 of unread lines.
+      if (own !== null) {
+        totals.otherMaterials = [...(totals.otherMaterials ?? []), { label: row.category, hours, rate, cost }];
+      }
     } else if (/^parts$/i.test(row.category.trim())) {
       totals.parts = round2(totals.parts + cost);
     } else if (hours !== null && rate !== null && (LABOR_LABEL.test(row.category) || !NON_LABOR_HOURS_BASIS.test(row.category))) {

@@ -740,12 +740,41 @@ export function explodeGluedRow(rawText: string): string {
   // the description to the part/qty/price run ("+25%~41035906311,223.75…").
   text = text.replace(/~/g, " ");
 
+  // A one-digit qty glued to a $0.00 price that runs into the hours cells,
+  // directly or across a tax/marker letter ("Service mode entry
+  // disable10.000.2M0.0" = qty 1, $0.00, 0.2 M, 0.0; "Rope Glass10.00T
+  // 0.30.0"; "camera10.00m0.00.0"). A real $10.00 on a CCC row prints its
+  // qty too ("110.00…"), so a qty-less "10.00" before the hours is qty +
+  // $0.00 — read whole, RO 22299's SOR billed $10.00 on unpriced manual
+  // lines. CCC prints no leading-zero price either, so a glued "00.00" is
+  // the R&I qty 0 + $0.00 ("molding type 100.000.40.0" is "type 1", qty 0,
+  // $0.00, 0.4 hr — not $100.00). Without hours after it ("Urethane
+  // Kit20.00", RO 22140) the run is a price and is left alone.
+  // Never after a number token: a spaced "1 10.00 0.5" already prints its qty
+  // and its $10.00 is a price.
+  const NOT_AFTER_A_NUMBER = String.raw`(?<![\d.,])(?<![\d.,]\s)`;
+  // The marker letter, when present, is consumed and re-spaced so the price
+  // and hours cells both stand alone ("10.00m0.5M" → "1 0.00 m 0.5M").
+  const MARKER_THEN_HOURS = String.raw`\s?(?:([mTX])\s?)?(?=-?\d{1,2}\.\d)`;
+  const respace = (marker: string | undefined) => (marker ? ` ${marker} ` : " ");
+  text = text
+    .replace(
+      new RegExp(String.raw`${NOT_AFTER_A_NUMBER}([1-9])(0\.00)${MARKER_THEN_HOURS}`, "g"),
+      (_match, qty: string, price: string, marker?: string) => `${qty} ${price}${respace(marker)}`
+    )
+    .replace(
+      new RegExp(String.raw`${NOT_AFTER_A_NUMBER}(\d)0(0\.00)${MARKER_THEN_HOURS}`, "g"),
+      (_match, descDigit: string, price: string, marker?: string) => `${descDigit} 0 ${price}${respace(marker)}`
+    );
+
   // The labor-TYPE letter glues onto the hours it qualifies ("Pre-repair
   // scan1.0D", "Reset electrical components10.3M"). Unsplit, the hours cell
   // never parses and the row carries no hours at all — RO 20792's two scan
   // shortfalls (1.0 vs 0.5) vanished this way. Uppercase only: lowercase
   // "m"/"s" are component markers that print BEFORE the hours.
   text = text.replace(/(\d\.\d)([DEFGMS])(?=\s|$)/g, "$1 $2");
+  // Also when the paint-hours cell follows with no space ("0.5M0.0").
+  text = text.replace(/(\d\.\d)([DEFGMS])(?=-?\d{1,2}\.\d(?:\s|$))/g, "$1 $2 ");
   // The description's last word glues onto a lone hours cell ("Pre-repair
   // scan1.0", "front bumper2.5") when the line prints no quantity. One digit
   // before the decimal only: "color10.5" is a quantity welded to hours and

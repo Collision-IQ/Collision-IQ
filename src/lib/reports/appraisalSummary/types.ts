@@ -49,6 +49,13 @@ export interface EstimateTotals {
   /** Labor categories printed with hours AND a rate. */
   labor: LaborTotal[];
   paintSupplies: { hours: number; rate: number; cost: number };
+  /**
+   * Supplies and materials other than paint that the totals block prices as
+   * hours × rate ("Body Supplies 10.1 hrs @ $3.00"). No estimate line carries
+   * them, so they are kept out of `misc` (whose dollars the lines must
+   * reproduce). Absent when the document prints none.
+   */
+  otherMaterials?: Array<{ label: string; hours: number; rate: number; cost: number }>;
   subtotal: number;
   tax: number;
   /** Grand Total / Total Cost of Repairs — never the net-of-deductible figure. */
