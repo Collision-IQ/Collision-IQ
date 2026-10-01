@@ -172,6 +172,7 @@ export function assignUnits(params: {
   for (const s of restShop()) add(s.desc, [s], []);
   for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(c.desc, [], [c]);
   if (ledger.paintMaterials !== 0) units.push({ label: "Paint materials", shopLines: [], carrierLines: [], diff: ledger.paintMaterials });
+  if (ledger.otherMaterials !== 0) units.push({ label: "Other materials", shopLines: [], carrierLines: [], diff: ledger.otherMaterials });
   if (ledger.laborRate !== 0) units.push({ label: "Labor rate", shopLines: [], carrierLines: [], diff: ledger.laborRate });
   return { units, shopToCarrier };
 }

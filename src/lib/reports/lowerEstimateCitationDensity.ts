@@ -378,7 +378,9 @@ function appendIndex(
     }.`
   );
   if (L.laborRate !== 0) write(`Labor rate still open: ${money(L.laborRate)}.`);
-  write(`Paint materials: ${money(L.paintMaterials)}. Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`);
+  write(
+    `Paint materials: ${money(L.paintMaterials)}.${L.otherMaterials !== 0 ? ` Other materials: ${money(L.otherMaterials)}.` : ""} Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`
+  );
   if (model.shortPay) {
     write(
       `Gross: this estimate short-pays ${money(model.shortPay.shortPaid)} of our lines and carries ${money(model.shortPay.carrierOver)} that ours does not or pays more on; with tax that is the ${money(L.gap)} difference.`

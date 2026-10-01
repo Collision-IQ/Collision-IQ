@@ -453,6 +453,11 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
       ? `, which is the ${rate(materialsRate.shopRate - materialsRate.carrierRate)} rate (${money(materialsRate.dollars)}) plus ${hr(materialsHours)} × ${rate(ps.rate)} (${money(materialsHours * ps.rate)})`
       : "";
   rows.push({ cells: ["Paint materials", money(L.paintMaterials), `${money(ps.cost)} − ${money(pc.cost)}${materialsSplit}.`] });
+  if (L.otherMaterials !== 0) {
+    const printed = (e: Estimate) =>
+      (e.totals.otherMaterials ?? []).map((m) => `${m.label} ${money(m.cost)}`).join(" + ") || money(0);
+    rows.push({ cells: ["Other materials", money(L.otherMaterials), `${printed(shop)} − ${printed(carrier)}.`] });
+  }
   const largest = [
     ...items.filter((i) => i.hours === 0 && i.strength === "Strong").map((i) => `${i.title.toLowerCase()} ${money(i.value)} on ours`),
     ...facts.checkFirst
@@ -486,8 +491,9 @@ export function buildOwnerNote(model: PlainSummaryModel): string {
   const share = L.gap > 0 ? Math.round((L.laborHours.dollars / L.gap) * 100) : 0;
   const drivers: string[] = [];
   if (L.laborHours.diff > 0 && share > 0) {
+    // "Most" only when it is: RO 22335's labor hours are 10% of the gap.
     drivers.push(
-      `Most of that difference (${share}%) is labor time: we wrote ${L.laborHours.diff.toFixed(1)} more hours of repair work than their appraiser did.`
+      `${share >= 50 ? `Most of that difference (${share}%) is labor time` : `Labor time accounts for ${share}% of that difference`}: we wrote ${L.laborHours.diff.toFixed(1)} more hours of repair work than their appraiser did.`
     );
   }
   if (facts.notParts && facts.notRates) {
