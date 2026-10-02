@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -797,49 +798,16 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   // SUBTOTALS rule — so continuation pages keep their region instead of
   // losing every anchor.
   const FOOTER_MARGIN = 40;
-  // Page chrome is the SAME line at the same y (±4pt) on several pages: the
-  // footer's "<date> <time> <id> Page N" and the header's title, RO and
-  // vehicle lines. Digits are folded so the page number and stamp do not
-  // matter; the words must. Position alone is not chrome — RO 22279's shop
-  // post-TD print has a table row ("black", y 642), the Sales Tax row and a
-  // legal paragraph in the same 8pt band on three pages, and reading that band
-  // as footer cut off lines 31-33 ($642.05 skid plate among them).
-  const chromeKey = (line: PdfTextLine) =>
-    `${Math.round(line.y / 8)}|${line.text.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase()}`;
-  // Footer chrome: such a line on 3+ pages in the bottom fifth.
-  const bottomBandPages = new Map<string, Set<number>>();
-  for (const [pageNumber, pageLines] of byPage) {
-    for (const line of pageLines) {
-      if (line.y < line.pageHeight * 0.8) continue;
-      const key = chromeKey(line);
-      const pages = bottomBandPages.get(key) ?? new Set<number>();
-      if (!pages.size) bottomBandPages.set(key, pages);
-      pages.add(pageNumber);
-    }
-  }
-  const footerBuckets = [...bottomBandPages.entries()]
-    .filter(([, pages]) => pages.size >= 3)
-    .map(([key]) => Number(key.split("|")[0]));
-  const footerTopY = footerBuckets.length ? Math.min(...footerBuckets) * 8 - 4 : null;
-  // Header chrome: such a line on 2+ pages in the top fifth ("Preliminary
-  // Estimate", "RO Number: …", the vehicle line). The first table row of
-  // every continuation page shares a y, never the text, so it is not chrome.
-  const topBandPages = new Map<string, Set<number>>();
-  for (const [pageNumber, pageLines] of byPage) {
-    for (const line of pageLines) {
-      if (line.y > line.pageHeight * 0.2) continue;
-      const key = chromeKey(line);
-      const pages = topBandPages.get(key) ?? new Set<number>();
-      if (!pages.size) topBandPages.set(key, pages);
-      pages.add(pageNumber);
-    }
-  }
-  const headerChrome = new Set([...topBandPages.entries()].filter(([, pages]) => pages.size >= 2).map(([key]) => key));
+  const chromePages = countPageChromeRepeats(lines);
+  // Footer chrome: a repeated line (see countPageChromeRepeats) on 3+ pages in
+  // the bottom fifth of the page. Repetition is by TEXT at the same y, not by
+  // y alone: CCC prints line items on a fixed pitch, so the last rows of every
+  // full page also share a y, and a position-only test read them as footer and
+  // cut the last 2-4 rows off every full page.
+  const footerLines = lines.filter((line) => line.y >= line.pageHeight * 0.8 && (chromePages.get(line) ?? 0) >= 3);
+  const footerTopY = footerLines.length ? Math.min(...footerLines.map((line) => line.y)) - 4 : null;
   let carriedTop: number | null = null;
-  // A print-once table is OPEN from its header until its SUBTOTALS rule; only
-  // then does a header-less page continue it under its own chrome. Pages after
-  // a per-page-header table closed (recall notices, legal text) keep their
-  // carried top.
+  /** A column header opened the table and no SUBTOTALS rule has closed it. */
   let tableOpen = false;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
@@ -851,27 +819,26 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
           (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
       )
       .sort((a, b) => a.y - b.y)[0];
-    if (header) carriedTop = header.y + header.height;
+    if (header) {
+      carriedTop = header.y + header.height;
+      tableOpen = true;
+    }
     if (carriedTop === null) continue; // pages before any header: no region
-    // A continuation page with no column header of its own starts its table
-    // under its own page chrome, not at the y where an earlier page printed
-    // the header. Carrying that y down demoted every row above it: RO 22279's
-    // shop estimate prints the header once, at y 92, and lost lines 34 and 35
-    // (y 80.5, 94.0 on the next page; $1,006.99 of parts) as guide rows.
-    if (header) tableOpen = true;
-    const headerChromeBottom = header || !tableOpen
-      ? null
-      : pageLines
-          .filter((line) => headerChrome.has(chromeKey(line)))
-          .reduce<number | null>((bottom, line) => Math.max(bottom ?? 0, line.y + line.height), null);
-    const top = header
-      ? header.y + header.height
-      : headerChromeBottom !== null
-        ? Math.min(carriedTop, headerChromeBottom)
-        : carriedTop;
+    let top = header ? header.y + header.height : carriedTop;
+    if (!header && tableOpen) {
+      // A continuation page that prints no column header of its own starts
+      // its rows right under the repeated page header, which is shorter than
+      // the header page's page-header-plus-column-header block. The carried
+      // top therefore sits a row or two BELOW this page's first rows. Those
+      // rows begin where this page's repeated chrome (title, RO/claim line,
+      // vehicle line) ends; the chrome itself stays outside the region.
+      const chromeAbove = pageLines.filter((line) => line.y < carriedTop! - 2 && (chromePages.get(line) ?? 0) >= 2);
+      if (chromeAbove.length) top = Math.min(top, Math.max(...chromeAbove.map((line) => line.y + line.height)));
+    }
     const subtotals = pageLines
       .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];
+    if (subtotals) tableOpen = false;
     const chromeBottom = Math.min(
       pageHeight - FOOTER_MARGIN,
       footerTopY !== null && footerTopY > top ? footerTopY - 2 : pageHeight - FOOTER_MARGIN
@@ -884,9 +851,145 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     // print-once producers the SUBTOTALS rule ends the table for good.
     if (subtotals && !header) carriedTop = null;
     if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
-    if (subtotals) tableOpen = false;
   }
   return regions;
+}
+
+/**
+ * Page chrome is text the producer prints on every page: the page header
+ * (title, RO/claim number, the vehicle line) and the footer (print stamp,
+ * "Page N"). For each line, the number of pages that print the SAME text at
+ * the same y (±4pt), counting its own page. Digits are masked so a page
+ * counter or print time does not make the footer unique. Position alone is
+ * not chrome: line items sit on a fixed pitch, so rows share a y across pages
+ * too. Two rows with the same masked text at the same y on different pages
+ * are rare, and the cost is only that the row stays outside the region, as
+ * every such row did before chrome was measured by text.
+ */
+function countPageChromeRepeats(lines: PdfTextLine[]): Map<PdfTextLine, number> {
+  const byText = new Map<string, PdfTextLine[]>();
+  for (const line of lines) {
+    const key = line.text.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+    if (!key) continue;
+    const group = byText.get(key) ?? [];
+    if (!group.length) byText.set(key, group);
+    group.push(line);
+  }
+  const repeats = new Map<PdfTextLine, number>();
+  for (const group of byText.values()) {
+    for (const line of group) {
+      const pages = new Set(group.filter((other) => Math.abs(other.y - line.y) <= 4).map((other) => other.pageNumber));
+      repeats.set(line, pages.size);
+    }
+  }
+  return repeats;
+}
+
+/**
+ * The line-number column, measured per document from the print itself. A
+ * description that wraps can start its second line with a digit ("3 Ft" under
+ * "Trim Masking Tape-3M 06347-Per", "6.5mm", "8.0x5-0.9"), and read as text
+ * alone that digit is a line number. Geometrically it is not: printed line
+ * numbers sit in the first column at the left margin, while the wrap starts in
+ * the description column.
+ *
+ * Samples are lines whose first word is a bare 1-4 digit token followed by
+ * more text. The column is the densest run of their left edges, where starts
+ * closer than one text height belong together: line numbers are right-aligned,
+ * so numbers of different widths start a digit or two apart, and the next
+ * column starts many ems to the right. Its extent is the run's right edge.
+ *
+ * Returns null, leaving the text-only reading in place, when the lines carry
+ * no measured words (stored-text synthetic lines), when fewer than three
+ * starts form the run, or when the run does not hold most of the starts.
+ */
+function measureLineNumberColumn(lines: PdfTextLine[]): { right: number; em: number } | null {
+  const starts = lines
+    .filter((line) => line.words.length > 1 && /^\d{1,4}$/.test(line.words[0].text.trim()))
+    .map((line) => line.words[0])
+    .sort((a, b) => a.x - b.x);
+  if (!starts.length) return null;
+  const heights = starts.map((word) => word.height).sort((a, b) => a - b);
+  const em = heights[Math.floor(heights.length / 2)];
+  let column: PdfWord[] = [];
+  let run: PdfWord[] = [];
+  for (const word of starts) {
+    if (run.length && word.x - run[run.length - 1].x > em) run = [];
+    run.push(word);
+    if (run.length > column.length) column = run;
+  }
+  if (column.length < 3 || column.length * 2 <= starts.length) return null;
+  return { right: Math.max(...column.map((word) => word.x + word.width)), em };
+}
+
+/**
+ * True when a measured line starts more than one em right of the line-number
+ * column: whatever digits it opens with, it began in a later column and is
+ * not a row's line number.
+ */
+function startsPastLineNumberColumn(line: PdfTextLine, column: { right: number; em: number } | null): boolean {
+  if (!column || !line.words.length) return false;
+  return line.words[0].x > column.right + column.em;
+}
+
+/**
+ * Where a digit-led wrap's text belongs in the row it continues: at the end of
+ * the row's description cell, ahead of its value columns, which is the order
+ * the text layer prints ("…06347-Per 3 Ft 1 7.08 T"). Appended after the
+ * values instead, the wrap's digits read as columns: "…06347-Per 1 7.04 T
+ * 3 Ft" parses 3.0 labor hours. Measured from the row's own words: the cell
+ * opens at the column where the wrap starts and closes at the first gap wider
+ * than one em, the whitespace before the part-number, quantity or price
+ * column. Returns the character offset in `rowText` where the cell ends, or
+ * null when the row has no word at that column (the wrap is then appended).
+ */
+function measureDescriptionCellEnd(row: PdfTextLine, rowText: string, cellLeft: number, em: number): number | null {
+  const words = row.words;
+  let last = words.findIndex((word) => Math.abs(word.x - cellLeft) <= em / 2);
+  if (last < 0) return null;
+  while (last + 1 < words.length && words[last + 1].x - (words[last].x + words[last].width) <= em) last += 1;
+  const cell = words
+    .slice(0, last + 1)
+    .map((word) => word.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return rowText.startsWith(cell) ? cell.length : null;
+}
+
+/**
+ * A row anchor's id. A printed line number names the row
+ * ("doc:p3:47:estimate_line"). An anchor with no line number (section,
+ * totals, supplier and guide rows, unnumbered notes) is named by its own
+ * printed text, hashed, never by where it falls in the anchor list.
+ *
+ * The id used to take the anchor's list position instead. Adding or dropping
+ * any anchor renumbered every unnumbered anchor after it, so a finding that
+ * carried an id from an earlier extraction could resolve to a different row
+ * without tripping the stale-anchor check, and the position could equal a
+ * printed number on the same page: the cover page's "4 Wheel Drive…" line 4
+ * and the fourth anchor were both p1:4:guide_row.
+ *
+ * The text key starts with a letter, so it can never equal a line number.
+ * The same text printed twice on one page as the same anchor type takes an
+ * occurrence suffix in reading order (".2", ".3"), which changes only if a
+ * copy of that same text is added or removed above it.
+ */
+function buildRowAnchorId(
+  documentId: string,
+  line: PdfTextLine,
+  lineNumber: string | null,
+  type: EstimateRowAnchorType,
+  unnumberedIds: Set<string>
+): string {
+  if (lineNumber) return `${documentId}:p${line.pageNumber}:${lineNumber}:${type}`;
+  const key = `t${createHash("sha1").update(line.normalizedText).digest("hex").slice(0, 10)}`;
+  let anchorId = `${documentId}:p${line.pageNumber}:${key}:${type}`;
+  for (let occurrence = 2; unnumberedIds.has(anchorId); occurrence += 1) {
+    anchorId = `${documentId}:p${line.pageNumber}:${key}.${occurrence}:${type}`;
+  }
+  unnumberedIds.add(anchorId);
+  return anchorId;
 }
 
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
@@ -897,11 +1000,23 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * belongs to the note, never to the row description. */
   let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
-  const usedAnchorIds = new Set<string>();
+  const lineNumberColumn = measureLineNumberColumn(lines);
+  /** The printed line each operation anchor was opened from. */
+  const anchorLines = new Map<EstimateRowAnchor, PdfTextLine>();
+  /** Where the next digit-led wrap goes in an anchor's rowText, so a second
+   * one lands after the first instead of ahead of it. */
+  const wrapInsertOffsets = new Map<EstimateRowAnchor, number>();
+  /** Ids already given to anchors with no line number (see buildRowAnchorId). */
+  const unnumberedAnchorIds = new Set<string>();
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
     if (isGenericOrMalformedAnchorText(line.text)) continue;
-    const lineNumber = extractLineNumber(line.text);
+    // A leading number counts as a line number only when the line starts in
+    // the measured line-number column. A digit-led wrap that starts in the
+    // description column carries no line number and continues the row above.
+    const printedNumber = extractLineNumber(line.text);
+    const wrappedPastLineNumberColumn = printedNumber !== null && startsPastLineNumberColumn(line, lineNumberColumn);
+    const lineNumber = wrappedPastLineNumberColumn ? null : printedNumber;
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
     // The running section may only advance on a header that sits INSIDE the
@@ -924,23 +1039,22 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // operation-type anchors may only exist INSIDE a region. A line-numbered
     // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
     // or below the SUBTOTALS rule is structurally non-anchorable.
-    if (
-      tableRegions.size > 0 &&
-      (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")
-    ) {
-      const region = tableRegions.get(line.pageNumber);
-      const inRegion = region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false;
-      if (!inRegion) type = "guide_row";
+    const region = tableRegions.get(line.pageNumber);
+    const inRegion = tableRegions.size === 0 || (region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false);
+    if (!inRegion && (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")) {
+      type = "guide_row";
     }
 
-    // A line below the table (SUBTOTALS, the ESTIMATE TOTALS block, legal
-    // text) never continues a row inside it: RO 20766's last shop row
-    // absorbed its whole totals block once its page's region was measured.
-    const continuationRegion = tableRegions.get(line.pageNumber);
-    const insideTable =
-      tableRegions.size === 0 ||
-      (continuationRegion !== undefined && line.y >= continuationRegion.top - 2 && line.y <= continuationRegion.bottom + 2);
-    if (!lineNumber && insideTable && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+    // Nor does text outside the region continue a row: the last row above the
+    // SUBTOTALS rule must not absorb a totals block the print does not label
+    // in words the totals test knows (an OCR'd "ESTIMATETOTALS").
+    if (
+      inRegion &&
+      !lineNumber &&
+      previousEstimateRow &&
+      line.pageNumber === previousEstimateRow.pageNumber &&
+      shouldAttachContinuationLine(line, type, { digitLedWrap: wrappedPastLineNumberColumn })
+    ) {
       // A NOTE wraps. Its second line carries no "Note:" prefix of its own
       // ("Note: PARTS: … LABOR:" / "Time includes R&R grommets and gasket."),
       // so testing that line in isolation reads it as row description and the
@@ -948,10 +1062,19 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       // "LT Tail lamp assy Time includes R&R grommets and gasket." Anything
       // continuing a line that was itself note payload is note payload.
       const asNote: boolean = lastWasNoteLine || type === "line_note" || isNoteContinuation(line.text);
+      const parentLine = anchorLines.get(previousEstimateRow);
+      const insertAt =
+        wrappedPastLineNumberColumn && !asNote && lineNumberColumn && parentLine
+          ? wrapInsertOffsets.get(previousEstimateRow) ??
+            measureDescriptionCellEnd(parentLine, previousEstimateRow.rowText, line.words[0].x, lineNumberColumn.em) ??
+            undefined
+          : undefined;
       attachContinuationLine(previousEstimateRow, line, {
         asNote,
         forceType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : undefined,
+        insertAt,
       });
+      if (insertAt !== undefined) wrapInsertOffsets.set(previousEstimateRow, insertAt + 1 + line.text.length);
       lastWasNoteLine = asNote;
       continue;
     }
@@ -965,13 +1088,14 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       rotation: 0,
     }, 2);
     const geometry = buildAnchorGeometry(rect);
-    // Anchor ids are unique within a document: every id-keyed map downstream
-    // keeps the LAST entry, so a repeated id would hand back another row.
-    const baseAnchorId = `${options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`}:p${line.pageNumber}:${lineNumber ?? anchors.length + 1}:${type}`;
-    const anchorId = usedAnchorIds.has(baseAnchorId) ? `${baseAnchorId}:y${Math.round(line.y)}` : baseAnchorId;
-    usedAnchorIds.add(anchorId);
     const anchor: EstimateRowAnchor = {
-      anchorId,
+      anchorId: buildRowAnchorId(
+        options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
+        line,
+        lineNumber,
+        type,
+        unnumberedAnchorIds
+      ),
       sourceDocumentId: options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
       sourceDocumentRole: options.sourceDocumentRole,
       pageNumber: line.pageNumber,
@@ -1009,7 +1133,10 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       anchor.normalizedSupplierText = line.normalizedText;
     }
     anchors.push(anchor);
-    previousEstimateRow = type === "estimate_line" || type === "line_note" || type === "embedded_link_row" ? anchor : previousEstimateRow;
+    if (type === "estimate_line" || type === "line_note" || type === "embedded_link_row") {
+      previousEstimateRow = anchor;
+      anchorLines.set(anchor, line);
+    }
   }
 
   return anchors;
@@ -1087,19 +1214,20 @@ export function buildMeasuredEngineRowAnchor(params: {
   };
 }
 
-function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchorType | null) {
+function shouldAttachContinuationLine(
+  line: PdfTextLine,
+  type: EstimateRowAnchorType | null,
+  options: { digitLedWrap?: boolean } = {}
+) {
   if (type === "section_row" || type === "totals_row" || type === "supplier_row" || type === "guide_row") return false;
   if (type === "line_note" || type === "embedded_link_row") return true;
   if (detectSection(line.text)) return false;
   if (isGenericOrMalformedAnchorText(line.text)) return false;
   const normalized = normalizeMatchText(line.text);
   if (!normalized) return false;
-  // Anything that opens with a digit is never appended to the row above: a
-  // wrapped "3 Ft", "12/28/2017 …" or the footer print stamp lands AFTER the
-  // row's value cells, and the re-parse then read it as the row's labor
-  // (masking tape at 3.0 hr) or lost the row on a print too short to measure
-  // its footer as chrome.
-  if (/^\d{1,4}\b/.test(normalized)) return false;
+  // A leading number opens a new row, unless the geometry measured the line
+  // as a wrap that starts past the line-number column.
+  if (!options.digitLedWrap && /^\d{1,4}\b/.test(normalized)) return false;
   // End-of-table boundary: the last estimate row must never absorb the totals
   // header or the page's trailing prose ("Category Basis Rate Cost $ This
   // estimate is based on our initial visual inspection…") — a badge anchored
@@ -1115,13 +1243,16 @@ function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchor
 function attachContinuationLine(
   anchor: EstimateRowAnchor,
   line: PdfTextLine,
-  options: { asNote: boolean; forceType?: EstimateRowAnchorType }
+  options: { asNote: boolean; forceType?: EstimateRowAnchorType; insertAt?: number }
 ) {
   if (options.asNote) {
     anchor.noteText = `${anchor.noteText ? `${anchor.noteText} ` : ""}${line.text}`;
     anchor.normalizedNoteText = normalizeMatchText(anchor.noteText);
   } else {
-    anchor.rowText = `${anchor.rowText} ${line.text}`.replace(/\s+/g, " ").trim();
+    // Wrapped text joins the end of the row unless a measured insertion point
+    // places it inside the description cell (see measureDescriptionCellEnd).
+    const at = options.insertAt ?? anchor.rowText.length;
+    anchor.rowText = `${anchor.rowText.slice(0, at)} ${line.text} ${anchor.rowText.slice(at)}`.replace(/\s+/g, " ").trim();
     anchor.normalizedRowText = normalizeMatchText(anchor.rowText);
     const parsed = parseEstimateRowFields(anchor.rowText, anchor.lineNumber);
     anchor.operation = parsed.operation;
@@ -1510,12 +1641,7 @@ function isNumberedOperationRow(text: string) {
 }
 
 function extractLineNumber(text: string) {
-  // A wrapped dimension, date or quantity fragment is not a numbered row:
-  // "6.5mm", "8.0x5-0.9", "12/28/2017" and "3 Ft" printed under a description
-  // took line numbers once the table region reached them, and the duplicate
-  // anchor id shadowed the real line 6.
-  if (/^\s*\d{1,4}\s+(?:ft|feet|in|inch(?:es)?|oz|ounces?|mm|cm|gal|qt|pcs?)\.?\s*$/i.test(text)) return null;
-  return text.match(/^\s*(?:line\s*)?(\d{1,4})(?![.,x/]\d)\b/i)?.[1] ?? null;
+  return text.match(/^\s*(?:line\s*)?(\d{1,4})\b/i)?.[1] ?? null;
 }
 
 function detectSection(text: string) {

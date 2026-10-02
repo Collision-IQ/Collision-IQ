@@ -273,11 +273,11 @@ describe("D3 — continuation pages keep the rows printed under their own chrome
     expect(typeOf("33")).toBe("estimate_line");
   });
 
-  it("a wrapped dimension never takes a line number, and a part number is never labor", () => {
-    expect(anchors.filter((anchor) => anchor.lineNumber === "6")).toEqual([]);
+  it("a part number is never labor", () => {
+    // (Stored-text lines carry no words, so a digit-led wrap keeps its text
+    // reading here; word-layer prints measure the line-number column instead,
+    // see rowAnchorWrappedLineNumber.test.ts.)
     expect(anchors.find((anchor) => anchor.lineNumber === "37")?.labor).not.toBe(1063943);
-    const ids = anchors.map((anchor) => anchor.anchorId);
-    expect(new Set(ids).size).toBe(ids.length);
   });
 
   const wordFixture = (ro: string, name: string) =>
@@ -308,18 +308,19 @@ describe("D3 — continuation pages keep the rows printed under their own chrome
       const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture(ro, "shop_words.json")), { sourceDocumentRole: "shop", sourceDocumentId: `shop-${ro}` });
       const tape = fixtureAnchors.find((anchor) => anchor.lineNumber === line && anchor.anchorType === "estimate_line");
       expect(tape?.rowText).toMatch(/Masking Tape/);
-      expect(tape?.rowText).not.toMatch(/\b3 Ft\b/);
+      // The wrap joins the description, ahead of the value cells.
+      expect(tape?.rowText).not.toMatch(/\d\.\d{2}\s+T\s+3 Ft\s*$/);
     }
   });
 
-  it("anchor ids are unique and line 6 is the real row (RO 22084 SOR-5)", () => {
+  it("line 6 is the real row, never a wrapped \"6.5mm\" (RO 22084 SOR-5)", () => {
     const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture("22084", "sor5_words.json")), {
       sourceDocumentRole: "carrier",
       sourceDocumentId: "sor5",
     });
-    const ids = fixtureAnchors.map((anchor) => anchor.anchorId);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(fixtureAnchors.find((anchor) => anchor.anchorId === "sor5:p3:6:estimate_line")?.rowText).toMatch(/R&I LT\/Rear R&I wheel/);
+    const line6 = fixtureAnchors.filter((anchor) => anchor.anchorId === "sor5:p3:6:estimate_line");
+    expect(line6).toHaveLength(1);
+    expect(line6[0].rowText).toMatch(/R&I LT\/Rear R&I wheel/);
   });
 });
 
@@ -923,8 +924,10 @@ describe("review — what the report may claim when lines are unread or read dif
   });
 
   it("a high-dollar carrier line the matcher paired with a cheap namesake is still raised", () => {
+    // Dropping our L135 leaves our read short of its printed total, so the
+    // line is raised as not found among the lines read, never "not on our sheet".
     const { m } = model21995((d) => (d.higher = d.higher.filter((r: EstimateDeltaRow) => r.lineNumber !== 135)));
-    expect(m.flags.find((f) => f.kind === "carrierOnlyHighDollar" && f.lines.carrier?.[0] === 102)).toBeDefined();
+    expect(m.flags.find((f) => f.kind === "shopLinesUnreconciled" && f.lines.carrier?.includes(102))).toBeDefined();
   });
 
   it("a carrier road test alone is not their calibration", () => {

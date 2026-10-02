@@ -99,7 +99,7 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   // With carrier dollars unread, a carrier line read with no price may be a
   // price that was not read: every "no price" statement says what was read.
   const carrierLinesIncomplete = carrierPartlyUnread(ledger);
-  const flags = integrityChecks(shop, carrier, { pairs: input.pairs, carrierLinesIncomplete });
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs, carrierLinesIncomplete, shopLineRead: ledger.shopLineRead });
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
   const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs, carrierLinesIncomplete });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
