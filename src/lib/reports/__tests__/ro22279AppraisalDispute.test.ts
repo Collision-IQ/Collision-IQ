@@ -508,6 +508,14 @@ describe("D5 — one counterpart per run", () => {
     for (const placeholder of ["[REDACTED], 739698", "XXXXXXXX, 1", "ESTIMATOR, REDACTED", "ADJUSTER NAME, License Number: 1", "NAME REDACTED, 2", "X, 3"]) {
       expect(readPrintedEstimator(`Written By: ${placeholder}`)).toBeNull();
     }
+    // Any redaction token voids the read, listed or not, bracketed or worded.
+    for (const redacted of ["[REDACTED_PERSON], 1", "Redacted for privacy, 2", "NAME WITHHELD, 3", "[PII], 4", "[CONFIDENTIAL], 5", "<name>, 6", "TBD, 7", "Staff, 8", "***, 9"]) {
+      expect(readPrintedEstimator(`Written By: ${redacted}`)).toBeNull();
+    }
+    const tokenSor = { ...sor, estimateRole: "carrier" as const, text: `Written By: [REDACTED_PERSON], License Number: 271128\n${sorText}` };
+    const tokenFinal = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `Written By: [REDACTED_PERSON], 739698\n${shopFinal.text}` };
+    expect(sameEstimator("Written By: [REDACTED_PERSON], 739698", tokenSor.text)).toBe(false);
+    expect(selectComparisonCounterpart([tokenFinal, tokenSor], { sourceParty: "shop", sourceText: "Written By: [REDACTED_PERSON], 739698" }).counterpart).toBe(tokenSor);
     // Short and initialled real names still count.
     for (const [printed, name] of [["J. R. SMITH, 1", "J R SMITH"], ["MIKE, 2", "MIKE"], ["JIWON NA, 3", "JIWON NA"], ["OSKAR, 4", "OSKAR"]]) {
       expect(readPrintedEstimator(`Written By: ${printed}`)).toBe(name);
@@ -546,6 +554,18 @@ describe("D5 — one counterpart per run", () => {
     for (const candidates of [[ia, theirs], [theirs, ia]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: theirs, unidentified: [] });
     }
+    // The insurer's own estimate named "Staff appraiser" is backed by its licensed
+    // writer, so a later brand-named file (our final) never outranks it.
+    const staff = { ...sor, fileName: "Staff appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: MONICA ROE, License Number: 271128\n${sorText}` };
+    const ourBranded = { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const };
+    for (const candidates of [[staff, ourBranded], [ourBranded, staff]]) {
+      const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
+      expect(selection.counterpart).toBe(staff);
+      expect(selection.unidentified.length).toBe(2);
+    }
+    // A licensed independent appraiser printed after the SOR is never theirs.
+    const licensedIa = { ...shopFinal, fileName: "Independent Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: JOHN DOE, License Number: 5\n${shopFinal.text}` };
+    expect(selectComparisonCounterpart([licensedIa, { ...sor, estimateRole: "carrier" as const }], { sourceParty: "shop" }).unidentified.length).toBe(2);
     // Printed after the SOR, it makes the run unsettled instead of being called theirs.
     const later = { ...ia, text: `Written By: JOHN DOE, 1\n${shopFinal.text}` };
     const sorNamed = { ...sor, estimateRole: "carrier" as const };

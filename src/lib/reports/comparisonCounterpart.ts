@@ -56,13 +56,18 @@ export function readLatestPrintedTimestamp(text: string): number | null {
  * own version named "USAA 22279 Final.pdf" is still the shop's.
  */
 export function readPrintedEstimator(text: string): string | null {
-  const name = (text ?? "").match(/Written\s+By:[ \t]*([^,\n]{2,60})/i)?.[1];
-  const words = (name?.toUpperCase().replace(/[^A-Z]+/g, " ").trim() ?? "").split(" ").filter(Boolean);
-  // A redaction or role placeholder ("[REDACTED]", "XXXXXXXX", "ESTIMATOR",
-  // "ADJUSTER NAME") prints the same on both sheets and proves nothing; any
-  // real name does, short or initialled ("J. R. SMITH", "MIKE", "JIWON NA").
+  const name = (text ?? "").match(/Written\s+By:[ \t]*([^,\n]{2,60})/i)?.[1]?.trim() ?? "";
+  const words = name.toUpperCase().replace(/[^A-Z]+/g, " ").trim().split(" ").filter(Boolean);
+  // A redaction prints the same on both sheets and proves nothing, so any
+  // sign of one voids the read: a bracketed or tokenised value
+  // ("[REDACTED_PERSON]", "<name>", "***") or a redaction word anywhere
+  // ("Redacted for privacy", "NAME WITHHELD"). A role placeholder voids it
+  // only when it is all there is ("ESTIMATOR", "ADJUSTER NAME"); any real
+  // name counts, short or initialled ("J. R. SMITH", "MIKE", "JIWON NA").
+  if (/^[[<({*#]|_/.test(name)) return null;
+  if (words.some((word) => /^(?:REDACTED|REDACT|WITHHELD|REMOVED|PII|PRIVATE|PRIVACY|CONFIDENTIAL|HIDDEN|MASKED|ANONYMOUS|ANONYMIZED)$/.test(word))) return null;
   const placeholder = (word: string) =>
-    word.length === 1 || /^X+$/.test(word) || /^(?:REDACTED|NAME|ESTIMATOR|APPRAISER|ADJUSTER|UNKNOWN|NONE|NA)$/.test(word);
+    word.length === 1 || /^X+$/.test(word) || /^(?:NAME|ESTIMATOR|APPRAISER|ADJUSTER|UNKNOWN|NONE|NA|TBD|STAFF|PERSON|USER)$/.test(word);
   if (words.every(placeholder) || words.join("").length < 3) return null;
   return words.join(" ");
 }
@@ -91,8 +96,14 @@ const nameWords = (fileName: string) =>
     .toLowerCase()} `;
 /** A word that names the insurer's document as such. */
 const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?)\b/;
-/** "Appraiser" also names an independent or the owner's appraiser: the weakest name mark. */
+/**
+ * "Appraiser" also names an independent or the owner's appraiser: on its own
+ * the weakest name mark, as plain as SOR only when the print backs it (an
+ * insurer authorship phrase, or a licensed writer).
+ */
 const APPRAISER_WORD = /\bappraisers?\b/;
+/** An appraiser who is not the insurer's: never the plainest mark, licensed or not. */
+const OTHER_APPRAISER = /\b(?:independent|owners?|umpire|ia)\b/;
 /** An insurer's brand: a shop names its own files this way too, so it is weaker evidence. */
 const INSURER_BRAND = /\b(?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)\b/;
 const SHOP_WORD = /\b(?:shop|repair facility|rta|appraisal)\b/;
@@ -215,7 +226,14 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
       const byEstimator = Boolean(options.sourceText) && sameEstimator(options.sourceText!, candidate.text);
       const ours = byEstimator || (shopSource ? SHOP_WORD.test(words) : INSURER_WORD.test(words) || INSURER_BRAND.test(words));
       const tier = shopSource
-        ? INSURER_WORD.test(words) ? 3 : INSURER_BRAND.test(words) ? 2 : authored || APPRAISER_WORD.test(words) ? 1 : 0
+        ? INSURER_WORD.test(words) ||
+          (APPRAISER_WORD.test(words) && !OTHER_APPRAISER.test(words) && (authored || printsAppraiserLicense(candidate.text)))
+          ? 3
+          : INSURER_BRAND.test(words)
+            ? 2
+            : authored || APPRAISER_WORD.test(words)
+              ? 1
+              : 0
         : SHOP_WORD.test(words) ? 3 : !authored ? 1 : 0;
       return [candidate, { ours, byEstimator, tier }] as const;
     })
