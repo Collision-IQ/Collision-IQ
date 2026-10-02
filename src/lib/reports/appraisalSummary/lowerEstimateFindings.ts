@@ -15,6 +15,7 @@
  */
 import type { PlainSummaryModel } from "../plainLanguageSummary";
 import type { ArgueItem, MatcherPair } from "./argueItems";
+import { unreconciledShopRead } from "./gapLedger";
 import { assignUnits, type ShortPayUnit } from "./shortPayView";
 import type { EstimateLine, LaborCat } from "./types";
 import { round2 } from "./types";
@@ -92,8 +93,13 @@ export function buildLowerEstimateFindings(model: PlainSummaryModel, pairs: Matc
     return finding;
   };
 
+  const shopReadCloses = !unreconciledShopRead(model.ledger);
   for (const unit of units) {
-    const entry: LowerEntry = { kind: unit.diff > 0 ? "short" : "over", text: describeUnit(unit, shopBy, carrierBy, model.items), amount: unit.diff };
+    const entry: LowerEntry = {
+      kind: unit.diff > 0 ? "short" : "over",
+      text: describeUnit(unit, shopBy, carrierBy, model.items, shopReadCloses),
+      amount: unit.diff,
+    };
     const anchor = unit.carrierLines.length
       ? Math.min(...unit.carrierLines)
       : unit.shopLines.length
@@ -148,7 +154,9 @@ function describeUnit(
   unit: ShortPayUnit,
   shopBy: Map<number, EstimateLine>,
   carrierBy: Map<number, EstimateLine>,
-  items: ArgueItem[]
+  items: ArgueItem[],
+  /** Our sheet's line read reproduces its printed totals, so an absence from ours may be stated. */
+  shopReadCloses: boolean
 ): string {
   const ours = unit.shopLines.map((n) => shopBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
   const theirs = unit.carrierLines.map((n) => carrierBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
@@ -161,7 +169,9 @@ function describeUnit(
     return `Ours ${refs(unit.shopLines)} ${unit.label} (${sideText(ours)}): not on this estimate, ${money(unit.diff)} at our rates.${strength}`;
   }
   if (!ours.length) {
-    return `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}. Not on ours.`;
+    return shopReadCloses
+      ? `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}. Not on ours.`
+      : `${unit.label} (${sideText(theirs)}): on this estimate, ${money(-unit.diff)}; not found among the lines read from ours, which do not add up to our printed totals. Confirm on our sheet.`;
   }
   return `${unit.label}: ours ${sideText(ours)} (${refs(unit.shopLines)}) vs this estimate's ${sideText(theirs)}; ${
     unit.diff > 0 ? `short ${money(unit.diff)}` : `this estimate is higher by ${money(-unit.diff)}`

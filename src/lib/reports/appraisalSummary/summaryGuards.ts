@@ -9,7 +9,7 @@
  * sentence ("zero aftermarket") can never excuse a claim in another, and a
  * "$0.00" in one row cannot be paired with "sublet" three sections away.
  */
-import type { GapLedger } from "./gapLedger";
+import { carrierPartlyUnread, unreconciledShopRead, type GapLedger } from "./gapLedger";
 import type { Flag } from "./integrityChecks";
 import type { GroupDelta } from "./operationEquivalence";
 import type { PartTypeEvidence } from "./partTypeEvidence";
@@ -23,7 +23,7 @@ export interface SummaryFacts {
   mostlyHours: string | null;
   /** Evidence-based only: the carrier's own exclusion note, or the group hours. */
   adasSentence: string | null;
-  /** Resolve before arguing: high-dollar carrier-only lines, trim-contradicting part numbers. */
+  /** Resolve before arguing: an unreconciled read of our sheet, high-dollar carrier-only lines, trim-contradicting part numbers. */
   checkFirst: Flag[];
   /** Our own sheet: missing reusable parts, under-coded lines, repeats, our duplicate part numbers. */
   cleanUpOurs: Flag[];
@@ -42,7 +42,7 @@ export function buildSummaryFacts(
   const hoursShare = ledger.gap > 0 ? Math.round((ledger.laborHours.dollars / ledger.gap) * 100) : 0;
   const adas = groups.find((g) => g.key === "adas");
   const adasDiff = adas ? Math.round((adas.shopHours - adas.carrierHours) * 10) / 10 : 0;
-  const checkFirstKinds = new Set(["carrierOnlyHighDollar", "trimConflictPartNumber"]);
+  const checkFirstKinds = new Set(["shopLinesUnreconciled", "carrierOnlyHighDollar", "trimConflictPartNumber"]);
   return {
     headline: `Why the two estimates differ by ${usd(ledger.gap)}`,
     notParts: partType.bothAllOem
@@ -58,7 +58,7 @@ export function buildSummaryFacts(
     adasSentence:
       adas && adas.exclusions.length
         ? `The carrier's own calibration line says its time ${adas.exclusions[0].toLowerCase()}. That is the work our calibration lines cover.`
-        : adas && adasDiff > 0
+        : adas && adasDiff > 0 && !carrierPartlyUnread(ledger)
           ? `We wrote ${adasDiff.toFixed(1)} more hours of calibration and diagnostics than the carrier.`
           : null,
     checkFirst: flags.filter((f) => checkFirstKinds.has(f.kind)),
@@ -109,6 +109,9 @@ export function lintSummaryText(text: string, ctx: LintContext): string[] {
   }
   if (/-\$[\d,]+\.\d{2}/.test(t) && /\bparts\b/i.test(t) && ctx.ledger.nonLaborNet >= 0) {
     violations.push("Prints a negative parts figure while the ledger's non-labor net is not negative.");
+  }
+  if (unreconciledShopRead(ctx.ledger) && /\b(not on (our sheet|ours)|only they wrote|ours does not have)\b/i.test(t)) {
+    violations.push("Says our sheet lacks a line, but the line prices read from our sheet do not reproduce its printed totals.");
   }
   return violations;
 }

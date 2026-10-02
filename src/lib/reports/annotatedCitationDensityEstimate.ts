@@ -17,7 +17,7 @@ import {
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
-import { LedgerNotClosedError } from "./appraisalSummary/gapLedger";
+import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
 import type { MatcherPair } from "./appraisalSummary/argueItems";
 import { buildLowerEstimateFindings } from "./appraisalSummary/lowerEstimateFindings";
 import { buildLowerEstimateCitationPdf } from "./lowerEstimateCitationDensity";
@@ -107,6 +107,7 @@ import {
   isCarrierAuthoredEstimateDocument,
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
+import { describeExcludedComparisons, sameEstimator, selectComparisonCounterpart } from "./comparisonCounterpart";
 import {
   buildPmCapFlag,
   detectRepairFacilityState,
@@ -198,6 +199,7 @@ import {
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
+  hoursReconcile,
   parseEstimateRows as parseDeltaEngineRows,
   parseGrandTotalFromWords as parseDeltaEngineGrandTotal,
   parseSubtotalsFromWords as parseDeltaEngineSubtotals,
@@ -1587,6 +1589,21 @@ async function buildLowerEstimateDeliverable(input: {
     );
     return undefined;
   }
+  // Its stamps and badges value every carrier line at its read price; with
+  // part of their sheet's prices unread a highlight would mark a printed
+  // price as different from ours when it was simply not read.
+  if (carrierPartlyUnread(input.model.ledger)) {
+    const { unreadCarrierLines: dollars, unreadCarrierHours: hours } = input.model.ledger;
+    input.warnings.push(
+      `The Citation Density copy of the comparison estimate was not built: ${[
+        dollars > 0 ? `${dollars.toFixed(2)} dollars of its printed parts and miscellaneous total are on lines whose price was not read` : "",
+        hours > 0 ? `${hours.toFixed(1)} hours of its printed labor were not read on any line` : "",
+      ]
+        .filter(Boolean)
+        .join(", and ")}, so its line values cannot be stamped. The annotated copy of our estimate is delivered instead.`
+    );
+    return undefined;
+  }
   try {
     const set = buildLowerEstimateFindings(input.model, input.pairs);
     const built = await buildLowerEstimateCitationPdf({
@@ -2024,6 +2041,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // fields bold, so the raw layer reads "CCllaaiimm ##" and a raw-text regex
   // misses every field on that platform.
   const gateSourceIdentity = readClaimIdentity(normalizeOverprintText(params.sourceText ?? ""));
+  // Advisories are held per comparison and reported only for the estimate the
+  // run compares (below): another estimate's VIN note must not read as this one's.
+  const gateAdvisories = new Map<ComparisonEstimateText, string[]>();
   for (const comparison of params.comparisonEstimateTexts ?? []) {
     if (!comparison.text?.trim()) continue;
     const comparisonIdentity = readClaimIdentity(normalizeOverprintText(comparison.text));
@@ -2031,7 +2051,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     if (!verdict.blocked) {
       // CR-0: a pair that continued on the VIN fallback (or with a VIN
       // advisory) says so where the BLOCKED box would have rendered.
-      for (const warning of verdict.warnings ?? []) warnings.push(warning);
+      gateAdvisories.set(comparison, verdict.warnings ?? []);
       continue;
     }
     appendToolUsageTrace(trace, {
@@ -2059,6 +2079,40 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     candidatesRejected: 0,
     droppedReasons: [],
   });
+  // ONE COUNTERPART. With the source party final and every estimate on the
+  // case past the identity gate above (a misfiled estimate for another
+  // vehicle still blocks the run; it is never "a version not compared"), a
+  // case holding more than one other estimate is narrowed to the single one
+  // this run measures against, and every reader below — word layers, rows,
+  // totals, coverage, release gate, forensic names, the dispute report — sees
+  // only it. Pooling them read RO 22279's Shop final lines under its SOR's
+  // totals.
+  // Names the estimates left when none of them could be identified as the
+  // other party's: the one compared was then picked by print order alone.
+  let counterpartPartyUnidentified: string[] | null = null;
+  if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
+    const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
+      sourceParty: sourceDocumentRole,
+      pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
+      sourceText: params.sourceText ?? "",
+    });
+    const chosen = selection.counterpart;
+    if (chosen) {
+      const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
+        chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
+      params = {
+        ...params,
+        comparisonEstimateTexts: [chosen],
+        comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
+      };
+      const note = describeExcludedComparisons(selection);
+      if (note) warnings.push(note);
+      if (selection.unidentified.length) counterpartPartyUnidentified = selection.unidentified.map((candidate) => candidate.fileName);
+    }
+  }
+  for (const comparison of params.comparisonEstimateTexts ?? []) {
+    for (const warning of gateAdvisories.get(comparison) ?? []) warnings.push(warning);
+  }
 
   appendToolUsageTrace(trace, {
     tool: "document_classifier",
@@ -3104,8 +3158,28 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // document with the wrong nouns in it. It is a companion, never a
     // deliverable the run depends on: a failure here is a warning on the
     // run, and the two documents above still ship.
-    const comparisonRole = params.comparisonEstimateTexts?.[0]?.estimateRole;
-    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
+    // The caller's label decides whose the comparison is. Text is never
+    // promoted over it: a shop's note ("BLEND NOT ON USAA ESTIMATE") and an
+    // independent appraiser's "prepared by" line both read as insurer
+    // authorship. Two refusals sit on top of the label: an estimate printing
+    // the same estimator as ours is ours (the route guesses "carrier" for an
+    // unmarked name), and when several estimates were on the case and
+    // nothing printed settles which is the insurer's, a report naming one
+    // "the insurer's" would be a guess.
+    const comparisonText = params.comparisonEstimateTexts?.[0];
+    const comparisonRole = comparisonText?.estimateRole;
+    const comparisonIsOurs = sameEstimator(params.sourceText ?? "", comparisonText?.text ?? "");
+    const renameAdvice =
+      'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
+    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {
+      warnings.push(
+        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same estimator ("Written By") as our estimate, so it reads as our own estimate, not the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
+      warnings.push(
+        `Appraisal Dispute Report not produced: nothing printed on ${counterpartPartyUnidentified.join(", ")} settles which one is the insurer's estimate, so the report would be guessing. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
       // with the line-item comparison withheld those lines are unread, and a
       // ledger over unread lines would state figures nobody checked.
@@ -3175,6 +3249,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           );
         }
       }
+    } else if (sourceDocumentRole === "shop") {
+      // Never skipped in silence: a shop run that gets no dispute report says
+      // which document it was measured against and why that one does not qualify.
+      const comparisonName = comparisonText?.fileName ?? "the comparison estimate";
+      warnings.push(
+        `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was not identified as the insurer's estimate: ${
+          comparisonRole === "shop" ? "it is labelled a shop estimate" : "its author is not identified"
+        }. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
     }
   }
 
@@ -4712,6 +4795,17 @@ function matchStructuredLineItemDeltas(
   // yields nothing, and the run then compares against an empty pool.
   const comparisonReads = comparison.map((item) => parseEstimateRowsForPlatform(repairTokens(item.text)));
   let lowerRows = comparisonReads.flatMap((read) => read.rows);
+  // Restored cells are disclosed, never silent: the value is the printed one
+  // (the document's own SUBTOTALS prove it), but it is not what OCR read.
+  comparisonReads.forEach((read, index) => {
+    const restored = read.rows.filter((row) => row.restoredCells?.length);
+    if (!restored.length) return;
+    context.extractionWarnings?.push(
+      `${comparison[index].fileName}: ${restored.length} machine-read line${restored.length === 1 ? " was" : "s were"} missing a decimal point (line ${restored
+        .map((row) => row.lineNumber)
+        .join(", ")}); restored because with them the lines add up to the document's own printed SUBTOTALS.`
+    );
+  });
   const comparisonPlatform = comparisonReads.map((read) => read.platform).find((platform) => platform) ?? null;
   const subletsBookedAsParts = comparisonReads.flatMap((read) => read.subletsBookedAsParts);
 
@@ -4770,9 +4864,7 @@ function matchStructuredLineItemDeltas(
         const body = printed.page ? rows.filter((row) => row.page <= printed.page) : rows;
         const laborSum = body.reduce((total, row) => total + (row.labor ?? 0), 0);
         const paintSum = body.reduce((total, row) => total + (row.paint ?? 0), 0);
-        const laborOk = printed.labor === null || Math.abs(laborSum - printed.labor) <= 0.21;
-        const paintOk = printed.paint === null || Math.abs(paintSum - printed.paint) <= 0.21;
-        return laborOk && paintOk;
+        return hoursReconcile(laborSum, printed.labor) && hoursReconcile(paintSum, printed.paint);
       };
       const subjectReconciles = subtotalsOk(subjectEngineRows, subjectWordPages);
       const competingReconciles = subtotalsOk(

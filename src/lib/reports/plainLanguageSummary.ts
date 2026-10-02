@@ -35,8 +35,8 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { DeltaForensicReportModel, ForensicBlock, ForensicSection, ForensicTableRow } from "./deltaForensicReport";
 import { loadCollisionIqLogo, renderDeltaForensicReport } from "./deltaForensicReportRenderer";
 import { argueItems, type ArgueItem, type MatcherPair } from "./appraisalSummary/argueItems";
-import { buildGapLedger, type GapLedger } from "./appraisalSummary/gapLedger";
-import { integrityChecks, type Flag } from "./appraisalSummary/integrityChecks";
+import { buildGapLedger, carrierPartlyUnread, type GapLedger } from "./appraisalSummary/gapLedger";
+import { HIGH_DOLLAR, integrityChecks, type Flag } from "./appraisalSummary/integrityChecks";
 import { classifyNonLabor } from "./appraisalSummary/nonLaborBuckets";
 import { groupEquivalents, type GroupDelta } from "./appraisalSummary/operationEquivalence";
 import { partTypeEvidence, type PartTypeEvidence } from "./appraisalSummary/partTypeEvidence";
@@ -96,9 +96,12 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
   const partType = partTypeEvidence(shop, carrier);
   const { groups, usedShop } = groupEquivalents(shop, carrier);
-  const flags = integrityChecks(shop, carrier, { pairs: input.pairs });
+  // With carrier dollars unread, a carrier line read with no price may be a
+  // price that was not read: every "no price" statement says what was read.
+  const carrierLinesIncomplete = carrierPartlyUnread(ledger);
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs, carrierLinesIncomplete, shopLineRead: ledger.shopLineRead });
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
-  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs });
+  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs, carrierLinesIncomplete });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
     (l) => classifyNonLabor(l) === "sublet" && /calibrat|adas/i.test(l.desc)
   );
@@ -206,6 +209,7 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       ],
       rows: ledgerRows(model),
     },
+    ...(carrierPartlyUnread(L) ? [{ kind: "note" as const, text: unreadCarrierNote(model) }] : []),
   ]);
 
   // 2b. The gross view behind the net.
@@ -253,13 +257,21 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
   section("Check this first", [
     facts.checkFirst.length
       ? { kind: "bullets", items: facts.checkFirst.map((f) => f.text) }
-      : { kind: "paragraph", text: "Nothing on either sheet needs resolving before the items below." },
+      : {
+          kind: "paragraph",
+          text:
+            model.ledger.unreadCarrierLines >= HIGH_DOLLAR
+              ? `Nothing on the lines read needs resolving first. ${money(model.ledger.unreadCarrierLines)} of their lines' prices was not read, so a high-dollar line only they wrote cannot be ruled out (see the note under the ledger).`
+              : carrierPartlyUnread(model.ledger)
+                ? "Nothing on the lines read needs resolving first; part of their sheet was not read (see the note under the ledger)."
+                : "Nothing on either sheet needs resolving before the items below.",
+        },
   ]);
 
   // 4. Items worth arguing.
   const shown = model.items.slice(0, MAX_ITEMS);
   const rest = model.items.slice(MAX_ITEMS);
-  const itemBlocks: ForensicBlock[] = [
+  const itemBlocks: ForensicBlock[] = carrierPartlyUnread(model.ledger) ? [] : [
     {
       kind: "paragraph",
       text: `Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first.${
@@ -267,7 +279,12 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       }`,
     },
   ];
-  if (shown.length) {
+  if (carrierPartlyUnread(model.ledger)) {
+    itemBlocks.push({
+      kind: "paragraph",
+      text: "No item is listed: part of their sheet was not read, so any line of ours could have its counterpart on a line that was not read (see the note under the ledger). The ledger above closes on both sheets' printed totals; the Forensic Estimate Analysis lists every line difference that was read.",
+    });
+  } else if (shown.length) {
     itemBlocks.push({
       kind: "table",
       columns: [
@@ -341,7 +358,9 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
           ? "Resolve the \"Check this first\" items with the carrier before anything else; a high-dollar line nobody can explain undermines every other argument."
           : "Confirm both sheets are the latest versions before anything else.",
         "Clean up our own sheet and send the corrected version, so the carrier is answering our final numbers.",
-        "Send the STRONG items first, each with the carrier's own line or note quoted. Then the NEEDS PROOF items, each with its P-page, OEM procedure or invoice attached.",
+        carrierPartlyUnread(model.ledger)
+          ? "Get a readable copy of their estimate, so every line can be read, and run this report again to list the items worth arguing."
+          : "Send the STRONG items first, each with the carrier's own line or note quoted. Then the NEEDS PROOF items, each with its P-page, OEM procedure or invoice attached.",
         "Ask for a reinspection with both appraisers present and the damaged assemblies off for anything still open.",
       ],
     },
@@ -438,7 +457,11 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
         money(L.laborRate),
         `(our rate − their rate) × their hours${
           labor.length ? `: ${labor.map((i) => `${i.label} ${hr(i.hours)} × ${rate(i.shopRate - i.carrierRate)}`).join("; ")}` : ""
-        }${adj > 0 ? `, less the carrier's ${money(adj)} rate adjustment` : ""}.`,
+        }${adj > 0 ? `, less the carrier's ${money(adj)} rate adjustment` : ""}.${
+          L.unreadCarrierLines > 0 && L.laborRate > 0
+            ? ` If any of the ${money(L.unreadCarrierLines)} on their lines that was not read is a labor-rate adjustment, this row is smaller by that amount (see the note below).`
+            : ""
+        }`,
       ],
     });
   } else if (adj > 0) {
@@ -478,6 +501,40 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
   rows.push({ cells: ["Tax", money(L.tax), `${money(shop.totals.tax)} − ${money(carrier.totals.tax)}.`] });
   rows.push({ cells: ["Total", money(L.gap), `${money(L.shopTotal)} − ${money(L.carrierTotal)}.`], variant: "total" });
   return rows;
+}
+
+/**
+ * What the report could not read on the carrier's sheet, with the amount, and
+ * exactly which rows it could move. Every bucket above is computed from the
+ * printed totals, so the unread dollars can shift money between the Labor
+ * rate row and the parts row and never change the total.
+ */
+export function unreadCarrierNote(model: PlainSummaryModel): string {
+  const { ledger: L, carrier } = model;
+  const printed = carrier.totals.parts + carrier.totals.misc;
+  const read = printed - L.unreadCarrierLines;
+  const dollars = L.unreadCarrierLines > 0;
+  return [
+    dollars
+      ? `${model.header.theirs} prints ${money(printed)} of parts and miscellaneous charges; the lines this read could price add up to ${
+          read > 0.005 ? money(read) : "nothing"
+        }, so ${money(L.unreadCarrierLines)} is on lines whose price was not read.`
+      : "",
+    L.unreadCarrierHours > 0
+      ? `${dollars ? "Their sheet" : model.header.theirs} prints ${hr(L.laborHours.carrier)} of labor; the lines this read carry ${hr(
+          Math.round((L.laborHours.carrier - L.unreadCarrierHours) * 10) / 10
+        )}, so ${hr(L.unreadCarrierHours)} of it was not read: a line, or a line's hours, that this read missed.`
+      : "",
+    "The rows above use the printed totals, so the total difference is exact.",
+    dollars && L.laborRate > 0
+      ? `If any of the ${money(L.unreadCarrierLines)} is a labor-rate adjustment, the Labor rate row is smaller and the parts row larger by that amount.`
+      : "",
+    `So no item is listed below: any line of ours could have its counterpart on a line that was not read${
+      dollars ? ", and a line of theirs described as having no price may be one whose price was not read" : ""
+    }. The Forensic Estimate Analysis lists every line difference that was read.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**

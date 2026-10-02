@@ -16,12 +16,16 @@
 
 import { canonicalOperationKey } from "./operationAliases";
 import { normalizeOverprintText } from "./overprintNormalize";
+import { isOcrRecoveredText } from "@/lib/attachments/ocrTextMarker";
 import {
   canonTotalsCategory,
   continuesIdentifier,
   isContactInformationRow,
   isManufacturerPrefixedIdentifier,
   looksLikePartNumber,
+  restoreDroppedHoursDecimal,
+  restoreHoursPoint,
+  restoreMoneyPoint,
   startsWithRepairOperation,
   totalsCategoriesFuzzyMatch,
 } from "./deltaEngine/estimateNormalize";
@@ -71,6 +75,13 @@ export interface EstimateDeltaRow {
    * it was written on the original estimate or on a later supplement.
    */
   supplementTag?: string | null;
+  /**
+   * Cells whose decimal point OCR dropped and the reader restored, because
+   * with them restored the document's line sums equal its own printed
+   * SUBTOTALS (see reconcileOcrDroppedPoints). Absent on every row read as
+   * printed; the run discloses the count.
+   */
+  restoredCells?: Array<"price" | "labor" | "paint">;
 }
 
 export type EstimateDeltaKind =
@@ -849,10 +860,32 @@ export function explodeGluedRow(rawText: string): string {
     const splittable =
       /\.\d/.test(withinToken) ||
       withinToken.replace(/\D/g, "").length >= 9 ||
-      // Tiny glued tails ("scan1m", "flare2") are qty/marker columns — but
-      // only after a WORD (2+ letters). After a mixed alnum fragment the
-      // digits are a part-number interior ("C25J75" must not split at "J7").
-      (withinToken.length <= 3 && /[A-Za-z]{2}$/.test(text.slice(0, i)));
+      // Tiny glued tails ("scan1m", "flare2", "deactivate/activate1m") are
+      // qty/marker columns — but only after a WORD (2+ letters). After a
+      // mixed alnum fragment the digits are a part-number interior: "C25J75"
+      // must not split at "J7", and neither may "86671BE000" at "BE0" —
+      // testing only the last two letters split RO 22279's Hyundai part
+      // numbers into "86671BE 000", so no part number read and none matched.
+      // A digit inside the alphanumeric run right before the tail is that
+      // signal, as is a dashed catalog head in capitals ("86302-BE200"); "/",
+      // "-" inside a word, or a line number / supplement tag / operation glued
+      // to the front of the row ("45#S01Detail1m"), are not. A qty tail is one
+      // digit, or one or two digits and a lowercase marker ("1", "1m", "10m"):
+      // that splits as always, after "4MATIC", "2019-UP", "8mm" or "R-1234yf".
+      // Any other short tail ("000", "200", "10", "0B", "6S") continues the
+      // part number.
+      (withinToken.length <= 3 &&
+        /[A-Za-z]{2}$/.test(text.slice(0, i)) &&
+        !(
+          !/^(?:\d|\d{1,2}[a-z])$/.test(withinToken) &&
+          (/\d{3,}-[A-Z]{1,3}$/.test(text.slice(tokenStart, i)) ||
+            /\d/.test(
+              (text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? "").replace(
+                tokenStart === 0 ? /^(?:\d{1,3})?(?:S\d{2})?(?:Repl|Rpr|Subl|Refn|Blnd|Algn|Sect|PDR)?(?=[A-Za-z])/ : /^$/,
+                ""
+              )
+            ))
+        ));
     if (!splittable && boundaryIndex === i) continue;
     if (isColumnBlob(remainder)) {
       const head = text.slice(0, boundaryIndex);
@@ -1725,6 +1758,169 @@ function boundRowsByPrintedSubtotals(
   return rows;
 }
 
+/*
+ * OCR DROPPED-DECIMAL-POINT CELLS, RESTORED ONLY WHEN THE DOCUMENT PROVES IT.
+ *
+ * A CCC print sets every line's cells in one grid: <qty> <extended price,
+ * 2 decimals> [charge marker] <labor, 1 decimal> [labor type] <paint,
+ * 1 decimal>. OCR of an image-only print can lose exactly one decimal point
+ * in that grid — RO 22279's USAA SOR read "1 5.00 T" as "1 500 T" on four
+ * lines and "0.5 M" as "05 M" on one — and the reader then left the price or
+ * the hours unread. The carrier's lines summed $20.00 short of its printed
+ * non-labor total and the Appraisal Dispute Report was refused.
+ *
+ * A row is a candidate only when exactly ONE cell of an otherwise well-formed
+ * grid is missing its point (the other cells pin which cell it is). The
+ * candidates of one column are then accepted together, or not at all, and
+ * only when with them the column's line sum equals the document's own printed
+ * SUBTOTALS cell and no other printed column moves further from its own.
+ * A price candidate additionally requires a full-grid print — every row with
+ * an hours cell reads a qty and a price — so an integer cannot be taken for a
+ * price on a print that leaves cells blank. OCR text only; a text layer's
+ * cells are never rewritten.
+ */
+const OCR_CELL_MONEY = /^-?\d{1,3}(?:,\d{3})*\.\d{2}$/;
+const OCR_CELL_HOURS = /^-?\d{1,2}\.\d$/;
+const OCR_CELL_INCL = /^incl\.?$/i;
+const OCR_CELL_QTY = /^\d{1,2}$/;
+// COLUMN_MARKER_PATTERN's letters plus the two-letter sublet charge ("Xm").
+const OCR_CELL_CHARGE = /^(?:[mstxdefgbp]|[mTX]{2})$/i;
+const OCR_CELL_LABOR_TYPE = /^[DEFGMS]$/;
+
+export type OcrRestoredColumn = "price" | "labor" | "paint";
+
+/** The single dropped-point cell of a CCC row and the row text with it restored, or null. */
+export function findOcrDroppedPointCell(
+  rowText: string
+): { column: OcrRestoredColumn; from: string; to: string; text: string } | null {
+  const tokens = rowText.replace(/\s+/g, " ").trim().split(" ");
+  // A dropped price only where the row prints no 2-decimal figure at all:
+  // otherwise that figure is the price cell, not this integer.
+  const rowHasMoney = tokens.some((token) => OCR_CELL_MONEY.test(token));
+  for (let q = 0; q < tokens.length - 3; q += 1) {
+    if (!OCR_CELL_QTY.test(tokens[q])) continue;
+    const p = q + 1;
+    const priceOk = OCR_CELL_MONEY.test(tokens[p]);
+    const priceFix = !priceOk && !rowHasMoney ? restoreMoneyPoint(tokens[p]) : null;
+    if (!priceOk && !priceFix) continue;
+    let j = p + 1;
+    if (j < tokens.length && OCR_CELL_CHARGE.test(tokens[j])) j += 1;
+    const laborIndex = j;
+    const laborToken = tokens[laborIndex];
+    if (laborToken === undefined) continue;
+    const laborOk = OCR_CELL_HOURS.test(laborToken) || OCR_CELL_INCL.test(laborToken);
+    const laborFix = laborOk ? null : restoreHoursPoint(laborToken);
+    if (!laborOk && !laborFix) continue;
+    j += 1;
+    if (j < tokens.length && OCR_CELL_LABOR_TYPE.test(tokens[j])) j += 1;
+    const paintIndex = j;
+    const paintToken = tokens[paintIndex];
+    if (paintToken === undefined) continue;
+    const paintOk = OCR_CELL_HOURS.test(paintToken) || OCR_CELL_INCL.test(paintToken);
+    const paintFix = paintOk ? null : restoreHoursPoint(paintToken);
+    if (!paintOk && !paintFix) continue;
+    // Well formed (0) or ambiguous (2+): leave the row as read.
+    if ([priceOk, laborOk, paintOk].filter((ok) => !ok).length !== 1) return null;
+    const out = [...tokens];
+    if (priceFix) {
+      out[p] = priceFix;
+      return { column: "price", from: tokens[p], to: priceFix, text: out.join(" ") };
+    }
+    if (laborFix) {
+      out[laborIndex] = laborFix;
+      return { column: "labor", from: laborToken, to: laborFix, text: out.join(" ") };
+    }
+    out[paintIndex] = paintFix!;
+    return { column: "paint", from: paintToken, to: paintFix!, text: out.join(" ") };
+  }
+  return null;
+}
+
+/**
+ * The SUBTOTALS cells exactly as printed — "SUBTOTALS 2,487.54 16.8 5.2" —
+ * from the FIRST SUBTOTALS line only, or null. Stricter than
+ * parseCccSubtotalsRule on purpose: it is the figure restored cells must
+ * reproduce, so a glued, short or misread line yields nothing rather than a
+ * wrong target, and a later Supplement Summary SUBTOTALS is never read.
+ */
+export function parseCccSubtotalsCells(text: string): { price: number; labor: number; paint: number } | null {
+  for (const raw of (text ?? "").replace(/\r/g, "\n").split("\n")) {
+    const line = raw.replace(/\s+/g, " ").trim();
+    // The first SUBTOTALS rule, even behind OCR punctuation noise ("| SUBTOTALS
+    // …"); a description that merely mentions subtotals is not the rule.
+    if (!/^\W*SUBTOTALS\b/i.test(line)) continue;
+    const cells = line.replace(/^\W*SUBTOTALS\s*/i, "").split(" ").filter(Boolean);
+    if (
+      cells.length !== 3 ||
+      !OCR_CELL_MONEY.test(cells[0]) ||
+      !OCR_CELL_HOURS.test(cells[1]) ||
+      !OCR_CELL_HOURS.test(cells[2])
+    ) {
+      return null;
+    }
+    const value = (cell: string) => Number(cell.replace(/,/g, ""));
+    return { price: value(cells[0]), labor: value(cells[1]), paint: value(cells[2]) };
+  }
+  return null;
+}
+
+function reconcileOcrDroppedPoints(
+  rows: EstimateDeltaRow[],
+  printed: { price: number; labor: number; paint: number }
+): EstimateDeltaRow[] {
+  const sameRead = (a: EstimateDeltaRow | null, b: EstimateDeltaRow) =>
+    a !== null &&
+    a.lineNumber === b.lineNumber &&
+    a.description === b.description &&
+    a.qty === b.qty &&
+    a.price === b.price &&
+    a.labor === b.labor &&
+    a.paint === b.paint &&
+    (a.laborType ?? null) === (b.laborType ?? null);
+  const context = (row: EstimateDeltaRow) => ({ section: row.section, anchorId: row.anchorId, pageNumber: row.pageNumber ?? null });
+  const repairs = rows.map((row) => {
+    const repair = findOcrDroppedPointCell(row.rawText);
+    // The row's own text must read back to the row as parsed, so the repair
+    // changes the one cell and nothing else about it.
+    return repair && sameRead(parseCccEstimateRow(row.rawText, context(row)), row) ? repair : null;
+  });
+  const fullGrid = rows.every(
+    (row, index) =>
+      row.lineNumber === null ||
+      (row.labor === null && !row.laborIncluded && row.paint === null && !row.paintIncluded) ||
+      (row.qty !== null && row.price !== null) ||
+      repairs[index] !== null
+  );
+  const sum = (set: EstimateDeltaRow[], column: OcrRestoredColumn) =>
+    Math.round(set.reduce((total, row) => total + (row[column] ?? 0), 0) * 100) / 100;
+  const tolerance: Record<OcrRestoredColumn, number> = { price: 0.005, labor: 0.05, paint: 0.05 };
+  let current = rows;
+  for (const column of ["price", "labor", "paint"] as const) {
+    if (column === "price" && !fullGrid) continue;
+    const indexes = repairs.flatMap((repair, index) => (repair?.column === column ? [index] : []));
+    if (indexes.length === 0) continue;
+    const trial = current.map((row, index) => {
+      if (!indexes.includes(index)) return row;
+      const reparsed = parseCccEstimateRow(repairs[index]!.text, context(row));
+      return reparsed ? { ...reparsed, restoredCells: [...(row.restoredCells ?? []), column] } : row;
+    });
+    const closes = Math.abs(sum(trial, column) - printed[column]) <= tolerance[column];
+    const noOtherWorse = (["price", "labor", "paint"] as const)
+      .filter((other) => other !== column)
+      .every((other) => Math.abs(sum(trial, other) - printed[other]) <= Math.abs(sum(current, other) - printed[other]) + 1e-9);
+    if (closes && noOtherWorse) current = trial;
+  }
+  return current;
+}
+
+/**
+ * OCR reads CCC's "**" line marker (data from an alternate source) as "xx",
+ * "x*", "xk" …; left in place it hides the operation code that follows
+ * ("xk Repl A/M Bumper cover" read with no operation). Only immediately after
+ * the line number and before an operation code or supplement tag.
+ */
+const OCR_DOUBLE_ASTERISK = /^(\d{1,3}) (?!\*\*)[xXkK*]{2}(?= (?:S\d{2} )?(?:Repl|R&I|Rpr|Subl|Refn|Blnd|O\/H|Algn|Sect|PDR)\b)/;
+
 export interface ParseEstimateRowsOptions {
   /**
    * How far the preamble rule may reach (see `dropPreambleRows`).
@@ -1749,6 +1945,8 @@ export function parseCccEstimateRows(
   options?: ParseEstimateRowsOptions
 ): EstimateDeltaRow[] {
   if (!text) return [];
+  // Read before the overprint/reflow passes, which can drop the header line.
+  const ocrRecovered = isOcrRecoveredText(text);
   text = normalizeOverprintText(text);
   if (isFragmentedEstimateText(text)) {
     text = reflowFragmentedEstimateText(text);
@@ -1758,6 +1956,7 @@ export function parseCccEstimateRows(
     .replace(/\r/g, "\n")
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) => (ocrRecovered ? line.replace(OCR_DOUBLE_ASTERISK, "$1 **") : line))
     .filter(Boolean);
 
   const rows: EstimateDeltaRow[] = [];
@@ -1798,8 +1997,12 @@ export function parseCccEstimateRows(
     seenLineNumbers.add(key);
     return true;
   });
+  // Reconciled over every printed row (before the preamble drop), because
+  // the SUBTOTALS cells it must reproduce count every printed row.
+  const printedCells = ocrRecovered ? parseCccSubtotalsCells(text) : null;
+  const read = printedCells ? reconcileOcrDroppedPoints(deduped, printedCells) : deduped;
   return boundRowsByPrintedSubtotals(
-    dropPreambleRows(deduped, options?.preambleAnchor ?? "operation-anchored"),
+    dropPreambleRows(read, options?.preambleAnchor ?? "operation-anchored"),
     parseCccSubtotalsRule(text)
   );
 }
@@ -3544,11 +3747,25 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
       /^([A-Za-z][A-Za-z ]*?)\s*(\d{1,3}(?:\.\d)?)\s*hrs?\s*@\s*\$\s*([\d,]+\.\d{2})\s*\/\s*hr\s*([\d,]+\.\d{2})$/i
     );
     if (labor) {
+      const rate = money(labor[3]);
+      const cost = money(labor[4]);
+      // OCR drops the hours point ("Paint Labor 52hrs @ $65.00 /hr 338.00",
+      // printed 5.2): restored only when the row's own rate × cost proves it.
+      const restored = restoreDroppedHoursDecimal(labor[2], rate, cost);
+      if (restored !== null) {
+        console.info("[estimate-totals] restored a dropped hours decimal point", {
+          category: labor[1].trim(),
+          read: labor[2],
+          restored,
+          rate,
+          cost,
+        });
+      }
       summary.categories.push({
         category: labor[1].trim(),
-        hours: Number(labor[2]),
-        rate: money(labor[3]),
-        cost: money(labor[4]),
+        hours: restored ?? Number(labor[2]),
+        rate,
+        cost,
       });
       continue;
     }
@@ -3758,11 +3975,20 @@ export function assessHoursCoverage(
   // paint hours, and counting it inflates the denominator: RO 22059's 96.2
   // real labor hours read as 125.9, dropping a correctly-parsed document to
   // 73% coverage and putting it within a few points of the gate.
+  // An OCR'd block can drop the hours point ("52hrs" printed 5.2); the same
+  // rate × cost proof the totals reader applies restores it here, so a
+  // machine-read print is not measured against ten times its labor.
+  const money = (value: string | undefined) => (value === undefined ? null : Number(value.replace(/,/g, "")));
   const printedHours = block
     .split(/\r?\n/)
     .filter((line) => !/supplies|materials/i.test(line))
-    .flatMap((line) => [...line.matchAll(/([\d.]+)\s*hrs/g)])
-    .map((match) => Number(match[1]))
+    .flatMap((line) => [
+      ...line.matchAll(/(-?)([\d.]+)\s*hrs(?:\s*@\s*\$\s*([\d,]+\.\d{2})\s*\/\s*hr\s*(-?[\d,]+\.\d{2}))?/g),
+    ])
+    .map((match) => {
+      const restored = restoreDroppedHoursDecimal(`${match[1]}${match[2]}`, money(match[3]), money(match[4]));
+      return restored !== null ? Math.abs(restored) : Number(match[2]);
+    })
     .filter((value) => Number.isFinite(value))
     .reduce((total, value) => total + value, 0);
   const coverage = printedHours > 0 ? parsedHours / printedHours : 1;

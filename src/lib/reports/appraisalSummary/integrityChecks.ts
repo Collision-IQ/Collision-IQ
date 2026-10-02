@@ -10,11 +10,13 @@
  */
 import type { MatcherPair } from "./argueItems";
 import { shopRateFor } from "./gapLedger";
-import { classifyNonLabor } from "./nonLaborBuckets";
+import { classifyNonLabor, type LineReconciliation } from "./nonLaborBuckets";
+import { isNonOemLine } from "./partTypeEvidence";
 import { round2, type Estimate, type EstimateLine, type LaborCat } from "./types";
 
 export type FlagKind =
   | "carrierOnlyHighDollar"
+  | "shopLinesUnreconciled"
   | "trimConflictPartNumber"
   | "partNumberVariant"
   | "duplicatePartNumber"
@@ -34,9 +36,21 @@ export interface Flag {
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 export const normalizePartNumber = (s?: string) => (s ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase();
-/** Side-less, op-less stem for matching the SAME component across the two sheets. */
+/**
+ * The cross-sheet identity of a part number: normalized, with the glyphs OCR
+ * confuses folded (letter O / digit 0, I / 1). An image-only SOR read
+ * "86316-BE000" as "86316-BE00O" (RO 22279), and comparing raw strings asked
+ * staff to confirm by VIN a part both sheets write identically.
+ */
+const partKey = (s?: string) => normalizePartNumber(s).replace(/[OQ]/g, "0").replace(/I/g, "1");
+/** Side-less, op-less, source-less stem for matching the SAME component across the
+ *  two sheets: "A/M Bumper cover w/o park" is our "Bumper cover w/o park assist". */
 const stem = (s: string) =>
-  s.toLowerCase().replace(/\b(rt|lt|repl|r&i|assy|w\/o?|opt|oem)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  s
+    .toLowerCase()
+    .replace(/\b(rt|lt|repl|r&i|assy|w\/o?|opt|oem|a\/m|lkq|rcy|recond|capa|nsf)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 /** First two stem words, with drivetrain/suspension qualifiers removed, so
  *  "RT Axle assy quad-motor" and "RT Axle assy dual/tri motor" meet. */
 const baseStem = (s: string) =>
@@ -66,24 +80,46 @@ const repeatKey = (l: EstimateLine) =>
 
 const LABOR_RANK: Record<LaborCat, number> = { body: 1, paint: 1, other: 1, frame: 2, structural: 2, aluminum: 2, mechanical: 3 };
 
+/** A carrier line at or above this, with no counterpart on our sheet, is resolved first. */
+export const HIGH_DOLLAR = 500;
+
+/** Why no sentence may say our sheet lacks a line: the read of it does not close. */
+export function shopLineReadSentence(read: LineReconciliation): string {
+  // Either sign: lines lost from the read, or a line misread or read twice.
+  return `Our sheet did not read cleanly: the line prices read from it add up to ${money(read.lineTotal)}, but it prints ${money(read.printed)} for parts and other priced items, a ${money(Math.abs(read.residual))} difference: some of our lines were not read, or were misread. Until that is reconciled, nothing here says a carrier line is missing from our sheet.`;
+}
+
 export function integrityChecks(
   shop: Estimate,
   carrier: Estimate,
-  opts: { highDollar?: number; pairs?: MatcherPair[] } = {}
+  opts: {
+    highDollar?: number;
+    pairs?: MatcherPair[];
+    /** Some carrier dollars sit on lines whose price was not read: "no price" is what was read, not what was printed. */
+    carrierLinesIncomplete?: boolean;
+    /** Our sheet's line read (GapLedger.shopLineRead). When it does not close, check 1 asserts no absence. */
+    shopLineRead?: LineReconciliation | null;
+  } = {}
 ): Flag[] {
   const flags: Flag[] = [];
-  const highDollar = opts.highDollar ?? 500;
-  const shopPartNumbers = new Set(shop.lines.map((l) => normalizePartNumber(l.partNumber)).filter(Boolean));
+  const highDollar = opts.highDollar ?? HIGH_DOLLAR;
+  const shopPartNumbers = new Set(shop.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
+  const unreadShop = opts.shopLineRead && !opts.shopLineRead.closes ? opts.shopLineRead : null;
 
   // 1. High-dollar carrier lines with no counterpart on our sheet.
+  const unmatched: EstimateLine[] = [];
   for (const c of carrier.lines) {
     if ((c.price ?? 0) < highDollar) continue;
     const kind = classifyNonLabor(c);
     // Sublet and the rate adjustment are handled by the ledger and the equivalence groups.
     if (kind !== "part" && kind !== "shopSupply") continue;
-    const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(normalizePartNumber(c.partNumber));
+    const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(partKey(c.partNumber));
     const hasDescription = shop.lines.some((s) => baseStem(s.desc) === baseStem(c.desc));
     if (hasPartNumber || hasDescription) continue;
+    unmatched.push(c);
+    // "Not on our sheet" is an absence claim about every line of our sheet; it
+    // is only made when the lines read reproduce what the sheet prints.
+    if (unreadShop) continue;
     const samePrice = shop.lines.find((s) => s.price === c.price);
     const samePriceOnCarrier = carrier.lines.find((x) => x !== c && x.price === c.price);
     flags.push({
@@ -98,6 +134,21 @@ export function integrityChecks(
             (samePriceOnCarrier ? ` and their own L${samePriceOnCarrier.line} "${samePriceOnCarrier.desc}"` : "") +
             ". Confirm whether it is a separate part or the same part written twice."
           : " Either we are missing it or it was written in error; confirm which before arguing anything else."),
+    });
+  }
+  if (unreadShop) {
+    flags.push({
+      kind: "shopLinesUnreconciled",
+      side: "shop",
+      lines: { carrier: unmatched.map((c) => c.line) },
+      dollars: unreadShop.residual,
+      text:
+        shopLineReadSentence(unreadShop) +
+        (unmatched.length
+          ? ` Not found among the lines read: carrier ${unmatched
+              .map((c) => `L${c.line} "${c.desc}" (${money(c.price!)})`)
+              .join(", ")}. Look for ${unmatched.length === 1 ? "it" : "them"} on our printed sheet before arguing anything else.`
+          : ""),
     });
   }
 
@@ -118,14 +169,21 @@ export function integrityChecks(
   }
   // A variant only when NEITHER number appears anywhere on the other sheet: a
   // part both sheets carry on some line is not a disagreement about the part.
-  const carrierPartNumbers = new Set(carrier.lines.map((l) => normalizePartNumber(l.partNumber)).filter(Boolean));
+  const carrierPartNumbers = new Set(carrier.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
   const variantShopLines = new Set<number>();
   for (const c of carrier.lines) {
-    if (!c.partNumber || shopPartNumbers.has(normalizePartNumber(c.partNumber))) continue;
+    if (!c.partNumber || shopPartNumbers.has(partKey(c.partNumber))) continue;
+    const contradicts =
+      trimMotor !== undefined && /(quad|tri|dual)[- ]?motor/i.test(c.desc) && !new RegExp(trimMotor, "i").test(c.desc);
+    // An aftermarket or recycled part, on either sheet, carries its own number:
+    // that is a part-type difference, not a variant to confirm by VIN. A part
+    // that contradicts the vehicle's drivetrain is flagged whatever its type.
+    if (!contradicts && isNonOemLine(c)) continue;
     const differs = (x: EstimateLine) =>
       Boolean(x.partNumber) &&
-      normalizePartNumber(x.partNumber) !== normalizePartNumber(c.partNumber) &&
-      !carrierPartNumbers.has(normalizePartNumber(x.partNumber));
+      partKey(x.partNumber) !== partKey(c.partNumber) &&
+      !carrierPartNumbers.has(partKey(x.partNumber)) &&
+      (contradicts || !isNonOemLine(x));
     const partner = shop.lines.find((x) => x.line === matcherPartner.get(c.line));
     const s =
       shop.lines.find((x) => !variantShopLines.has(x.line) && differs(x) && qualifierStem(x.desc) === qualifierStem(c.desc)) ??
@@ -133,9 +191,10 @@ export function integrityChecks(
         ? partner
         : undefined);
     if (!s) continue;
+    // "Ours is nowhere on their sheet" is unverifiable with lines unread; a
+    // number that contradicts the vehicle stands on their line alone.
+    if (!contradicts && opts.carrierLinesIncomplete) continue;
     variantShopLines.add(s.line);
-    const contradicts =
-      trimMotor !== undefined && /(quad|tri|dual)[- ]?motor/i.test(c.desc) && !new RegExp(trimMotor, "i").test(c.desc);
     flags.push({
       kind: contradicts ? "trimConflictPartNumber" : "partNumberVariant",
       side: "both",
@@ -177,7 +236,7 @@ export function integrityChecks(
   for (const c of carrier.lines) {
     if (!c.partNumber || (c.hours ?? 0) > 0) continue;
     const s = shop.lines.find(
-      (x) => normalizePartNumber(x.partNumber) === normalizePartNumber(c.partNumber) && (x.hours ?? 0) > 0
+      (x) => partKey(x.partNumber) === partKey(c.partNumber) && (x.hours ?? 0) > 0
     );
     if (s) {
       flags.push({
@@ -198,8 +257,9 @@ export function integrityChecks(
         kind: "reuseMismatch",
         side: "shop",
         lines: { shop: [s.line], carrier: [c.line] },
-        dollars: -(c.price ?? 0),
-        text: `The carrier replaces the ${c.desc} (${money(c.price ?? 0)}, L${c.line}; its note says the part cannot be reused); we wrote R&I on L${s.line}. Add the part.`,
+        // A price that was not read is not $0.00.
+        dollars: c.price !== undefined && c.price !== null ? -c.price : undefined,
+        text: `The carrier replaces the ${c.desc} (${c.price !== undefined && c.price !== null ? money(c.price) : "price not read"}, L${c.line}; its note says the part cannot be reused); we wrote R&I on L${s.line}. Add the part.`,
       });
     }
   }
@@ -251,7 +311,9 @@ export function integrityChecks(
         side: "carrier",
         lines: { shop: [s.line], carrier: [c.line] },
         dollars: s.price,
-        text: `The carrier wrote "${c.desc}" (L${c.line}) with no price; ours is ${money(s.price!)} (L${s.line}). Ask them to price it.`,
+        text: opts.carrierLinesIncomplete
+          ? `No price was read for the carrier's "${c.desc}" (L${c.line}); ours is ${money(s.price!)} (L${s.line}). Check their printed line: if it is blank, ask them to price it.`
+          : `The carrier wrote "${c.desc}" (L${c.line}) with no price; ours is ${money(s.price!)} (L${s.line}). Ask them to price it.`,
       });
     }
   }

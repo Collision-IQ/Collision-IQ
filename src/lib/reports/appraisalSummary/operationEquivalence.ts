@@ -25,6 +25,8 @@ export interface EquivGroup {
   label: string;
   shop: RegExp;
   carrier: RegExp;
+  /** The group forms only when at least one carrier line matches this (a road test alone is not calibration). */
+  carrierAnchor?: RegExp;
 }
 
 export const EQUIV_GROUPS: EquivGroup[] = [
@@ -56,7 +58,13 @@ export const EQUIV_GROUPS: EquivGroup[] = [
     key: "adas",
     label: "ADAS calibration & diagnostics",
     shop: /calibrat|driver\s+assist|trupoint|research\s+(up\s+to\s+date\s+)?adas|set\s+ride\s+height|service\s+mode|set\s+up\s+targets|blueprint|research\s+dtc|connect\s+vehicle|road\s+test|allpurpose|reset\s+vehicle|in-?proc/i,
-    carrier: /aim\s+(camera|distance\s+sensor)|add\s+for\s+radar|calibrat/i,
+    // "road test" on both sides: the shop pattern carries it, and leaving the
+    // carrier's own road test out (RO 22279 L49, 0.5 hr) printed "theirs 0.0 hr".
+    // But a road test is a test drive, not calibration: the carrier side
+    // counts only when it writes real calibration or aiming, or a carrier
+    // road test alone would absorb our calibration as "the same work".
+    carrier: /aim\s+(camera|distance\s+sensor)|add\s+for\s+radar|calibrat|road\s+test/i,
+    carrierAnchor: /aim\s+(camera|distance\s+sensor)|add\s+for\s+radar|calibrat/i,
   },
   {
     key: "scan",
@@ -109,6 +117,7 @@ export function groupEquivalents(shop: Estimate, carrier: Estimate) {
     const c = carrier.lines.filter((l) => !usedCarrier.has(l.line) && matches(group.carrier, l));
     // One-sided: leave it for the no-counterpart pass.
     if (!s.length || !c.length) continue;
+    if (group.carrierAnchor && !c.some((l) => matches(group.carrierAnchor!, l))) continue;
     s.forEach((l) => usedShop.add(l.line));
     c.forEach((l) => usedCarrier.add(l.line));
     const exclusions = c
