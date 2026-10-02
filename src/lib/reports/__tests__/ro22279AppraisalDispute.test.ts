@@ -349,6 +349,9 @@ describe("D4 — a part number with a two-letter interior is one token", () => {
     // A short tail other than a qty marker stays on the part number.
     expect(parseCccEstimateRow("1 Repl Bumper bracket 62090-5AA0B 1 89.00 0.3 0.0")).toMatchObject({ description: "Bumper bracket", partNumber: "62090-5AA0B", qty: 1, price: 89 });
     expect(parseCccEstimateRow("1 Repl Bracket 57704FL01B 1 245.00 0.0 0.0")).toMatchObject({ partNumber: "57704FL01B", qty: 1, price: 245 });
+    // A one- or two-digit qty with a lowercase marker splits after any word.
+    expect(parseCccEstimateRow("5#S01Clip retainer 8mm10m")).toMatchObject({ description: "Clip retainer 8mm", qty: 10 });
+    expect(parseCccEstimateRow("6#S01Wheel weights 1/4oz12m")).toMatchObject({ description: "Wheel weights 1/4oz", qty: 12 });
     // A qty marker after a description word holding digits splits as on main.
     for (const [row, description] of [
       ["45#Nameplate 4MATIC1m", "Nameplate 4MATIC"],
@@ -409,8 +412,8 @@ describe("D5 — one counterpart per run", () => {
     expect(readPrintedEstimateVersion(earlier.text)).toBe(1);
     for (const candidates of [[latest, earlier], [earlier, latest]]) {
       const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
-      // Unsettled: the dispute report is refused, the forensic run uses the latest.
-      expect(selection.counterpart?.fileName).toBe("Progressive Supplement 3.pdf");
+      // Unsettled: the dispute report is refused; the forensic run uses the most plainly marked.
+      expect(selection.counterpart?.fileName).toBe("SOR 1.pdf");
       expect(selection.unidentified.map((c) => c.fileName).sort()).toEqual(["Progressive Supplement 3.pdf", "SOR 1.pdf"]);
     }
   });
@@ -502,8 +505,12 @@ describe("D5 — one counterpart per run", () => {
   });
 
   it("a redacted or placeholder estimator proves nothing; a real name does", () => {
-    for (const placeholder of ["[REDACTED], 739698", "XXXXXXXX, 1", "ESTIMATOR, REDACTED", "ADJUSTER NAME, License Number: 1", "NAME REDACTED, 2", "OSKAR, 3"]) {
+    for (const placeholder of ["[REDACTED], 739698", "XXXXXXXX, 1", "ESTIMATOR, REDACTED", "ADJUSTER NAME, License Number: 1", "NAME REDACTED, 2", "X, 3"]) {
       expect(readPrintedEstimator(`Written By: ${placeholder}`)).toBeNull();
+    }
+    // Short and initialled real names still count.
+    for (const [printed, name] of [["J. R. SMITH, 1", "J R SMITH"], ["MIKE, 2", "MIKE"], ["JIWON NA, 3", "JIWON NA"], ["OSKAR, 4", "OSKAR"]]) {
+      expect(readPrintedEstimator(`Written By: ${printed}`)).toBe(name);
     }
     expect(sameEstimator("Written By: [REDACTED], 739698", "Written By: [REDACTED], License Number: 271128")).toBe(false);
     expect(readPrintedEstimator("Written By: Jane  Roe, License Number: 1")).toBe("JANE ROE");
@@ -521,10 +528,29 @@ describe("D5 — one counterpart per run", () => {
     for (const candidates of [[older, latest], [latest, older]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: latest, unidentified: [] });
     }
-    // Nothing ties them together: unsettled, but measured against the latest.
+    // Nothing ties them together: unsettled, measured against the most plainly marked.
     const blind = selectComparisonCounterpart([older, latest].map((c) => ({ ...c, text: c.text.replace(appraiser, "") })), { sourceParty: "shop" });
     expect(blind.unidentified.length).toBe(2);
-    expect(blind.counterpart?.fileName).toBe("USAA_22279.pdf");
+    expect(blind.counterpart?.fileName).toBe("Insurance estimate 22279.pdf");
+    // Two shop versions by one (unlicensed) estimator never join that way.
+    const estimator = "Written By: JOHN DOE, 739698";
+    const shopNamedAdjuster = { ...shopFinal, fileName: "Supplement request to adjuster 22279.pdf", estimateRole: "carrier" as const, text: `${estimator}\n${shopFinal.text.replace("10/1/2026", "9/22/2026")}` };
+    const shopNamedUsaa = { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const, text: `${estimator}\n${shopFinal.text}` };
+    const real = { ...latest, fileName: "SOR-1_22279.pdf" };
+    expect(selectComparisonCounterpart([shopNamedAdjuster, real, shopNamedUsaa], { sourceParty: "shop" }).unidentified.length).toBeGreaterThan(0);
+  });
+
+  it("an independent appraiser's estimate is the weakest mark: it never outranks the insurer's brand", () => {
+    const ia = { ...shopFinal, fileName: "Independent Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: JOHN DOE, 1\n${shopFinal.text.replace("10/1/2026", "9/22/2026")}` };
+    const theirs = { ...sor, fileName: "USAA Supplement 1.pdf", estimateRole: "carrier" as const };
+    for (const candidates of [[ia, theirs], [theirs, ia]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: theirs, unidentified: [] });
+    }
+    // Printed after the SOR, it makes the run unsettled instead of being called theirs.
+    const later = { ...ia, text: `Written By: JOHN DOE, 1\n${shopFinal.text}` };
+    const sorNamed = { ...sor, estimateRole: "carrier" as const };
+    expect(selectComparisonCounterpart([later, sorNamed], { sourceParty: "shop" })).toMatchObject({ counterpart: sorNamed });
+    expect(selectComparisonCounterpart([later, sorNamed], { sourceParty: "shop" }).unidentified.length).toBe(2);
   });
 
   it("names an Estimate of Record as such, never 'supplement 0'", () => {

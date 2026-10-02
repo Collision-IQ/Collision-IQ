@@ -58,12 +58,18 @@ export function readLatestPrintedTimestamp(text: string): number | null {
 export function readPrintedEstimator(text: string): string | null {
   const name = (text ?? "").match(/Written\s+By:[ \t]*([^,\n]{2,60})/i)?.[1];
   const words = (name?.toUpperCase().replace(/[^A-Z]+/g, " ").trim() ?? "").split(" ").filter(Boolean);
-  // A person's name: two or more words of two or more letters. A redaction
-  // or role placeholder ("[REDACTED]", "XXXXXXXX", "ESTIMATOR", "ADJUSTER
-  // NAME") prints the same on both sheets and proves nothing.
-  const placeholder = (word: string) => /^X+$/.test(word) || /^(?:REDACTED|NAME|ESTIMATOR|APPRAISER|ADJUSTER|UNKNOWN|NONE|NA)$/.test(word);
-  if (words.filter((word) => word.length >= 2).length < 2 || words.some(placeholder)) return null;
+  // A redaction or role placeholder ("[REDACTED]", "XXXXXXXX", "ESTIMATOR",
+  // "ADJUSTER NAME") prints the same on both sheets and proves nothing; any
+  // real name does, short or initialled ("J. R. SMITH", "MIKE", "JIWON NA").
+  const placeholder = (word: string) =>
+    word.length === 1 || /^X+$/.test(word) || /^(?:REDACTED|NAME|ESTIMATOR|APPRAISER|ADJUSTER|UNKNOWN|NONE|NA)$/.test(word);
+  if (words.every(placeholder) || words.join("").length < 3) return null;
   return words.join(" ");
+}
+
+/** The print names a licensed appraiser as its writer ("Written By: NAME, License Number: …"). */
+function printsAppraiserLicense(text: string): boolean {
+  return /Written\s+By:[^\n]*\bLicense\s+(?:Number|No\.?|#)/i.test(text ?? "");
 }
 
 /** True when both prints name an estimator and it is the same one. */
@@ -84,7 +90,9 @@ const nameWords = (fileName: string) =>
     .replace(/[^A-Za-z0-9]+/g, " ")
     .toLowerCase()} `;
 /** A word that names the insurer's document as such. */
-const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?|appraisers?)\b/;
+const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?)\b/;
+/** "Appraiser" also names an independent or the owner's appraiser: the weakest name mark. */
+const APPRAISER_WORD = /\bappraisers?\b/;
 /** An insurer's brand: a shop names its own files this way too, so it is weaker evidence. */
 const INSURER_BRAND = /\b(?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)\b/;
 const SHOP_WORD = /\b(?:shop|repair facility|rta|appraisal)\b/;
@@ -207,7 +215,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
       const byEstimator = Boolean(options.sourceText) && sameEstimator(options.sourceText!, candidate.text);
       const ours = byEstimator || (shopSource ? SHOP_WORD.test(words) : INSURER_WORD.test(words) || INSURER_BRAND.test(words));
       const tier = shopSource
-        ? INSURER_WORD.test(words) ? 3 : INSURER_BRAND.test(words) ? 2 : authored ? 1 : 0
+        ? INSURER_WORD.test(words) ? 3 : INSURER_BRAND.test(words) ? 2 : authored || APPRAISER_WORD.test(words) ? 1 : 0
         : SHOP_WORD.test(words) ? 3 : !authored ? 1 : 0;
       return [candidate, { ours, byEstimator, tier }] as const;
     })
@@ -232,11 +240,18 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   let unidentified: T[] = [];
   if (clean.length) {
     const topTier = Math.max(...clean.map((candidate) => ev(candidate).tier));
-    // The most plainly marked, plus any estimate printing the same estimator
-    // as one of them: the insurer's versions named differently ("Insurance
-    // estimate.pdf", then "USAA_22279.pdf") are still one appraiser's.
+    // The most plainly marked, plus any estimate printing the same licensed
+    // appraiser as one of them: the insurer's versions named differently
+    // ("Insurance estimate.pdf", then "USAA_22279.pdf") are still one
+    // appraiser's. A shop estimator prints no license, so two shop versions
+    // never join this way.
     const writer = new Map(clean.map((candidate) => [candidate, readPrintedEstimator(candidate.text)]));
-    const topWriters = new Set(clean.filter((candidate) => ev(candidate).tier === topTier).map((candidate) => writer.get(candidate)).filter(Boolean));
+    const topWriters = new Set(
+      clean
+        .filter((candidate) => ev(candidate).tier === topTier && printsAppraiserLicense(candidate.text))
+        .map((candidate) => writer.get(candidate))
+        .filter(Boolean)
+    );
     const top = clean.filter((candidate) => ev(candidate).tier === topTier || topWriters.has(writer.get(candidate) ?? ""));
     const overall = orderByPrintedEvidence(clean);
     const latest = clean[overall.best];
@@ -244,9 +259,9 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     // and no estimate may carry both marks while the best mark is weak.
     const latestIsTop = overall.rank === null || top.includes(latest);
     if (!latestIsTop || (topTier < 3 && conflicted.length)) unidentified = [...clean, ...conflicted];
-    // Unsettled: measure against the latest printed, as the forensic run did
-    // before; the dispute report is refused either way.
-    pool = unidentified.length && !latestIsTop ? clean : top;
+    // Unsettled or not, the forensic run is measured against the most plainly
+    // marked: a later file marked only by a brand or a phrase may be ours.
+    pool = top;
     for (const candidate of base) {
       if (top.includes(candidate) || unidentified.includes(candidate)) continue;
       if (ev(candidate).ours) excluded.push({ candidate, reason: oursReason(candidate) });
