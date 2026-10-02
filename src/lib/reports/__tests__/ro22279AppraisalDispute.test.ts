@@ -476,12 +476,18 @@ describe("D5 — one counterpart per run", () => {
   });
 
   it("reads party words through camel case and separators", () => {
-    const unmarked = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
+    // Our other version prints our estimator, so it is ours whatever its name.
+    const ourEstimator = "Written By: JANE ROE, 739698";
+    const unmarked = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `${ourEstimator}\n${shopFinal.text}` };
     for (const name of ["GeicoSupplement1.pdf", "State-Farm-Supplement-3.pdf", "Liberty_Mutual_Supp1.pdf", "InsuranceEstimate.pdf"]) {
       const theirs = { ...sor, fileName: name, estimateRole: "carrier" as const };
       for (const candidates of [[unmarked, theirs], [theirs, unmarked]]) {
-        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: theirs, unidentified: [] });
+        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: ourEstimator })).toMatchObject({ counterpart: theirs, unidentified: [] });
       }
+      // Nothing shows the unmarked one is ours: a brand alone does not settle it; a word naming the document does.
+      const blind = selectComparisonCounterpart([{ ...unmarked, text: shopFinal.text }, theirs], { sourceParty: "shop" });
+      expect(blind.counterpart).toBe(theirs);
+      expect(blind.unidentified.length).toBe(name === "InsuranceEstimate.pdf" ? 0 : 2);
     }
     const ours = { ...shopFinal, fileName: "ShopFinal22279.pdf", estimateRole: "shop" as const };
     const geico = { ...sor, fileName: "GeicoSupplement3.pdf", estimateRole: "carrier" as const };
@@ -575,6 +581,18 @@ describe("D5 — one counterpart per run", () => {
         }
       }
     }
+    // An insurer mark anywhere in the name keeps it theirs, whatever else the name says.
+    for (const name of ["Insurance appraiser estimate - customer copy.pdf", "USAA SOR 1 - Independent Appraiser.pdf", "USAA IA appraiser estimate.pdf", "State Farm appraiser estimate for insured.pdf"]) {
+      const insurer = { ...sor, fileName: name, estimateRole: "carrier" as const };
+      const ourOther = { ...shopFinal, fileName: "22279 supplement.pdf", estimateRole: "carrier" as const, text: `Written By: DANIEL KRAMER, 2\n${shopFinal.text}` };
+      for (const candidates of [[insurer, ourOther], [ourOther, insurer]]) {
+        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart).toBe(insurer);
+      }
+    }
+    // Another party's appraiser set aside next to a lone unmarked estimate: unsettled, never "theirs".
+    const insuredIa = { ...shopFinal, fileName: "Insured's Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: JOHN DOE, License Number: 5\n${shopFinal.text}` };
+    const unmarkedOurs = { ...shopFinal, fileName: "22279 supplement.pdf", estimateRole: "carrier" as const, text: `Written By: DANIEL KRAMER, 2\n${shopFinal.text}` };
+    expect(selectComparisonCounterpart([insuredIa, unmarkedOurs], { sourceParty: "shop" }).unidentified.length).toBe(2);
     // A bare "appraiser" is a weak mark: against a later brand-named file the run is unsettled.
     const bare = { ...sor, fileName: "Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: MONICA ROE, License Number: 271128\n${sorText}` };
     const laterBrand = { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const };

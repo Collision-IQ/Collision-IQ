@@ -106,7 +106,8 @@ const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?)\b/;
  */
 const APPRAISER_WORD = /\bappraisers?\b/;
 const INSURER_APPRAISER = /\b(?:staff|company|desk|field)\s+appraisers?\b/;
-const OTHER_APPRAISER = /\b(?:independent|insureds?|policy ?holders?|owners?|claimants?|customers?|umpires?|ia|our|my)\b/;
+/** The qualifier right before "appraiser" ("insured's appraiser" reads "insured s appraiser"). */
+const OTHER_APPRAISER = /\b(?:independent|insureds?|policy ?holders?|owners?|claimants?|customers?|umpires?|ia|our|my)(?: s)? appraisers?\b/;
 /** An insurer's brand: a shop names its own files this way too, so it is weaker evidence. */
 const INSURER_BRAND = /\b(?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)\b/;
 const SHOP_WORD = /\b(?:shop|repair facility|rta|appraisal)\b/;
@@ -228,7 +229,6 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
       const authored = isCarrierAuthoredEstimateDocument({ filename: "", text: candidate.text });
       const byEstimator = Boolean(options.sourceText) && sameEstimator(options.sourceText!, candidate.text);
       const ours = byEstimator || (shopSource ? SHOP_WORD.test(words) : INSURER_WORD.test(words) || INSURER_BRAND.test(words));
-      const thirdParty = shopSource && APPRAISER_WORD.test(words) && OTHER_APPRAISER.test(words);
       const tier = shopSource
         ? INSURER_WORD.test(words) || INSURER_APPRAISER.test(words)
           ? 3
@@ -238,6 +238,9 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
               ? 1
               : 0
         : SHOP_WORD.test(words) ? 3 : !authored ? 1 : 0;
+      // Another party's appraiser by name, and nothing in the name marking it
+      // the insurer's ("Insurance appraiser estimate - customer copy" is theirs).
+      const thirdParty = shopSource && OTHER_APPRAISER.test(words) && !INSURER_WORD.test(words) && !INSURER_APPRAISER.test(words) && !INSURER_BRAND.test(words);
       return [candidate, { ours, byEstimator, tier, thirdParty }] as const;
     })
   );
@@ -285,11 +288,13 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     const latest = clean[overall.best];
     // The most plainly marked one must also be the latest the prints show.
     // While the best mark is weak (a brand, a bare "appraiser", a phrase),
-    // no other estimate may carry a different weak mark or both parties'
-    // marks: a shop names its own files after the insurer too.
+    // no other estimate not shown to be ours may sit beside it, marked
+    // differently, marked both ways, or unmarked: a shop names its own files
+    // after the insurer too, and an OCR'd SOR may carry no mark at all.
     const latestIsTop = overall.rank === null || top.includes(latest);
-    const weakDisagree = topTier < 3 && (conflicted.length > 0 || clean.some((candidate) => !top.includes(candidate)));
-    if (!latestIsTop || weakDisagree) unidentified = [...clean, ...conflicted];
+    const weakDisagree =
+      topTier < 3 && (conflicted.length > 0 || unknown.length > 0 || clean.some((candidate) => !top.includes(candidate)));
+    if (!latestIsTop || weakDisagree) unidentified = [...clean, ...conflicted, ...(topTier < 3 ? unknown : [])];
     // Unsettled or not, the forensic run is measured against the most plainly
     // marked: a later file marked only by a brand or a phrase may be ours.
     pool = top;
@@ -304,7 +309,10 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     const ambiguous = [...conflicted, ...unknown];
     pool = ambiguous.length ? ambiguous : weighed.length ? weighed : base;
     if (ambiguous.length > 1) unidentified = ambiguous;
-    // Only other parties' appraisers left: nothing here is the insurer's.
+    // With another party's appraiser set aside, a lone unmarked estimate is
+    // not shown to be the insurer's (it may be our own other version); with
+    // only such appraisers left, nothing here is the insurer's.
+    else if (thirdParties.length && ambiguous.length) unidentified = [...ambiguous, ...thirdParties];
     else if (!weighed.length && base.length > 1) unidentified = base;
     for (const candidate of weighed) {
       if (!pool.includes(candidate)) excluded.push({ candidate, reason: oursReason(candidate) });
