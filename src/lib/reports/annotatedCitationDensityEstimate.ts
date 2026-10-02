@@ -107,6 +107,7 @@ import {
   isCarrierAuthoredEstimateDocument,
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
+import { describeExcludedComparisons, selectComparisonCounterpart } from "./comparisonCounterpart";
 import {
   buildPmCapFlag,
   detectRepairFacilityState,
@@ -1913,6 +1914,29 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       "Source estimate could not be confirmed as carrier-authored from the parsed file; it is labeled by file provenance instead of an assumed carrier role."
     );
   }
+  // ONE COUNTERPART. With the source party now final, a case holding more
+  // than one other estimate is narrowed to the single one this run measures
+  // against, and every reader below — identity, word layers, rows, totals,
+  // coverage, release gate, forensic names, the dispute report — sees only
+  // it. Pooling them read RO 22279's Shop final lines under its SOR's totals.
+  if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
+    const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
+      sourceParty: sourceDocumentRole,
+      pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
+    });
+    const chosen = selection.counterpart;
+    if (chosen) {
+      const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
+        chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
+      params = {
+        ...params,
+        comparisonEstimateTexts: [chosen],
+        comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
+      };
+      const note = describeExcludedComparisons(selection);
+      if (note) warnings.push(note);
+    }
+  }
   const anchors = extraction.anchors;
   const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
   const trace: CitationDensityDebugTrace = {
@@ -3175,6 +3199,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           );
         }
       }
+    } else if (sourceDocumentRole === "shop") {
+      // Never skipped in silence: a shop run that gets no dispute report says
+      // which document it was measured against and how that one was read.
+      const comparisonName = params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate";
+      warnings.push(
+        `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was read as ${
+          comparisonRole === "shop" ? "a shop estimate" : "an estimate of unidentified authorship"
+        }. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
     }
   }
 

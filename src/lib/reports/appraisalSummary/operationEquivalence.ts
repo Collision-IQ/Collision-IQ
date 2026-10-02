@@ -56,7 +56,9 @@ export const EQUIV_GROUPS: EquivGroup[] = [
     key: "adas",
     label: "ADAS calibration & diagnostics",
     shop: /calibrat|driver\s+assist|trupoint|research\s+(up\s+to\s+date\s+)?adas|set\s+ride\s+height|service\s+mode|set\s+up\s+targets|blueprint|research\s+dtc|connect\s+vehicle|road\s+test|allpurpose|reset\s+vehicle|in-?proc/i,
-    carrier: /aim\s+(camera|distance\s+sensor)|add\s+for\s+radar|calibrat/i,
+    // "road test" on both sides: the shop pattern carries it, and leaving the
+    // carrier's own road test out (RO 22279 L49, 0.5 hr) printed "theirs 0.0 hr".
+    carrier: /aim\s+(camera|distance\s+sensor)|add\s+for\s+radar|calibrat|road\s+test/i,
   },
   {
     key: "scan",

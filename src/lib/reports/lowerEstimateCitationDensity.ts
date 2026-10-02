@@ -29,7 +29,7 @@ import type { PdfWord } from "./citationDensityRowAnchors";
 import { labelCat } from "./appraisalSummary/estimateFromDeltaRows";
 import { LABOR_FAMILY } from "./appraisalSummary/gapLedger";
 import type { LowerEntry, LowerFinding, LowerFindingSet, StampField } from "./appraisalSummary/lowerEstimateFindings";
-import type { PlainSummaryModel } from "./plainLanguageSummary";
+import { unreadCarrierNote, type PlainSummaryModel } from "./plainLanguageSummary";
 
 const STAMP_SIZE = 6.5;
 const BADGE_SIZE = 6.5;
@@ -378,6 +378,7 @@ function appendIndex(
     }.`
   );
   if (L.laborRate !== 0) write(`Labor rate still open: ${money(L.laborRate)}.`);
+  if (L.unreadCarrierLines > 0) write(unreadCarrierNote(model));
   write(
     `Paint materials: ${money(L.paintMaterials)}.${L.otherMaterials !== 0 ? ` Other materials: ${money(L.otherMaterials)}.` : ""} Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`
   );

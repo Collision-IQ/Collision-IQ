@@ -11,6 +11,7 @@
 import type { MatcherPair } from "./argueItems";
 import { shopRateFor } from "./gapLedger";
 import { classifyNonLabor } from "./nonLaborBuckets";
+import { isNonOemLine } from "./partTypeEvidence";
 import { round2, type Estimate, type EstimateLine, type LaborCat } from "./types";
 
 export type FlagKind =
@@ -34,9 +35,21 @@ export interface Flag {
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 export const normalizePartNumber = (s?: string) => (s ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase();
-/** Side-less, op-less stem for matching the SAME component across the two sheets. */
+/**
+ * The cross-sheet identity of a part number: normalized, with the glyphs OCR
+ * confuses folded (letter O / digit 0, I / 1). An image-only SOR read
+ * "86316-BE000" as "86316-BE00O" (RO 22279), and comparing raw strings asked
+ * staff to confirm by VIN a part both sheets write identically.
+ */
+const partKey = (s?: string) => normalizePartNumber(s).replace(/[OQ]/g, "0").replace(/I/g, "1");
+/** Side-less, op-less, source-less stem for matching the SAME component across the
+ *  two sheets: "A/M Bumper cover w/o park" is our "Bumper cover w/o park assist". */
 const stem = (s: string) =>
-  s.toLowerCase().replace(/\b(rt|lt|repl|r&i|assy|w\/o?|opt|oem)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  s
+    .toLowerCase()
+    .replace(/\b(rt|lt|repl|r&i|assy|w\/o?|opt|oem|a\/m|lkq|rcy|recond|capa|nsf)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 /** First two stem words, with drivetrain/suspension qualifiers removed, so
  *  "RT Axle assy quad-motor" and "RT Axle assy dual/tri motor" meet. */
 const baseStem = (s: string) =>
@@ -73,7 +86,11 @@ export function integrityChecks(
 ): Flag[] {
   const flags: Flag[] = [];
   const highDollar = opts.highDollar ?? 500;
-  const shopPartNumbers = new Set(shop.lines.map((l) => normalizePartNumber(l.partNumber)).filter(Boolean));
+  const shopPartNumbers = new Set(shop.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
+  // Carrier lines the delta matcher itself paired with one of ours.
+  const pairedCarrierLines = new Set(
+    (opts.pairs ?? []).filter((pair) => pair.carrierLine !== undefined && pair.shopLines.length > 0).map((pair) => pair.carrierLine!)
+  );
 
   // 1. High-dollar carrier lines with no counterpart on our sheet.
   for (const c of carrier.lines) {
@@ -81,7 +98,10 @@ export function integrityChecks(
     const kind = classifyNonLabor(c);
     // Sublet and the rate adjustment are handled by the ledger and the equivalence groups.
     if (kind !== "part" && kind !== "shopSupply") continue;
-    const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(normalizePartNumber(c.partNumber));
+    // The matcher's pairing is the counterpart (RO 22279: their A/M bumper
+    // cover L26 is our OEM L30, paired by the matcher at a price difference).
+    if (pairedCarrierLines.has(c.line)) continue;
+    const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(partKey(c.partNumber));
     const hasDescription = shop.lines.some((s) => baseStem(s.desc) === baseStem(c.desc));
     if (hasPartNumber || hasDescription) continue;
     const samePrice = shop.lines.find((s) => s.price === c.price);
@@ -118,14 +138,17 @@ export function integrityChecks(
   }
   // A variant only when NEITHER number appears anywhere on the other sheet: a
   // part both sheets carry on some line is not a disagreement about the part.
-  const carrierPartNumbers = new Set(carrier.lines.map((l) => normalizePartNumber(l.partNumber)).filter(Boolean));
+  const carrierPartNumbers = new Set(carrier.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
   const variantShopLines = new Set<number>();
   for (const c of carrier.lines) {
-    if (!c.partNumber || shopPartNumbers.has(normalizePartNumber(c.partNumber))) continue;
+    if (!c.partNumber || shopPartNumbers.has(partKey(c.partNumber))) continue;
+    // An aftermarket or recycled part always carries its own number: that is a
+    // part-type difference, not a variant to confirm by VIN.
+    if (isNonOemLine(c)) continue;
     const differs = (x: EstimateLine) =>
       Boolean(x.partNumber) &&
-      normalizePartNumber(x.partNumber) !== normalizePartNumber(c.partNumber) &&
-      !carrierPartNumbers.has(normalizePartNumber(x.partNumber));
+      partKey(x.partNumber) !== partKey(c.partNumber) &&
+      !carrierPartNumbers.has(partKey(x.partNumber));
     const partner = shop.lines.find((x) => x.line === matcherPartner.get(c.line));
     const s =
       shop.lines.find((x) => !variantShopLines.has(x.line) && differs(x) && qualifierStem(x.desc) === qualifierStem(c.desc)) ??
@@ -177,7 +200,7 @@ export function integrityChecks(
   for (const c of carrier.lines) {
     if (!c.partNumber || (c.hours ?? 0) > 0) continue;
     const s = shop.lines.find(
-      (x) => normalizePartNumber(x.partNumber) === normalizePartNumber(c.partNumber) && (x.hours ?? 0) > 0
+      (x) => partKey(x.partNumber) === partKey(c.partNumber) && (x.hours ?? 0) > 0
     );
     if (s) {
       flags.push({

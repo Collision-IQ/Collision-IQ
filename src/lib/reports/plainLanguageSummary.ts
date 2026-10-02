@@ -96,9 +96,14 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
   const partType = partTypeEvidence(shop, carrier);
   const { groups, usedShop } = groupEquivalents(shop, carrier);
-  const flags = integrityChecks(shop, carrier, { pairs: input.pairs });
+  // With carrier dollars unread, a carrier line read with no price may be a
+  // price that was not read: "they wrote it with no price" is not stated.
+  const carrierLinesIncomplete = ledger.unreadCarrierLines > 0;
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs }).filter(
+    (flag) => !(carrierLinesIncomplete && flag.kind === "zeroPricedCarrierLine")
+  );
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
-  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs });
+  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs, carrierLinesIncomplete });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
     (l) => classifyNonLabor(l) === "sublet" && /calibrat|adas/i.test(l.desc)
   );
@@ -206,6 +211,7 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       ],
       rows: ledgerRows(model),
     },
+    ...(L.unreadCarrierLines > 0 ? [{ kind: "note" as const, text: unreadCarrierNote(model) }] : []),
   ]);
 
   // 2b. The gross view behind the net.
@@ -438,7 +444,11 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
         money(L.laborRate),
         `(our rate − their rate) × their hours${
           labor.length ? `: ${labor.map((i) => `${i.label} ${hr(i.hours)} × ${rate(i.shopRate - i.carrierRate)}`).join("; ")}` : ""
-        }${adj > 0 ? `, less the carrier's ${money(adj)} rate adjustment` : ""}.`,
+        }${adj > 0 ? `, less the carrier's ${money(adj)} rate adjustment` : ""}.${
+          L.unreadCarrierLines > 0 && L.laborRate > 0
+            ? ` If any of the ${money(L.unreadCarrierLines)} on their lines that was not read is a labor-rate adjustment, this row is smaller by that amount (see the note below).`
+            : ""
+        }`,
       ],
     });
   } else if (adj > 0) {
@@ -478,6 +488,30 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
   rows.push({ cells: ["Tax", money(L.tax), `${money(shop.totals.tax)} − ${money(carrier.totals.tax)}.`] });
   rows.push({ cells: ["Total", money(L.gap), `${money(L.shopTotal)} − ${money(L.carrierTotal)}.`], variant: "total" });
   return rows;
+}
+
+/**
+ * What the report could not read on the carrier's sheet, with the amount, and
+ * exactly which rows it could move. Every bucket above is computed from the
+ * printed totals, so the unread dollars can shift money between the Labor
+ * rate row and the parts row and never change the total.
+ */
+export function unreadCarrierNote(model: PlainSummaryModel): string {
+  const { ledger: L, carrier } = model;
+  const printed = carrier.totals.parts + carrier.totals.misc;
+  const read = printed - L.unreadCarrierLines;
+  return [
+    `${model.header.theirs} prints ${money(printed)} of parts and miscellaneous charges; the lines this read could price add up to ${
+      read > 0.005 ? money(read) : "nothing"
+    }, so ${money(L.unreadCarrierLines)} is on lines whose price was not read.`,
+    "The rows above use the printed totals, so the total difference is exact.",
+    L.laborRate > 0
+      ? `If any of the ${money(L.unreadCarrierLines)} is a labor-rate adjustment, the Labor rate row is smaller and the parts row larger by that amount.`
+      : "",
+    "A line of theirs described here as having no price or no counterpart may be one whose price was not read: check it against their printed estimate before raising it.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**

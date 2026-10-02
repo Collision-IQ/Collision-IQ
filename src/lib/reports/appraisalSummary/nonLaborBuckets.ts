@@ -40,6 +40,12 @@ export interface NonLaborBuckets {
 
 export class NonLaborParseError extends Error {}
 
+/** Printed Parts + Misc less what the lines that were read price: dollars on lines whose price was not read (negative when the read over-reads). */
+export function unreadLineDollars(estimate: Estimate): number {
+  const read = estimate.lines.reduce((sum, line) => sum + (line.price ?? 0), 0);
+  return round2(estimate.totals.parts + estimate.totals.misc - read);
+}
+
 /**
  * Sum each bucket from the line prices. `strict` (the production default)
  * requires the line prices to reproduce the printed Parts + Misc totals to

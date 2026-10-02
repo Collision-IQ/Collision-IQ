@@ -189,10 +189,26 @@ export function findVin(text: string): string | null {
     }
     return null;
   };
+  // A labeled read that fails its check digit is kept, and the walk goes on:
+  // the same print often states its VIN again. A later labeled VIN replaces
+  // it only when that VIN validates and differs from it in exactly ONE
+  // position where the fold had to guess (the raw glyph was O, I or Q) — the
+  // signature of a misread glyph, never of another vehicle. RO 22279's SOR
+  // OCR'd "KM8HACABORU 149560" on page 1 (O for 9) and the correct VIN on
+  // pages 11 and 12; reading only page 1 reported "VINs differ".
+  let unvalidated: { vin: string; raw: string } | null = null;
+  const correctsGuess = (vin: string) => {
+    if (!unvalidated) return false;
+    const differing = [...vin].flatMap((char, index) => (char === unvalidated!.vin[index] ? [] : [index]));
+    return differing.length === 1 && /[OIQ]/.test(unvalidated.raw[differing[0]] ?? "");
+  };
   for (const match of text.matchAll(/\bVIN\b\s*[:#-]?/gi)) {
     const after = text.slice(match.index + match[0].length, match.index + match[0].length + 60);
     const found = scan(after);
-    if (found) return found;
+    if (found) {
+      if (!unvalidated || correctsGuess(found)) return found;
+      continue;
+    }
     // LABELED lane only: accept a 17-char token whose OCR fold lands in the
     // VIN alphabet even when the check digit fails. The label anchors what the
     // value IS; the check digit stays a confidence signal, never a gate
@@ -201,11 +217,17 @@ export function findVin(text: string): string | null {
     // below keeps its strict check so part numbers never match.
     const run = /[A-Z0-9]{17,}/i.exec(after.replace(/\s+/g, ""));
     if (run) {
-      const folded = foldVinForComparison(run[0].slice(0, 17));
-      if (folded && VIN_ALPHABET.test(folded)) return folded;
+      const raw = run[0].slice(0, 17).toUpperCase();
+      const folded = foldVinForComparison(raw);
+      if (!folded || !VIN_ALPHABET.test(folded)) continue;
+      if (isValidVin(folded)) {
+        if (!unvalidated || correctsGuess(folded)) return folded;
+        continue;
+      }
+      unvalidated ??= { vin: folded, raw };
     }
   }
-  return scan(text);
+  return unvalidated?.vin ?? scan(text);
 }
 
 /** Read identity keys off a document's own text. */

@@ -74,8 +74,13 @@ export function argueItems(params: {
   usedShop: Set<number>;
   flags: Flag[];
   pairs: MatcherPair[];
+  /** Some of the carrier's printed dollars sit on lines whose price was not read. */
+  carrierLinesIncomplete?: boolean;
 }): ArgueItem[] {
   const { shop, carrier, groups, usedShop, flags, pairs } = params;
+  // With part of their sheet unread, "no price" and "no counterpart" are what
+  // this read found, not what their sheet says.
+  const incomplete = params.carrierLinesIncomplete === true;
   const shopLine = new Map(shop.lines.map((l) => [l.line, l]));
   const carrierLine = new Map(carrier.lines.map((l) => [l.line, l]));
   const paintRate = shopRateFor(shop, "paint", 0);
@@ -115,7 +120,9 @@ export function argueItems(params: {
         ? group.carrierValue === 0 && group.carrierLines.length > 0
           ? // Written but not priced ("Subl Pre-repair scan 1 m", RO 22335):
             // open for invoice, which is not a $0.00 allowance.
-            `Ours ${money(group.shopValue)}; theirs lists the same sublet with no price (${group.carrierLines.map((line) => `L${line}`).join(", ")}), left open for invoice. The invoices settle it.`
+            incomplete
+            ? `Ours ${money(group.shopValue)}; no price was read for theirs (${group.carrierLines.map((line) => `L${line}`).join(", ")}). Check their printed line: if it is blank, it is left open for invoice and the invoices settle it.`
+            : `Ours ${money(group.shopValue)}; theirs lists the same sublet with no price (${group.carrierLines.map((line) => `L${line}`).join(", ")}), left open for invoice. The invoices settle it.`
           : `Ours ${money(group.shopValue)}, theirs ${money(group.carrierValue)} for the same sublet; the invoices settle it.`
         : group.shopHours === group.carrierHours
           ? pricedDetail(group) ?? `${sides}: the same hours, coded to a different labor category on each sheet.`
@@ -206,7 +213,7 @@ export function argueItems(params: {
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : theirs
           ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
-          : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
+          : `No counterpart ${incomplete ? "read " : ""}on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,
       value,
       shopLines: lines.map((l) => l.line),

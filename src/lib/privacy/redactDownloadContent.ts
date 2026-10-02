@@ -26,6 +26,21 @@ const PLATE_FALLBACK_PATTERN =
 	/(\b(?:license\s*plate|plate)\s*(?:number|no\.?|#)?\s*[:#-]?\s*)([A-Z0-9][A-Z0-9 -]{1,10})/gi;
 
 /**
+ * The word after "plate" is a plate only when it has a plate's shape: a token
+ * of at most 8 characters that carries a digit ("MKZ4426", "7abc123"), or a
+ * short all-caps group followed by digits ("ABC 1234"). Without the shape
+ * test every estimate line naming a plate lost its next word — "Skid plate
+ * SE, SEL" printed as "Skid plate [REDACTED_PLATE], SEL" and "License plate
+ * pad 869413K000" lost "pad 869413K" (RO 22279) — and a 10-character part
+ * number is never a plate.
+ */
+function hasPlateShape(value: string): boolean {
+	const [first = "", second = ""] = value.trim().split(/[\s-]+/);
+	if (/^(?=.*\d)[A-Za-z0-9]{2,8}$/.test(first)) return true;
+	return /^[A-Z]{2,4}$/.test(first) && /^\d{2,5}$/.test(second);
+}
+
+/**
  * A labelled value is only redacted when it has the SHAPE of the datum its
  * label claims. Without this, "…estimates exist for this claim: the shop's
  * estimate at $26,006.59…" matched the claim rule, the value group ate
@@ -188,8 +203,8 @@ export function redactDownloadContent(text: string): string {
 	// Generic fallback patterns second.
 	redacted = redacted.replace(STREET_ADDRESS_PATTERN, "[REDACTED_ADDRESS]");
 	redacted = redacted.replace(STATE_ZIP_PATTERN, (_match, prefix: string) => `${prefix}[REDACTED_ZIP]`);
-	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (_match, prefix: string) => {
-		return `${prefix}[REDACTED_PLATE]`;
+	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (match, prefix: string, value: string) => {
+		return hasPlateShape(value) ? `${prefix}[REDACTED_PLATE]` : match;
 	});
 
 	// A carrier is named in prose far more often than after an "Insurer:" label

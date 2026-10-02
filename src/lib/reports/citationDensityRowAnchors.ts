@@ -797,21 +797,44 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   // SUBTOTALS rule — so continuation pages keep their region instead of
   // losing every anchor.
   const FOOTER_MARGIN = 40;
-  // Footer chrome is detected GEOMETRICALLY: a line position that repeats at
-  // the same y (±4pt) on 3+ pages in the bottom fifth of the page is page
-  // chrome, never table content — no date/Page-N text test involved.
-  const bottomBandPages = new Map<number, Set<number>>();
+  // Page chrome is the SAME line at the same y (±4pt) on several pages: the
+  // footer's "<date> <time> <id> Page N" and the header's title, RO and
+  // vehicle lines. Digits are folded so the page number and stamp do not
+  // matter; the words must. Position alone is not chrome — RO 22279's shop
+  // post-TD print has a table row ("black", y 642), the Sales Tax row and a
+  // legal paragraph in the same 8pt band on three pages, and reading that band
+  // as footer cut off lines 31-33 ($642.05 skid plate among them).
+  const chromeKey = (line: PdfTextLine) =>
+    `${Math.round(line.y / 8)}|${line.text.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase()}`;
+  // Footer chrome: such a line on 3+ pages in the bottom fifth.
+  const bottomBandPages = new Map<string, Set<number>>();
   for (const [pageNumber, pageLines] of byPage) {
     for (const line of pageLines) {
       if (line.y < line.pageHeight * 0.8) continue;
-      const bucket = Math.round(line.y / 8);
-      const pages = bottomBandPages.get(bucket) ?? new Set<number>();
-      if (!pages.size) bottomBandPages.set(bucket, pages);
+      const key = chromeKey(line);
+      const pages = bottomBandPages.get(key) ?? new Set<number>();
+      if (!pages.size) bottomBandPages.set(key, pages);
       pages.add(pageNumber);
     }
   }
-  const footerBuckets = [...bottomBandPages.entries()].filter(([, pages]) => pages.size >= 3).map(([bucket]) => bucket);
+  const footerBuckets = [...bottomBandPages.entries()]
+    .filter(([, pages]) => pages.size >= 3)
+    .map(([key]) => Number(key.split("|")[0]));
   const footerTopY = footerBuckets.length ? Math.min(...footerBuckets) * 8 - 4 : null;
+  // Header chrome: such a line on 2+ pages in the top fifth ("Preliminary
+  // Estimate", "RO Number: …", the vehicle line). The first table row of
+  // every continuation page shares a y, never the text, so it is not chrome.
+  const topBandPages = new Map<string, Set<number>>();
+  for (const [pageNumber, pageLines] of byPage) {
+    for (const line of pageLines) {
+      if (line.y > line.pageHeight * 0.2) continue;
+      const key = chromeKey(line);
+      const pages = topBandPages.get(key) ?? new Set<number>();
+      if (!pages.size) topBandPages.set(key, pages);
+      pages.add(pageNumber);
+    }
+  }
+  const headerChrome = new Set([...topBandPages.entries()].filter(([, pages]) => pages.size >= 2).map(([key]) => key));
   let carriedTop: number | null = null;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
@@ -825,7 +848,21 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
       .sort((a, b) => a.y - b.y)[0];
     if (header) carriedTop = header.y + header.height;
     if (carriedTop === null) continue; // pages before any header: no region
-    const top = header ? header.y + header.height : carriedTop;
+    // A continuation page with no column header of its own starts its table
+    // under its own page chrome, not at the y where an earlier page printed
+    // the header. Carrying that y down demoted every row above it: RO 22279's
+    // shop estimate prints the header once, at y 92, and lost lines 34 and 35
+    // (y 80.5, 94.0 on the next page; $1,006.99 of parts) as guide rows.
+    const headerChromeBottom = header
+      ? null
+      : pageLines
+          .filter((line) => headerChrome.has(chromeKey(line)))
+          .reduce<number | null>((bottom, line) => Math.max(bottom ?? 0, line.y + line.height), null);
+    const top = header
+      ? header.y + header.height
+      : headerChromeBottom !== null
+        ? Math.min(carriedTop, headerChromeBottom)
+        : carriedTop;
     const subtotals = pageLines
       .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];

@@ -80,6 +80,8 @@ export interface Estimate {
   altPartsUsage?: AltPartsUsage;
   /** The deductible the document states under its Total Cost of Repairs; absent when it does not say. */
   deductible?: number;
+  /** The estimating platform the document's text prints ("ccc", "mitchell" …); null/absent when not read. */
+  platform?: string | null;
 }
 
 export const round2 = (n: number): number => Math.round(n * 100) / 100;

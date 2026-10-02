@@ -83,6 +83,16 @@ describe("real identifiers are still redacted — under-redaction is the worse b
     expect(redactDownloadContent("Zip: 17601")).toContain("[REDACTED_ZIP]");
   });
 
+  it("redacts a plate only when the word after 'plate' has a plate's shape", () => {
+    expect(redactDownloadContent("License plate: MKZ4426")).toContain("[REDACTED_PLATE]");
+    expect(redactDownloadContent("plate number 7abc123 on file")).toContain("[REDACTED_PLATE]");
+    expect(redactDownloadContent("Plate ABC 1234")).toContain("[REDACTED_PLATE]");
+    // Estimate lines that merely name a plate keep their words (RO 22279).
+    expect(redactDownloadContent("Repl Skid plate SE, SEL")).toBe("Repl Skid plate SE, SEL");
+    expect(redactDownloadContent("Repl License plate pad 869413K000")).toBe("Repl License plate pad 869413K000");
+    expect(redactDownloadContent("Repl Skid plate 86671BE000")).toBe("Repl Skid plate 86671BE000");
+  });
+
   it("redacts owner names in both printed orders", () => {
     expect(redactDownloadContent("Insured: REARDON, CHRISTOPHER")).toContain("[REDACTED_PERSON]");
     expect(redactDownloadContent("Owner: Christopher Reardon")).toContain("[REDACTED_PERSON]");

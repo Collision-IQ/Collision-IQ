@@ -21,7 +21,7 @@
  * own subtotals; if they do not, LedgerNotClosedError is thrown and the report
  * is not produced (the same philosophy as the R24 release gate).
  */
-import { nonLaborBuckets } from "./nonLaborBuckets";
+import { nonLaborBuckets, unreadLineDollars } from "./nonLaborBuckets";
 import { round2, type Estimate, type LaborCat, type LaborTotal } from "./types";
 
 type Family = "body" | "paint" | "mech" | "struct" | "other";
@@ -71,8 +71,34 @@ export interface LedgerOptions {
   strictLines?: boolean;
 }
 
+/**
+ * Dollars of the carrier's printed Parts + Misc on lines whose price was not
+ * read, when the report may still be stated with them disclosed; 0 when the
+ * lines reproduce the printed total.
+ *
+ * The strict guard refused the whole report for ANY shortfall: RO 22279's
+ * image-only SOR was refused for $20.00 of OCR-dropped decimal points, and
+ * each earlier "not produced" RO was fixed by patching the one reader that
+ * tripped it. A SHORTFALL on a CCC print is bounded: every bucket comes from
+ * printed totals, and the unread dollars can only move between the Labor rate
+ * row (if one of them is a rate adjustment) and the parts row — never the
+ * gap. So it is carried as a disclosed figure. An OVER-read (lines summing to
+ * more than was printed) means a price was misread, and a Mitchell carrier
+ * books sublet into its labor categories, so line sums do not measure a
+ * shortfall there; both still refuse.
+ */
+export function unreadCarrierDollars(carrier: Estimate, opts: LedgerOptions = {}): number {
+  const unread = unreadLineDollars(carrier);
+  if (Math.abs(unread) <= 0.05) return 0;
+  if ((opts.strictLines ?? true) && !(unread > 0 && carrier.platform === "ccc")) {
+    nonLaborBuckets(carrier, { strict: true }); // throws NonLaborParseError with the figures
+  }
+  return unread > 0 ? unread : 0;
+}
+
 export function resolveRateBasis(shop: Estimate, carrier: Estimate, opts: LedgerOptions = {}): RateBasis {
-  const adjustment = nonLaborBuckets(carrier, { strict: opts.strictLines ?? true }).rateAdjustment;
+  unreadCarrierDollars(carrier, opts);
+  const adjustment = nonLaborBuckets(carrier, { strict: false }).rateAdjustment;
   // Σ (shop rate − carrier rate) × carrier hours, taken against the carrier's
   // PRINTED category cost so a cent of print rounding cannot open the ledger.
   let implied = 0;
@@ -127,6 +153,8 @@ export interface GapLedger {
   tax: number;
   closes: true;
   rate: RateBasis;
+  /** Carrier Parts + Misc dollars on lines whose price was not read (disclosed in the report); 0 when fully read. */
+  unreadCarrierLines: number;
 }
 
 export class LedgerNotClosedError extends Error {}
@@ -177,5 +205,6 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     tax,
     closes: true,
     rate,
+    unreadCarrierLines: unreadCarrierDollars(carrier, opts),
   };
 }
