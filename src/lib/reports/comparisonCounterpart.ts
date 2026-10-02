@@ -49,7 +49,13 @@ export function readLatestPrintedTimestamp(text: string): number | null {
   return latest;
 }
 
-export type CounterpartCandidate = { fileName: string; text: string; sourceDocumentId?: string };
+export type CounterpartCandidate = {
+  fileName: string;
+  text: string;
+  sourceDocumentId?: string;
+  /** The party the caller labelled it with, when it did. */
+  estimateRole?: "carrier" | "shop";
+};
 
 export type CounterpartSelection<T extends CounterpartCandidate> = {
   counterpart: T | null;
@@ -88,8 +94,14 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     };
   }
 
+  // The other party is what the caller labelled it OR what the document's own
+  // authorship reads as: either can admit a candidate, neither can remove one
+  // the other admitted (a Mitchell supplement prints no authorship boilerplate).
+  const otherRole = options.sourceParty === "shop" ? "carrier" : "shop";
   const carrierAuthored = (candidate: T) => isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: candidate.text });
-  const otherParty = candidates.filter((candidate) => carrierAuthored(candidate) === (options.sourceParty === "shop"));
+  const otherParty = candidates.filter(
+    (candidate) => candidate.estimateRole === otherRole || carrierAuthored(candidate) === (options.sourceParty === "shop")
+  );
   const partyPool = otherParty.length ? otherParty : candidates;
   // An estimate whose totals cannot be read is not something to measure against.
   const readable = partyPool.filter((candidate) => candidate.text.trim() && parseEstimateTotalsForPlatform(candidate.text)?.grandTotal != null);
@@ -97,7 +109,9 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
 
   const excluded: CounterpartSelection<T>["excluded"] = [];
   const partyReason =
-    options.sourceParty === "shop" ? "it was not read as carrier-authored" : "it was read as carrier-authored, like the annotated estimate";
+    options.sourceParty === "shop"
+      ? "it was neither labelled nor read as the insurer's estimate"
+      : "it was labelled or read as the insurer's estimate, like the annotated one";
   for (const candidate of candidates) {
     if (otherParty.length && !otherParty.includes(candidate)) excluded.push({ candidate, reason: partyReason });
     else if (!pool.includes(candidate)) excluded.push({ candidate, reason: "its totals could not be read" });
@@ -113,7 +127,8 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   if (pool.length > 1 && distinct(versions)) {
     order = versions;
     basis = "printed supplement number";
-    reason = (index) => `supplement ${versions[index]}; ${pool[best].fileName} prints supplement ${versions[best]}`;
+    const printedAs = (version: number) => (version === 0 ? "Estimate of Record" : `supplement ${version}`);
+    reason = (index) => `it prints ${printedAs(versions[index]!)}; ${pool[best].fileName} prints ${printedAs(versions[best]!)}`;
   } else if (pool.length > 1 && distinct(printed)) {
     order = printed;
     basis = "print date";

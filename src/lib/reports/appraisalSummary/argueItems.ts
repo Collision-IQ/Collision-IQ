@@ -108,21 +108,32 @@ export function argueItems(params: {
     return `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr: the same hours. The difference is in the priced lines: ours ${money(ours)}, theirs ${theirs > 0 ? money(theirs) : "none priced"}.`;
   };
 
+  // A carrier line in the group whose price was not read: its priced lines
+  // cannot be compared, so the group is worth its hours only and says so.
+  const unpricedCarrierLines = (group: GroupDelta) =>
+    incomplete ? group.carrierLines.filter((line) => { const l = carrierLine.get(line); return l !== undefined && (l.price === undefined || l.price === null); }) : [];
+  const hoursValue = (lines: number[], byLine: Map<number, EstimateLine>) =>
+    round2(lines.reduce((sum, line) => { const l = byLine.get(line); return sum + (l ? (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) : 0); }, 0));
+
   // Strong — the carrier's own exclusion note on an equivalence group.
   for (const group of groups) {
-    const diff = round2(group.shopValue - group.carrierValue);
+    const unpriced = unpricedCarrierLines(group);
+    const diff = unpriced.length
+      ? round2(hoursValue(group.shopLines, shopLine) - hoursValue(group.carrierLines, carrierLine))
+      : round2(group.shopValue - group.carrierValue);
     if (diff <= 0) continue;
     const excluded = group.exclusions.length > 0;
     const sides = `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr`;
-    const detail = excluded
+    const unpricedNote = `No price was read for their ${unpriced.map((line) => `L${line}`).join(", ")}: compare the priced lines with their printed estimate before arguing them. Worth counts the hours only.`;
+    const detail = unpriced.length
+      ? `${sides}${excluded ? `. Their own line says the time ${group.exclusions[0].toLowerCase()}` : ""}. ${unpricedNote}`
+      : excluded
       ? `${sides}. Their own line says the time ${group.exclusions[0].toLowerCase()}.`
       : group.shopHours === 0 && group.carrierHours === 0
         ? group.carrierValue === 0 && group.carrierLines.length > 0
           ? // Written but not priced ("Subl Pre-repair scan 1 m", RO 22335):
             // open for invoice, which is not a $0.00 allowance.
-            incomplete
-            ? `Ours ${money(group.shopValue)}; no price was read for theirs (${group.carrierLines.map((line) => `L${line}`).join(", ")}). Check their printed line: if it is blank, it is left open for invoice and the invoices settle it.`
-            : `Ours ${money(group.shopValue)}; theirs lists the same sublet with no price (${group.carrierLines.map((line) => `L${line}`).join(", ")}), left open for invoice. The invoices settle it.`
+            `Ours ${money(group.shopValue)}; theirs lists the same sublet with no price (${group.carrierLines.map((line) => `L${line}`).join(", ")}), left open for invoice. The invoices settle it.`
           : `Ours ${money(group.shopValue)}, theirs ${money(group.carrierValue)} for the same sublet; the invoices settle it.`
         : group.shopHours === group.carrierHours
           ? pricedDetail(group) ?? `${sides}: the same hours, coded to a different labor category on each sheet.`
@@ -157,6 +168,17 @@ export function argueItems(params: {
 
   // Strong — the carrier pays the parent part and leaves the child off.
   for (const rule of PARENT_PARTS) {
+    // A carrier line in play whose price was not read cannot be netted.
+    if (
+      incomplete &&
+      carrier.lines.some(
+        (l) =>
+          (l.price === undefined || l.price === null) &&
+          ((rule.child.test(l.desc) && !rule.exclude.test(l.desc)) || rule.companion.test(l.desc) || rule.parent.test(l.desc))
+      )
+    ) {
+      continue;
+    }
     const children = shop.lines.filter((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc) && (l.price ?? 0) > 0);
     const carrierHasChild = carrier.lines.some((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc));
     const parents = carrier.lines.filter((l) => rule.parent.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0);

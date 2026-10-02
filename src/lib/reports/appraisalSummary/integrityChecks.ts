@@ -82,15 +82,16 @@ const LABOR_RANK: Record<LaborCat, number> = { body: 1, paint: 1, other: 1, fram
 export function integrityChecks(
   shop: Estimate,
   carrier: Estimate,
-  opts: { highDollar?: number; pairs?: MatcherPair[] } = {}
+  opts: {
+    highDollar?: number;
+    pairs?: MatcherPair[];
+    /** Some carrier dollars sit on lines whose price was not read: "no price" is what was read, not what was printed. */
+    carrierLinesIncomplete?: boolean;
+  } = {}
 ): Flag[] {
   const flags: Flag[] = [];
   const highDollar = opts.highDollar ?? 500;
   const shopPartNumbers = new Set(shop.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
-  // Carrier lines the delta matcher itself paired with one of ours.
-  const pairedCarrierLines = new Set(
-    (opts.pairs ?? []).filter((pair) => pair.carrierLine !== undefined && pair.shopLines.length > 0).map((pair) => pair.carrierLine!)
-  );
 
   // 1. High-dollar carrier lines with no counterpart on our sheet.
   for (const c of carrier.lines) {
@@ -98,9 +99,6 @@ export function integrityChecks(
     const kind = classifyNonLabor(c);
     // Sublet and the rate adjustment are handled by the ledger and the equivalence groups.
     if (kind !== "part" && kind !== "shopSupply") continue;
-    // The matcher's pairing is the counterpart (RO 22279: their A/M bumper
-    // cover L26 is our OEM L30, paired by the matcher at a price difference).
-    if (pairedCarrierLines.has(c.line)) continue;
     const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(partKey(c.partNumber));
     const hasDescription = shop.lines.some((s) => baseStem(s.desc) === baseStem(c.desc));
     if (hasPartNumber || hasDescription) continue;
@@ -142,13 +140,17 @@ export function integrityChecks(
   const variantShopLines = new Set<number>();
   for (const c of carrier.lines) {
     if (!c.partNumber || shopPartNumbers.has(partKey(c.partNumber))) continue;
-    // An aftermarket or recycled part always carries its own number: that is a
-    // part-type difference, not a variant to confirm by VIN.
-    if (isNonOemLine(c)) continue;
+    const contradicts =
+      trimMotor !== undefined && /(quad|tri|dual)[- ]?motor/i.test(c.desc) && !new RegExp(trimMotor, "i").test(c.desc);
+    // An aftermarket or recycled part, on either sheet, carries its own number:
+    // that is a part-type difference, not a variant to confirm by VIN. A part
+    // that contradicts the vehicle's drivetrain is flagged whatever its type.
+    if (!contradicts && isNonOemLine(c)) continue;
     const differs = (x: EstimateLine) =>
       Boolean(x.partNumber) &&
       partKey(x.partNumber) !== partKey(c.partNumber) &&
-      !carrierPartNumbers.has(partKey(x.partNumber));
+      !carrierPartNumbers.has(partKey(x.partNumber)) &&
+      (contradicts || !isNonOemLine(x));
     const partner = shop.lines.find((x) => x.line === matcherPartner.get(c.line));
     const s =
       shop.lines.find((x) => !variantShopLines.has(x.line) && differs(x) && qualifierStem(x.desc) === qualifierStem(c.desc)) ??
@@ -157,8 +159,6 @@ export function integrityChecks(
         : undefined);
     if (!s) continue;
     variantShopLines.add(s.line);
-    const contradicts =
-      trimMotor !== undefined && /(quad|tri|dual)[- ]?motor/i.test(c.desc) && !new RegExp(trimMotor, "i").test(c.desc);
     flags.push({
       kind: contradicts ? "trimConflictPartNumber" : "partNumberVariant",
       side: "both",
@@ -221,8 +221,9 @@ export function integrityChecks(
         kind: "reuseMismatch",
         side: "shop",
         lines: { shop: [s.line], carrier: [c.line] },
-        dollars: -(c.price ?? 0),
-        text: `The carrier replaces the ${c.desc} (${money(c.price ?? 0)}, L${c.line}; its note says the part cannot be reused); we wrote R&I on L${s.line}. Add the part.`,
+        // A price that was not read is not $0.00.
+        dollars: c.price !== undefined && c.price !== null ? -c.price : undefined,
+        text: `The carrier replaces the ${c.desc} (${c.price !== undefined && c.price !== null ? money(c.price) : "price not read"}, L${c.line}; its note says the part cannot be reused); we wrote R&I on L${s.line}. Add the part.`,
       });
     }
   }
@@ -274,7 +275,9 @@ export function integrityChecks(
         side: "carrier",
         lines: { shop: [s.line], carrier: [c.line] },
         dollars: s.price,
-        text: `The carrier wrote "${c.desc}" (L${c.line}) with no price; ours is ${money(s.price!)} (L${s.line}). Ask them to price it.`,
+        text: opts.carrierLinesIncomplete
+          ? `No price was read for the carrier's "${c.desc}" (L${c.line}); ours is ${money(s.price!)} (L${s.line}). Check their printed line: if it is blank, ask them to price it.`
+          : `The carrier wrote "${c.desc}" (L${c.line}) with no price; ours is ${money(s.price!)} (L${s.line}). Ask them to price it.`,
       });
     }
   }

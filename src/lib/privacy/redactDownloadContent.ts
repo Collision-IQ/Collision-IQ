@@ -26,18 +26,37 @@ const PLATE_FALLBACK_PATTERN =
 	/(\b(?:license\s*plate|plate)\s*(?:number|no\.?|#)?\s*[:#-]?\s*)([A-Z0-9][A-Z0-9 -]{1,10})/gi;
 
 /**
- * The word after "plate" is a plate only when it has a plate's shape: a token
- * of at most 8 characters that carries a digit ("MKZ4426", "7abc123"), or a
- * short all-caps group followed by digits ("ABC 1234"). Without the shape
- * test every estimate line naming a plate lost its next word — "Skid plate
- * SE, SEL" printed as "Skid plate [REDACTED_PLATE], SEL" and "License plate
- * pad 869413K000" lost "pad 869413K" (RO 22279) — and a 10-character part
- * number is never a plate.
+ * Is the text after "plate" a plate number? FAIL CLOSED: anything that could
+ * be a plate is redacted, and only text that is plainly an estimate line
+ * keeps its words.
+ *
+ * - Labelled ("Plate: GOBUCKS", "Plate No. ABC 1234", "plate is MKZ4426"): redacted.
+ * - "License plate" followed by anything but a lowercase word ("pad",
+ *   "bracket", "lamp") or a lone digit cell ("License plate 0 0.00"): redacted.
+ * - A bare "plate" after a part word ("Skid plate", "sill plate"): redacted
+ *   only when the token has a plate's shape (a 2-8 character token with a
+ *   digit, or a short letter group followed by digits) — "Skid plate SE, SEL"
+ *   printed as "Skid plate [REDACTED_PLATE], SEL" on RO 22279, and a
+ *   10-character part number is never a plate.
+ * - Anything else ("Plate MYCAR" opening a line): redacted.
  */
-function hasPlateShape(value: string): boolean {
-	const [first = "", second = ""] = value.trim().split(/[\s-]+/);
-	if (/^(?=.*\d)[A-Za-z0-9]{2,8}$/.test(first)) return true;
-	return /^[A-Z]{2,4}$/.test(first) && /^\d{2,5}$/.test(second);
+function plateValueToRedact(prefix: string, value: string, before: string, after: string): { lead: string } | null {
+	const filler = value.match(/^(?:is|was|reads)\s+/i);
+	const lead = filler ? filler[0] : "";
+	const rest = value.slice(lead.length).trim();
+	const [first = "", second = ""] = rest.split(/[\s-]+/);
+	if (!first) return null;
+	// Digits running into a decimal are a glued money cell ("sill plate00.00Incl.").
+	if (/^\d+$/.test(rest) && /^\.\d/.test(after)) return null;
+	const labelled = Boolean(filler) || /(?:number|no\.?|#|[:#-])\s*$/i.test(prefix);
+	if (labelled) return /^[A-Za-z0-9]{1,8}$/.test(first) ? { lead } : null;
+	if (/license\s*plate/i.test(prefix)) return first.length >= 2 && !/^[a-z]+$/.test(first) ? { lead } : null;
+	if (/[A-Za-z]\s*$/.test(before)) {
+		const shaped =
+			/^(?=.*\d)[A-Za-z0-9]{2,8}$/.test(first) || (/^[A-Za-z]{1,4}$/.test(first) && /^(?=.*\d)[A-Za-z0-9]{2,5}$/.test(second));
+		return shaped ? { lead } : null;
+	}
+	return /^[A-Za-z0-9]{1,8}$/.test(first) ? { lead } : null;
 }
 
 /**
@@ -203,8 +222,9 @@ export function redactDownloadContent(text: string): string {
 	// Generic fallback patterns second.
 	redacted = redacted.replace(STREET_ADDRESS_PATTERN, "[REDACTED_ADDRESS]");
 	redacted = redacted.replace(STATE_ZIP_PATTERN, (_match, prefix: string) => `${prefix}[REDACTED_ZIP]`);
-	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (match, prefix: string, value: string) => {
-		return hasPlateShape(value) ? `${prefix}[REDACTED_PLATE]` : match;
+	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (match, prefix: string, value: string, offset: number, whole: string) => {
+		const redact = plateValueToRedact(prefix, value, whole.slice(0, offset), whole.slice(offset + match.length));
+		return redact ? `${prefix}${redact.lead}[REDACTED_PLATE]` : match;
 	});
 
 	// A carrier is named in prose far more often than after an "Insurer:" label

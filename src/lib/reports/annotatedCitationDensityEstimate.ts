@@ -1588,6 +1588,15 @@ async function buildLowerEstimateDeliverable(input: {
     );
     return undefined;
   }
+  // Its stamps and badges value every carrier line at its read price; with
+  // part of their sheet's prices unread a highlight would mark a printed
+  // price as different from ours when it was simply not read.
+  if (input.model.ledger.unreadCarrierLines > 0) {
+    input.warnings.push(
+      `The Citation Density copy of the comparison estimate was not built: ${input.model.ledger.unreadCarrierLines.toFixed(2)} dollars of its printed parts and miscellaneous total are on lines whose price was not read, so its line values cannot be stamped. The annotated copy of our estimate is delivered instead.`
+    );
+    return undefined;
+  }
   try {
     const set = buildLowerEstimateFindings(input.model, input.pairs);
     const built = await buildLowerEstimateCitationPdf({
@@ -1914,29 +1923,6 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       "Source estimate could not be confirmed as carrier-authored from the parsed file; it is labeled by file provenance instead of an assumed carrier role."
     );
   }
-  // ONE COUNTERPART. With the source party now final, a case holding more
-  // than one other estimate is narrowed to the single one this run measures
-  // against, and every reader below — identity, word layers, rows, totals,
-  // coverage, release gate, forensic names, the dispute report — sees only
-  // it. Pooling them read RO 22279's Shop final lines under its SOR's totals.
-  if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
-    const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
-      sourceParty: sourceDocumentRole,
-      pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
-    });
-    const chosen = selection.counterpart;
-    if (chosen) {
-      const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
-        chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
-      params = {
-        ...params,
-        comparisonEstimateTexts: [chosen],
-        comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
-      };
-      const note = describeExcludedComparisons(selection);
-      if (note) warnings.push(note);
-    }
-  }
   const anchors = extraction.anchors;
   const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
   const trace: CitationDensityDebugTrace = {
@@ -2083,6 +2069,32 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     candidatesRejected: 0,
     droppedReasons: [],
   });
+  // ONE COUNTERPART. With the source party final and every estimate on the
+  // case past the identity gate above (a misfiled estimate for another
+  // vehicle still blocks the run; it is never "a version not compared"), a
+  // case holding more than one other estimate is narrowed to the single one
+  // this run measures against, and every reader below — word layers, rows,
+  // totals, coverage, release gate, forensic names, the dispute report — sees
+  // only it. Pooling them read RO 22279's Shop final lines under its SOR's
+  // totals.
+  if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
+    const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
+      sourceParty: sourceDocumentRole,
+      pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
+    });
+    const chosen = selection.counterpart;
+    if (chosen) {
+      const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
+        chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
+      params = {
+        ...params,
+        comparisonEstimateTexts: [chosen],
+        comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
+      };
+      const note = describeExcludedComparisons(selection);
+      if (note) warnings.push(note);
+    }
+  }
 
   appendToolUsageTrace(trace, {
     tool: "document_classifier",
@@ -3128,7 +3140,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // document with the wrong nouns in it. It is a companion, never a
     // deliverable the run depends on: a failure here is a warning on the
     // run, and the two documents above still ship.
-    const comparisonRole = params.comparisonEstimateTexts?.[0]?.estimateRole;
+    // The route labels a comparison from its FILE NAME ("appraisal" reads as
+    // shop). A comparison whose own text reads as insurer-authored is the
+    // insurer's whatever it is called — text only here, never the file name,
+    // so an independent appraiser's file name cannot make it the carrier's.
+    const comparisonText = params.comparisonEstimateTexts?.[0];
+    const comparisonRole =
+      comparisonText?.estimateRole === "carrier" || isCarrierAuthoredEstimateDocument({ filename: "", text: comparisonText?.text })
+        ? "carrier"
+        : comparisonText?.estimateRole;
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
       // with the line-item comparison withheld those lines are unread, and a
@@ -3201,12 +3221,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       }
     } else if (sourceDocumentRole === "shop") {
       // Never skipped in silence: a shop run that gets no dispute report says
-      // which document it was measured against and how that one was read.
-      const comparisonName = params.comparisonEstimateTexts?.[0]?.fileName ?? "the comparison estimate";
+      // which document it was measured against and why that one does not qualify.
+      const comparisonName = comparisonText?.fileName ?? "the comparison estimate";
       warnings.push(
-        `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was read as ${
-          comparisonRole === "shop" ? "a shop estimate" : "an estimate of unidentified authorship"
-        }. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was not identified as the insurer's estimate: ${
+          comparisonRole === "shop" ? "it is labelled a shop estimate" : "its author is not identified"
+        }, and its text does not read as insurer-authored. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     }
   }
@@ -4745,6 +4765,17 @@ function matchStructuredLineItemDeltas(
   // yields nothing, and the run then compares against an empty pool.
   const comparisonReads = comparison.map((item) => parseEstimateRowsForPlatform(repairTokens(item.text)));
   let lowerRows = comparisonReads.flatMap((read) => read.rows);
+  // Restored cells are disclosed, never silent: the value is the printed one
+  // (the document's own SUBTOTALS prove it), but it is not what OCR read.
+  comparisonReads.forEach((read, index) => {
+    const restored = read.rows.filter((row) => row.restoredCells?.length);
+    if (!restored.length) return;
+    context.extractionWarnings?.push(
+      `${comparison[index].fileName}: ${restored.length} machine-read line${restored.length === 1 ? " was" : "s were"} missing a decimal point (line ${restored
+        .map((row) => row.lineNumber)
+        .join(", ")}); restored because with them the lines add up to the document's own printed SUBTOTALS.`
+    );
+  });
   const comparisonPlatform = comparisonReads.map((read) => read.platform).find((platform) => platform) ?? null;
   const subletsBookedAsParts = comparisonReads.flatMap((read) => read.subletsBookedAsParts);
 

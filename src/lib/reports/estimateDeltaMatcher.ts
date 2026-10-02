@@ -860,13 +860,17 @@ export function explodeGluedRow(rawText: string): string {
     const splittable =
       /\.\d/.test(withinToken) ||
       withinToken.replace(/\D/g, "").length >= 9 ||
-      // Tiny glued tails ("scan1m", "flare2") are qty/marker columns — but
-      // only after a WORD (2+ letters, nothing else). After a mixed alnum
-      // fragment the digits are a part-number interior: "C25J75" must not
-      // split at "J7", and neither may "86671BE000" at "BE0" — testing only
-      // the last two letters split RO 22279's Hyundai part numbers into
-      // "86671BE 000", so no part number read and none could match.
-      (withinToken.length <= 3 && /^[A-Za-z]{2,}$/.test(text.slice(tokenStart, i)));
+      // Tiny glued tails ("scan1m", "flare2", "deactivate/activate1m") are
+      // qty/marker columns — but only after a WORD (2+ letters). After a
+      // mixed alnum fragment the digits are a part-number interior: "C25J75"
+      // must not split at "J7", and neither may "86671BE000" at "BE0" —
+      // testing only the last two letters split RO 22279's Hyundai part
+      // numbers into "86671BE 000", so no part number read and none matched.
+      // A digit inside the alphanumeric run right before the tail is that
+      // signal; "/", "-" or a glued line number before the word are not.
+      (withinToken.length <= 3 &&
+        /[A-Za-z]{2}$/.test(text.slice(0, i)) &&
+        !/\d/.test(text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? ""));
     if (!splittable && boundaryIndex === i) continue;
     if (isColumnBlob(remainder)) {
       const head = text.slice(0, boundaryIndex);
@@ -1827,8 +1831,10 @@ export function findOcrDroppedPointCell(
 export function parseCccSubtotalsCells(text: string): { price: number; labor: number; paint: number } | null {
   for (const raw of (text ?? "").replace(/\r/g, "\n").split("\n")) {
     const line = raw.replace(/\s+/g, " ").trim();
-    if (!/^SUBTOTALS\b/i.test(line)) continue;
-    const cells = line.replace(/^SUBTOTALS\s*/i, "").split(" ").filter(Boolean);
+    // The first SUBTOTALS line, even behind OCR noise ("| SUBTOTALS …"), so
+    // a garbled main rule never hands the target to the Supplement Summary's.
+    if (!/\bSUBTOTALS\b/i.test(line)) continue;
+    const cells = line.replace(/^.*?\bSUBTOTALS\s*/i, "").split(" ").filter(Boolean);
     if (
       cells.length !== 3 ||
       !OCR_CELL_MONEY.test(cells[0]) ||

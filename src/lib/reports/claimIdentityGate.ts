@@ -190,17 +190,21 @@ export function findVin(text: string): string | null {
     return null;
   };
   // A labeled read that fails its check digit is kept, and the walk goes on:
-  // the same print often states its VIN again. A later labeled VIN replaces
-  // it only when that VIN validates and differs from it in exactly ONE
+  // the same print often states its VIN again. Later labeled VINs replace it
+  // only when TWO of them agree, validate, and differ from it in exactly ONE
   // position where the fold had to guess (the raw glyph was O, I or Q) — the
-  // signature of a misread glyph, never of another vehicle. RO 22279's SOR
-  // OCR'd "KM8HACABORU 149560" on page 1 (O for 9) and the correct VIN on
-  // pages 11 and 12; reading only page 1 reported "VINs differ".
+  // signature of a misread glyph, never of another vehicle, and never one
+  // more misread of a VIN that carries no check digit. RO 22279's SOR OCR'd
+  // "KM8HACABORU 149560" on page 1 (O for 9) and the correct VIN on pages 11
+  // and 12; reading only page 1 reported "VINs differ".
   let unvalidated: { vin: string; raw: string } | null = null;
+  const corrections = new Map<string, number>();
   const correctsGuess = (vin: string) => {
     if (!unvalidated) return false;
     const differing = [...vin].flatMap((char, index) => (char === unvalidated!.vin[index] ? [] : [index]));
-    return differing.length === 1 && /[OIQ]/.test(unvalidated.raw[differing[0]] ?? "");
+    if (differing.length !== 1 || !/[OIQ]/.test(unvalidated.raw[differing[0]] ?? "")) return false;
+    corrections.set(vin, (corrections.get(vin) ?? 0) + 1);
+    return corrections.get(vin)! >= 2;
   };
   for (const match of text.matchAll(/\bVIN\b\s*[:#-]?/gi)) {
     const after = text.slice(match.index + match[0].length, match.index + match[0].length + 60);

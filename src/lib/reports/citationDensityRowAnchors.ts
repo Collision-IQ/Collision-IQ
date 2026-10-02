@@ -836,6 +836,11 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   }
   const headerChrome = new Set([...topBandPages.entries()].filter(([, pages]) => pages.size >= 2).map(([key]) => key));
   let carriedTop: number | null = null;
+  // A print-once table is OPEN from its header until its SUBTOTALS rule; only
+  // then does a header-less page continue it under its own chrome. Pages after
+  // a per-page-header table closed (recall notices, legal text) keep their
+  // carried top.
+  let tableOpen = false;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
     const pageHeight = pageLines[0]?.pageHeight ?? 792;
@@ -853,7 +858,8 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     // the header. Carrying that y down demoted every row above it: RO 22279's
     // shop estimate prints the header once, at y 92, and lost lines 34 and 35
     // (y 80.5, 94.0 on the next page; $1,006.99 of parts) as guide rows.
-    const headerChromeBottom = header
+    if (header) tableOpen = true;
+    const headerChromeBottom = header || !tableOpen
       ? null
       : pageLines
           .filter((line) => headerChrome.has(chromeKey(line)))
@@ -878,6 +884,7 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     // print-once producers the SUBTOTALS rule ends the table for good.
     if (subtotals && !header) carriedTop = null;
     if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
+    if (subtotals) tableOpen = false;
   }
   return regions;
 }
@@ -890,6 +897,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * belongs to the note, never to the row description. */
   let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
+  const usedAnchorIds = new Set<string>();
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
     if (isGenericOrMalformedAnchorText(line.text)) continue;
@@ -925,7 +933,14 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       if (!inRegion) type = "guide_row";
     }
 
-    if (!lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+    // A line below the table (SUBTOTALS, the ESTIMATE TOTALS block, legal
+    // text) never continues a row inside it: RO 20766's last shop row
+    // absorbed its whole totals block once its page's region was measured.
+    const continuationRegion = tableRegions.get(line.pageNumber);
+    const insideTable =
+      tableRegions.size === 0 ||
+      (continuationRegion !== undefined && line.y >= continuationRegion.top - 2 && line.y <= continuationRegion.bottom + 2);
+    if (!lineNumber && insideTable && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
       // A NOTE wraps. Its second line carries no "Note:" prefix of its own
       // ("Note: PARTS: … LABOR:" / "Time includes R&R grommets and gasket."),
       // so testing that line in isolation reads it as row description and the
@@ -950,8 +965,13 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       rotation: 0,
     }, 2);
     const geometry = buildAnchorGeometry(rect);
+    // Anchor ids are unique within a document: every id-keyed map downstream
+    // keeps the LAST entry, so a repeated id would hand back another row.
+    const baseAnchorId = `${options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`}:p${line.pageNumber}:${lineNumber ?? anchors.length + 1}:${type}`;
+    const anchorId = usedAnchorIds.has(baseAnchorId) ? `${baseAnchorId}:y${Math.round(line.y)}` : baseAnchorId;
+    usedAnchorIds.add(anchorId);
     const anchor: EstimateRowAnchor = {
-      anchorId: `${options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`}:p${line.pageNumber}:${lineNumber ?? anchors.length + 1}:${type}`,
+      anchorId,
       sourceDocumentId: options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
       sourceDocumentRole: options.sourceDocumentRole,
       pageNumber: line.pageNumber,
@@ -1225,7 +1245,9 @@ function extractNumericTokens(value: string) {
 }
 
 function detectLaborValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  // The captured figure must be a value cell, never the head of a part number
+  // ("Front pillar structural bulb 1063943-00-A" read 1,063,943 labor hours).
+  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d-])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:scan|calibration|r&i|r\s*&\s*i|repair|replace|refinish|labor|test|aim|initialize|program|mask|sand|polish)\b/i.test(text)) {
     return null;
@@ -1234,7 +1256,7 @@ function detectLaborValue(text: string, tokens: Array<{ value: number; index: nu
 }
 
 function detectPaintValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d-])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:paint|refinish|blend|clear coat|mask|jamb|color|sand|polish)\b/i.test(text)) return null;
   return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;
@@ -1483,7 +1505,12 @@ function isNumberedOperationRow(text: string) {
 }
 
 function extractLineNumber(text: string) {
-  return text.match(/^\s*(?:line\s*)?(\d{1,4})\b/i)?.[1] ?? null;
+  // A wrapped dimension or quantity fragment is not a numbered row: "6.5mm",
+  // "8.0x5-0.9" and "3 Ft" printed under a description took line numbers 6, 8
+  // and 3 once the table region reached them, and the duplicate anchor id
+  // shadowed the real line 6.
+  if (/^\s*\d{1,4}\s+(?:ft|feet|in|inch(?:es)?|oz|ounces?|mm|cm|gal|qt|pcs?)\.?\s*$/i.test(text)) return null;
+  return text.match(/^\s*(?:line\s*)?(\d{1,4})(?![.,x]\d)\b/i)?.[1] ?? null;
 }
 
 function detectSection(text: string) {

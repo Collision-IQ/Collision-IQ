@@ -97,11 +97,9 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const partType = partTypeEvidence(shop, carrier);
   const { groups, usedShop } = groupEquivalents(shop, carrier);
   // With carrier dollars unread, a carrier line read with no price may be a
-  // price that was not read: "they wrote it with no price" is not stated.
+  // price that was not read: every "no price" statement says what was read.
   const carrierLinesIncomplete = ledger.unreadCarrierLines > 0;
-  const flags = integrityChecks(shop, carrier, { pairs: input.pairs }).filter(
-    (flag) => !(carrierLinesIncomplete && flag.kind === "zeroPricedCarrierLine")
-  );
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs, carrierLinesIncomplete });
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
   const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs, carrierLinesIncomplete });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
@@ -508,7 +506,7 @@ export function unreadCarrierNote(model: PlainSummaryModel): string {
     L.laborRate > 0
       ? `If any of the ${money(L.unreadCarrierLines)} is a labor-rate adjustment, the Labor rate row is smaller and the parts row larger by that amount.`
       : "",
-    "A line of theirs described here as having no price or no counterpart may be one whose price was not read: check it against their printed estimate before raising it.",
+    "A line of theirs described here as having no price or no counterpart may be one whose price was not read: check it against their printed estimate before raising it. An item that includes a line of theirs with no price read is worth its hours only.",
   ]
     .filter(Boolean)
     .join(" ");

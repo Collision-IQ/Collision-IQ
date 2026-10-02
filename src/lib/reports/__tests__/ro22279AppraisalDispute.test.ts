@@ -46,7 +46,8 @@ import {
   parseCccSubtotalsCells,
   type EstimateDeltaRow,
 } from "../estimateDeltaMatcher";
-import { buildEstimateRowAnchorsFromLines, type PdfTextLine } from "../citationDensityRowAnchors";
+import { buildEstimateRowAnchorsFromLines, buildPdfTextLines, type PdfTextLine, type PdfWord } from "../citationDensityRowAnchors";
+import { adaptForensicToPlainSummary } from "../plainLanguageSummaryAdapter";
 import {
   describeExcludedComparisons,
   readLatestPrintedTimestamp,
@@ -66,6 +67,7 @@ import {
 import {
   buildAnnotatedCitationDensityEstimatePdf,
   buildRequiredEstimatorDeltaFindings,
+  CitationDensityAnnotationError,
 } from "../annotatedCitationDensityEstimate";
 
 const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures/22279");
@@ -241,6 +243,8 @@ describe("D3 — continuation pages keep the rows printed under their own chrome
     line(3, 80.5, "34 * Repl Skid plate SE, SEL 86671BE000 1 504.49 Incl."),
     line(3, 94, "35 * Repl Reinforcement 86631BE200 1 502.50 0.1"),
     line(3, 107.5, "36 Repl Prep unprimed bumper 1 0.7"),
+    line(3, 121, "37 # Repl RT Front pillar structural bulb 1063943-00-A 1 1.00"),
+    line(3, 134.6, "6.5mm"),
     line(3, 520.5, "SUBTOTALS 2,977.68 17.6 7.8"),
     line(3, 643, "Sales Tax $ 5,758.94 @ 6.0000 % 345.54"),
     ...chrome(4),
@@ -259,6 +263,37 @@ describe("D3 — continuation pages keep the rows printed under their own chrome
     expect(typeOf("31")).toBe("estimate_line");
     expect(typeOf("33")).toBe("estimate_line");
   });
+
+  it("a wrapped dimension never takes a line number, and a part number is never labor", () => {
+    expect(anchors.filter((anchor) => anchor.lineNumber === "6")).toEqual([]);
+    expect(anchors.find((anchor) => anchor.lineNumber === "37")?.labor).not.toBe(1063943);
+    const ids = anchors.map((anchor) => anchor.anchorId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  const wordFixture = (ro: string, name: string) =>
+    JSON.parse(readFileSync(path.join(FIXTURE_DIR, `../${ro}/${name}`), "utf8")) as PdfWord[];
+
+  it("a rescued last row never absorbs the totals block below SUBTOTALS (RO 20766 shop L99)", () => {
+    const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture("20766", "shop_words.json")), {
+      sourceDocumentRole: "shop",
+      sourceDocumentId: "shop-20766",
+    });
+    const l99 = fixtureAnchors.find((anchor) => anchor.lineNumber === "99" && anchor.anchorType === "estimate_line");
+    expect(l99).toBeDefined();
+    expect(l99!.rowText).not.toMatch(/Calibration\/Reset|hrs @/);
+    expect(l99!.height).toBeLessThan(20);
+  });
+
+  it("anchor ids are unique and line 6 is the real row (RO 22084 SOR-5)", () => {
+    const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture("22084", "sor5_words.json")), {
+      sourceDocumentRole: "carrier",
+      sourceDocumentId: "sor5",
+    });
+    const ids = fixtureAnchors.map((anchor) => anchor.anchorId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(fixtureAnchors.find((anchor) => anchor.anchorId === "sor5:p3:6:estimate_line")?.rowText).toMatch(/R&I LT\/Rear R&I wheel/);
+  });
 });
 
 describe("D4 — a part number with a two-letter interior is one token", () => {
@@ -272,6 +307,22 @@ describe("D4 — a part number with a two-letter interior is one token", () => {
       description: "Reinforcement",
       partNumber: "86631BE200",
     });
+  });
+
+  it("still splits a glued qty off a word with '/' or '-', or after a glued line number", () => {
+    expect(parseCccEstimateRow("59Repl High voltage system deactivate/activate1m2.8M")).toMatchObject({
+      description: "High voltage system deactivate/activate",
+      qty: 1,
+      labor: 2.8,
+      laborType: "M",
+    });
+    expect(parseCccEstimateRow("45#Post-scan1m")).toMatchObject({ description: "Post-scan", qty: 1 });
+    expect(parseCccEstimateRow("12 Repl Grille C25J75 1 45.00 0.3")).toMatchObject({ partNumber: "C25J75" });
+  });
+
+  it("reads the fixture HV rows exactly as before (RO 21995 SOR-3 L59)", () => {
+    const rows = parseEstimateRowsForPlatform(repairTokens(readFileSync(path.join(FIXTURE_DIR, "../21995/sor3_rows_text.txt"), "utf8"))).rows;
+    expect(row(rows, 59)).toMatchObject({ description: "High voltage system deactivate/activate", qty: 1, labor: 2.8 });
   });
 });
 
@@ -288,7 +339,7 @@ describe("D5 — one counterpart per run", () => {
       const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
       expect(selection.counterpart?.fileName).toBe("SOR-1_22279.pdf");
       expect(describeExcludedComparisons(selection)).toMatch(
-        /^Compared against SOR-1_22279\.pdf only\. Not compared: Shop_final_22279\.pdf \(it was not read as carrier-authored\)/
+        /^Compared against SOR-1_22279\.pdf only\. Not compared: Shop_final_22279\.pdf \(it was neither labelled nor read as the insurer's estimate\)/
       );
     }
   });
@@ -305,6 +356,24 @@ describe("D5 — one counterpart per run", () => {
     }
   });
 
+  it("a supplement the caller labels the insurer's counts as theirs even when its text prints no authorship", () => {
+    const mitchell = readFileSync(path.join(FIXTURE_DIR, "../22132/sor3_mitchell_text.txt"), "utf8");
+    expect(readPrintedEstimateVersion(mitchell)).toBe(3);
+    const latest = { fileName: "Progressive Supplement 3.pdf", text: mitchell, estimateRole: "carrier" as const };
+    const earlier = { fileName: "SOR 1.pdf", text: mitchell.replace(/^([ \t]*Supplement[ \t]+)3([ \t]*)$/m, "$11$2"), estimateRole: "carrier" as const };
+    expect(readPrintedEstimateVersion(earlier.text)).toBe(1);
+    for (const candidates of [[latest, earlier], [earlier, latest]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe("Progressive Supplement 3.pdf");
+    }
+  });
+
+  it("names an Estimate of Record as such, never 'supplement 0'", () => {
+    const eor = { fileName: "EOR.pdf", estimateRole: "carrier" as const, text: sorText.replace(/Supplement of Record 1 with Summary/g, "Estimate of Record") };
+    const note = describeExcludedComparisons(selectComparisonCounterpart([eor, sor], { sourceParty: "shop" }));
+    expect(note).toMatch(/EOR\.pdf \(it prints Estimate of Record; SOR-1_22279\.pdf prints supplement 1\)/);
+    expect(note).not.toMatch(/supplement 0/);
+  });
+
   it("reads print stamps glued to the next token, and leaves a single comparison alone", () => {
     expect(readLatestPrintedTimestamp("9/22/2026 11:03:55 AM300060Page 1\n10/1/2026 6:10:33 PM 300060")).toBe(Date.UTC(2026, 9, 1, 18, 10, 33));
     expect(readPrintedEstimateVersion("NET COST OF SUPPLEMENT 1,855.12")).toBeNull();
@@ -316,10 +385,13 @@ describe("D5 — one counterpart per run", () => {
 
 describe("D6 — a VIN misread on one page is corrected by the same print's own valid VIN", () => {
   const VIN = "5YJSA1E65NF488007";
-  it("adopts the later labeled VIN only where the fold guessed", () => {
+  it("adopts a later labeled VIN only where the fold guessed, and only when two later reads agree", () => {
     expect(isValidVin(VIN)).toBe(true);
     const filler = "Line items and page furniture. ".repeat(4);
-    expect(findVin(`VIN: 5YJSA1E65NFO88007 Production Date\n${filler}\nVIN: ${VIN} Production Date`)).toBe(VIN);
+    const page = (vin: string) => `VIN: ${vin} Production Date\n${filler}\n`;
+    expect(findVin(page("5YJSA1E65NFO88007") + page(VIN) + page(VIN))).toBe(VIN);
+    // One later read is not enough: it could itself be the misread of a VIN with no check digit.
+    expect(findVin(page("5YJSA1E65NFO88007") + page(VIN))).toBe("5YJSA1E65NF088007");
   });
 
   it("never swaps in a different vehicle's VIN", () => {
@@ -432,9 +504,128 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
     expect(result.warnings.join("\n")).toMatch(/Compared against Carrier SOR S2\.pdf only\. Not compared: Shop prelim\.pdf/);
   });
 
+  it("an estimate for another vehicle on the case still blocks the run; it is never 'a version not compared'", async () => {
+    const otherVehicle = ["Preliminary Estimate", "Claim #: 99-9999999-01", "VIN: 1HGCM82633A004352", "Net Cost of Repairs $9,100.00", "31 Repl RT Side rail 57601-53070 727.53 2.5"].join("\n");
+    await expect(
+      build([
+        { fileName: "Other vehicle.pdf", sourceDocumentId: "other", estimateRole: "shop", text: otherVehicle },
+        { fileName: "Carrier SOR S2.pdf", sourceDocumentId: "sor2", estimateRole: "carrier", text: carrierText },
+      ])
+    ).rejects.toBeInstanceOf(CitationDensityAnnotationError);
+  });
+
+  it("a comparison whose own text is the insurer's is not refused for its file name", async () => {
+    const result = await build([
+      { fileName: "Appraisal S2.pdf", sourceDocumentId: "sor2", estimateRole: "shop", text: `USAA approved estimate\n${carrierText}` },
+    ]);
+    expect(result.warnings.join("\n")).not.toMatch(/not identified as the insurer's estimate/);
+  });
+
   it("says why a shop-vs-shop run has no dispute report", async () => {
     const result = await build([{ fileName: "Shop prelim.pdf", sourceDocumentId: "prelim", estimateRole: "shop", text: shopVersionText }]);
     expect(result.plainSummaryExportId).toBeUndefined();
-    expect(result.warnings.join("\n")).toMatch(/Appraisal Dispute Report not produced: .*Shop prelim\.pdf was read as a shop estimate/);
+    expect(result.warnings.join("\n")).toMatch(/Appraisal Dispute Report not produced: .*Shop prelim\.pdf was not identified as the insurer's estimate: it is labelled a shop estimate/);
+  });
+});
+
+/*
+ * The adversarial review of this change found what a report generated on a
+ * partial read, or from a wider read, could then claim. Each case below is a
+ * reviewer's input, run on the real RO 21995 production rows or the RO 22279
+ * dispute input.
+ */
+describe("review — what the report may claim when lines are unread or read differently", () => {
+  const delta21995 = JSON.parse(readFileSync(path.join(FIXTURE_DIR, "../21995/delta_rows.json"), "utf8"));
+  const text21995 = (name: string) => readFileSync(path.join(FIXTURE_DIR, `../21995/${name}`), "utf8");
+  type Delta = typeof delta21995;
+  const lowerRow = (d: Delta, line: number) => d.lower.find((r: EstimateDeltaRow) => r.lineNumber === line);
+  function model21995(mutate: (d: Delta) => void) {
+    const d = clone(delta21995);
+    mutate(d);
+    const adapted = adaptForensicToPlainSummary({
+      reconciliation: d.reconciliation,
+      rows: { higher: d.higher, lower: d.lower, deltas: d.deltas },
+      higherDocumentName: "Shop final 21995.pdf",
+      lowerDocumentName: "SOR-3 21995.pdf",
+      higherText: text21995("shop_final_rows_text.txt"),
+      lowerText: text21995("sor3_rows_text.txt"),
+      vehicleLabel: "2026 Rivian R1S",
+      roNumber: "21995",
+      generatedAt: "2026-10-02T00:00:00.000Z",
+    });
+    if (!adapted.ok) throw new Error(adapted.reason);
+    const m = buildPlainSummaryModel(adapted.input);
+    return { m, text: plainSummaryDocumentText(buildPlainSummaryDocument(m)) };
+  }
+
+  it("a reuse flag never prints $0.00 for a price that was not read", () => {
+    const { m, text } = model21995((d) => (lowerRow(d, 134).price = null));
+    expect(m.ledger.unreadCarrierLines).toBe(63.47);
+    expect(text).toMatch(/RT Water shield upper \(price not read, L134/);
+    expect(text).not.toMatch(/\(\$0\.00, L134/);
+  });
+
+  it("an unread companion price never inflates the tires item", () => {
+    const { m, text } = model21995((d) => (lowerRow(d, 77).price = null));
+    expect(m.items.find((item) => /^Tires/.test(item.title))).toBeUndefined();
+    expect(text).not.toMatch(/\$1,408\.60/);
+  });
+
+  it("an unread group price is worth its hours only, and says so", () => {
+    const { m } = model21995((d) => (lowerRow(d, 102).price = null));
+    const subframe = m.items.find((item) => /Subframe/.test(item.title));
+    if (subframe) {
+      expect(subframe.detail).toMatch(/No price was read for their L102/);
+      expect(subframe.value).toBeLessThan(100);
+    }
+  });
+
+  it("'no price' is stated as what was read while any carrier price is unread", () => {
+    const full = model21995(() => {});
+    const partial = model21995((d) => (lowerRow(d, 75).price = null));
+    const flag = (m: typeof full.m) => m.flags.find((f) => f.kind === "zeroPricedCarrierLine" && f.lines.carrier?.[0] === 57);
+    expect(flag(full.m)?.text).toMatch(/^The carrier wrote "Forklift frame from lot" \(L57\) with no price/);
+    expect(flag(partial.m)?.text).toMatch(/^No price was read for the carrier's "Forklift frame from lot" \(L57\)/);
+  });
+
+  it("a recycled part for the wrong drivetrain is still flagged", () => {
+    const { m } = model21995((d) => (lowerRow(d, 98).partSource = ["RCY"]));
+    expect(m.flags.find((f) => f.kind === "trimConflictPartNumber" && f.lines.carrier?.[0] === 98)).toBeDefined();
+  });
+
+  it("a high-dollar carrier line the matcher paired with a cheap namesake is still raised", () => {
+    const { m } = model21995((d) => (d.higher = d.higher.filter((r: EstimateDeltaRow) => r.lineNumber !== 135)));
+    expect(m.flags.find((f) => f.kind === "carrierOnlyHighDollar" && f.lines.carrier?.[0] === 102)).toBeDefined();
+  });
+
+  it("a carrier road test alone is not their calibration", () => {
+    const input = clone(disputeInput);
+    input.carrier.lines = input.carrier.lines.map((l) => (l.line === 35 ? { ...l, desc: "Four wheel alignment" } : l));
+    input.pairs = input.pairs.map((p) => (p.carrierLine === 35 ? { kind: "missing" as const, shopLines: p.shopLines } : p));
+    const text = plainSummaryDocumentText(buildPlainSummaryDocument(buildPlainSummaryModel(input)));
+    expect(text).toMatch(/No counterpart on their sheet \(L45/);
+    expect(text).not.toMatch(/they pay more than we wrote/);
+    expect(text).not.toMatch(/ADAS calibration & diagnostics/);
+  });
+
+  it("a shop non-OEM part is a part-type difference, not a variant to confirm by VIN", () => {
+    const input = clone(disputeInput);
+    input.shop.lines = input.shop.lines.map((l) =>
+      l.line === 30 ? { ...l, desc: "LKQ Bumper cover w/o park assist", partNumber: "HY1100280C", partSource: ["LKQ"] } : l
+    );
+    input.carrier.lines = input.carrier.lines.map((l) =>
+      l.line === 26 ? { ...l, desc: "Bumper cover w/o park assist", partNumber: "86650BE020AS", partSource: [] } : l
+    );
+    const m = buildPlainSummaryModel(input);
+    expect(m.flags.filter((f) => f.kind === "partNumberVariant" && f.lines.shop?.[0] === 30)).toEqual([]);
+  });
+
+  it("an unread calibration sublet price leaves the ADAS item worth its hours only", () => {
+    const input = clone(disputeInput);
+    input.carrier.lines = input.carrier.lines.map((l) => (l.line === 35 ? { ...l, price: undefined } : l));
+    const m = buildPlainSummaryModel(input);
+    const adas = m.items.find((item) => item.title === "ADAS calibration & diagnostics");
+    expect(adas).toBeUndefined(); // 0.5 hr each side: nothing left to argue on hours alone
+    expect(plainSummaryDocumentText(buildPlainSummaryDocument(m))).not.toMatch(/theirs none priced/);
   });
 });
