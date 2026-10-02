@@ -21,7 +21,7 @@
  * own subtotals; if they do not, LedgerNotClosedError is thrown and the report
  * is not produced (the same philosophy as the R24 release gate).
  */
-import { lineReconciliation, nonLaborBuckets, type LineReconciliation } from "./nonLaborBuckets";
+import { lineReconciliation, nonLaborBuckets, unreadLineDollars, type LineReconciliation } from "./nonLaborBuckets";
 import { round2, type Estimate, type LaborCat, type LaborTotal } from "./types";
 
 type Family = "body" | "paint" | "mech" | "struct" | "other";
@@ -71,8 +71,55 @@ export interface LedgerOptions {
   strictLines?: boolean;
 }
 
+/**
+ * Dollars of the carrier's printed Parts + Misc on lines whose price was not
+ * read, when the report may still be stated with them disclosed; 0 when the
+ * lines reproduce the printed total.
+ *
+ * The strict guard refused the whole report for ANY shortfall: RO 22279's
+ * image-only SOR was refused for $20.00 of OCR-dropped decimal points, and
+ * each earlier "not produced" RO was fixed by patching the one reader that
+ * tripped it. A SHORTFALL on a CCC print is bounded: every bucket comes from
+ * printed totals, and the unread dollars can only move between the Labor rate
+ * row (if one of them is a rate adjustment) and the parts row — never the
+ * gap. So it is carried as a disclosed figure. An OVER-read (lines summing to
+ * more than was printed) means a price was misread, and a Mitchell carrier
+ * books sublet into its labor categories, so line sums do not measure a
+ * shortfall there; both still refuse.
+ */
+export function unreadCarrierDollars(carrier: Estimate, opts: LedgerOptions = {}): number {
+  const unread = unreadLineDollars(carrier);
+  if (Math.abs(unread) <= 0.05) return 0;
+  if ((opts.strictLines ?? true) && !(unread > 0 && carrier.platform === "ccc")) {
+    nonLaborBuckets(carrier, { strict: true }); // throws NonLaborParseError with the figures
+  }
+  return unread > 0 ? unread : 0;
+}
+
+/**
+ * Carrier labor hours on lines that were not read: the printed labor hours
+ * less the hours on the lines read. A dropped row that carries only labor
+ * leaves no unread dollars, and the work on it then reads as "no
+ * counterpart" or "theirs 0.0 hr". Measured on a CCC print, whose line hours
+ * add up to its printed categories (RO 21995 and RO 22279, both sides, to
+ * the tenth); 0 when fully read or not CCC.
+ */
+export function unreadCarrierHours(carrier: Estimate): number {
+  if (carrier.platform !== "ccc") return 0;
+  const printed = carrier.totals.labor.reduce((sum, l) => sum + l.hours, 0);
+  const read = carrier.lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0);
+  const unread = Math.round((printed - read) * 10) / 10;
+  return unread > 0.05 ? unread : 0;
+}
+
+/** Part of the carrier's sheet was not read: dollars, labor hours, or both. */
+export function carrierPartlyUnread(ledger: Pick<GapLedger, "unreadCarrierLines" | "unreadCarrierHours">): boolean {
+  return ledger.unreadCarrierLines > 0 || ledger.unreadCarrierHours > 0;
+}
+
 export function resolveRateBasis(shop: Estimate, carrier: Estimate, opts: LedgerOptions = {}): RateBasis {
-  const adjustment = nonLaborBuckets(carrier, { strict: opts.strictLines ?? true }).rateAdjustment;
+  unreadCarrierDollars(carrier, opts);
+  const adjustment = nonLaborBuckets(carrier, { strict: false }).rateAdjustment;
   // Σ (shop rate − carrier rate) × carrier hours, taken against the carrier's
   // PRINTED category cost so a cent of print rounding cannot open the ledger.
   let implied = 0;
@@ -127,6 +174,10 @@ export interface GapLedger {
   tax: number;
   closes: true;
   rate: RateBasis;
+  /** Carrier Parts + Misc dollars on lines whose price was not read (disclosed in the report); 0 when fully read. */
+  unreadCarrierLines: number;
+  /** Carrier printed labor hours on lines that were not read (disclosed in the report); 0 when fully read. */
+  unreadCarrierHours: number;
   /**
    * Our sheet's line prices against its own printed Parts + Misc: the check
    * resolveRateBasis makes of the carrier's, made of ours. It never refuses the
@@ -185,6 +236,8 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     tax,
     closes: true,
     rate,
+    unreadCarrierLines: unreadCarrierDollars(carrier, opts),
+    unreadCarrierHours: unreadCarrierHours(carrier),
     shopLineRead: (opts.strictLines ?? true) ? lineReconciliation(shop) : null,
   };
 }
