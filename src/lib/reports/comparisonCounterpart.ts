@@ -49,6 +49,10 @@ export function readLatestPrintedTimestamp(text: string): number | null {
   return latest;
 }
 
+/** The file-name party tokens the citation-density route labels a comparison from. */
+const CARRIER_NAME = /carrier|insur|sor|geico|state farm|progressive|allstate/i;
+const SHOP_NAME = /shop|repair facility|rta|appraisal/i;
+
 export type CounterpartCandidate = {
   fileName: string;
   text: string;
@@ -94,13 +98,18 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     };
   }
 
-  // The other party is what the caller labelled it OR what the document's own
-  // authorship reads as: either can admit a candidate, neither can remove one
-  // the other admitted (a Mitchell supplement prints no authorship boilerplate).
+  // The other party is what the document's own authorship reads as, OR what
+  // the caller labelled it from a party token in its NAME (a Mitchell
+  // supplement prints no authorship boilerplate). A label the caller only
+  // guessed — the route's last resort labels an unmarked file the opposite
+  // of the source — admits nothing: it let the shop's own later estimate in
+  // as "theirs" ahead of the SOR.
   const otherRole = options.sourceParty === "shop" ? "carrier" : "shop";
   const carrierAuthored = (candidate: T) => isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: candidate.text });
+  const labelledByName = (candidate: T) =>
+    candidate.estimateRole === otherRole && (otherRole === "carrier" ? CARRIER_NAME : SHOP_NAME).test(candidate.fileName);
   const otherParty = candidates.filter(
-    (candidate) => candidate.estimateRole === otherRole || carrierAuthored(candidate) === (options.sourceParty === "shop")
+    (candidate) => labelledByName(candidate) || carrierAuthored(candidate) === (options.sourceParty === "shop")
   );
   const partyPool = otherParty.length ? otherParty : candidates;
   // An estimate whose totals cannot be read is not something to measure against.

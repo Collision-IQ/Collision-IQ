@@ -108,25 +108,24 @@ export function argueItems(params: {
     return `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr: the same hours. The difference is in the priced lines: ours ${money(ours)}, theirs ${theirs > 0 ? money(theirs) : "none priced"}.`;
   };
 
-  // A carrier line in the group whose price was not read: its priced lines
-  // cannot be compared, so the group is worth its hours only and says so.
-  const unpricedCarrierLines = (group: GroupDelta) =>
-    incomplete ? group.carrierLines.filter((line) => { const l = carrierLine.get(line); return l !== undefined && (l.price === undefined || l.price === null); }) : [];
+  // Part of their sheet's prices unread (a price cell not read, a row not
+  // read at all, or a sublet that prints blank by design — the ledger cannot
+  // tell which): no item may rest on a carrier price. Groups are valued on
+  // hours; parent-part items and our priced lines with no counterpart are
+  // not listed.
   const hoursValue = (lines: number[], byLine: Map<number, EstimateLine>) =>
     round2(lines.reduce((sum, line) => { const l = byLine.get(line); return sum + (l ? (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) : 0); }, 0));
 
   // Strong — the carrier's own exclusion note on an equivalence group.
   for (const group of groups) {
-    const unpriced = unpricedCarrierLines(group);
-    const diff = unpriced.length
+    const diff = incomplete
       ? round2(hoursValue(group.shopLines, shopLine) - hoursValue(group.carrierLines, carrierLine))
       : round2(group.shopValue - group.carrierValue);
     if (diff <= 0) continue;
     const excluded = group.exclusions.length > 0;
     const sides = `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr`;
-    const unpricedNote = `No price was read for their ${unpriced.map((line) => `L${line}`).join(", ")}: compare the priced lines with their printed estimate before arguing them. Worth counts the hours only.`;
-    const detail = unpriced.length
-      ? `${sides}${excluded ? `. Their own line says the time ${group.exclusions[0].toLowerCase()}` : ""}. ${unpricedNote}`
+    const detail = incomplete
+      ? `${sides}${excluded ? `. Their own line says the time ${group.exclusions[0].toLowerCase()}` : ""}. Part of their sheet's prices was not read, so the priced lines are not compared; Worth counts the hours only.`
       : excluded
       ? `${sides}. Their own line says the time ${group.exclusions[0].toLowerCase()}.`
       : group.shopHours === 0 && group.carrierHours === 0
@@ -168,17 +167,8 @@ export function argueItems(params: {
 
   // Strong — the carrier pays the parent part and leaves the child off.
   for (const rule of PARENT_PARTS) {
-    // A carrier line in play whose price was not read cannot be netted.
-    if (
-      incomplete &&
-      carrier.lines.some(
-        (l) =>
-          (l.price === undefined || l.price === null) &&
-          ((rule.child.test(l.desc) && !rule.exclude.test(l.desc)) || rule.companion.test(l.desc) || rule.parent.test(l.desc))
-      )
-    ) {
-      continue;
-    }
+    // Netted against their companion prices, so not stated on a partial read.
+    if (incomplete) continue;
     const children = shop.lines.filter((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc) && (l.price ?? 0) > 0);
     const carrierHasChild = carrier.lines.some((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc));
     const parents = carrier.lines.filter((l) => rule.parent.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0);
@@ -213,6 +203,10 @@ export function argueItems(params: {
     if (!lines.length || lines.some((l) => claimed.has(l.line))) continue;
     const theirs = pair.carrierLine !== undefined ? carrierLine.get(pair.carrierLine) : undefined;
     if (theirs && usedShopCarrierLine(groups, theirs.line)) continue;
+    // A priced line of ours with "no counterpart" on a partial read may have
+    // one among their unread priced rows. Unread DOLLARS cannot hide a
+    // labor-only counterpart, so a labor-only line stands as on a full read.
+    if (incomplete && !theirs && lines.some((l) => (l.price ?? 0) > 0)) continue;
     const ourHours = round2(lines.reduce((sum, l) => sum + hoursOf(l), 0));
     const hours = round2(ourHours - hoursOf(theirs));
     const partValue = theirs ? 0 : lines.reduce((sum, l) => sum + (l.price ?? 0), 0);
@@ -235,7 +229,7 @@ export function argueItems(params: {
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : theirs
           ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
-          : `No counterpart ${incomplete ? "read " : ""}on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
+          : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,
       value,
       shopLines: lines.map((l) => l.line),

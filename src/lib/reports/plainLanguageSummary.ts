@@ -285,7 +285,19 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       })),
     });
   } else {
-    itemBlocks.push({ kind: "paragraph", text: "No hours or parts difference is left once equivalent operations are grouped." });
+    itemBlocks.push({
+      kind: "paragraph",
+      text:
+        model.ledger.unreadCarrierLines > 0
+          ? "No hours difference is left on the lines read. Items that rest on their prices are not listed while part of their sheet's prices is unread (see the note under the ledger)."
+          : "No hours or parts difference is left once equivalent operations are grouped.",
+    });
+  }
+  if (shown.length && model.ledger.unreadCarrierLines > 0) {
+    itemBlocks.push({
+      kind: "note",
+      text: "Part of their sheet's prices is unread, so items that rest on their prices (a priced line of ours with no counterpart on their sheet, sublets and other priced lines, tires) are not listed and the items above are valued on hours only. The Forensic Estimate Analysis lists every line difference that was read.",
+    });
   }
   if (rest.length) {
     itemBlocks.push({
@@ -506,7 +518,7 @@ export function unreadCarrierNote(model: PlainSummaryModel): string {
     L.laborRate > 0
       ? `If any of the ${money(L.unreadCarrierLines)} is a labor-rate adjustment, the Labor rate row is smaller and the parts row larger by that amount.`
       : "",
-    "A line of theirs described here as having no price or no counterpart may be one whose price was not read: check it against their printed estimate before raising it. An item that includes a line of theirs with no price read is worth its hours only.",
+    "So no item below rests on their prices: a priced line of ours with no counterpart on their sheet, sublets and other priced lines, and tires are not listed, the remaining items are valued on hours only, and a line of theirs described as having no price may be one whose price was not read. The Forensic Estimate Analysis lists every line difference that was read.",
   ]
     .filter(Boolean)
     .join(" ");

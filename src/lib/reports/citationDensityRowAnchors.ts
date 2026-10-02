@@ -1094,7 +1094,9 @@ function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchor
   if (isGenericOrMalformedAnchorText(line.text)) return false;
   const normalized = normalizeMatchText(line.text);
   if (!normalized) return false;
-  if (/^\d{1,4}\b/.test(normalized)) return false;
+  // A numbered row starts its own anchor; a wrapped size or date fragment
+  // ("6.5mm", "8.2x12.2", "12/28/2017 …") continues the row above it.
+  if (extractLineNumber(line.text) !== null) return false;
   // End-of-table boundary: the last estimate row must never absorb the totals
   // header or the page's trailing prose ("Category Basis Rate Cost $ This
   // estimate is based on our initial visual inspection…") — a badge anchored
@@ -1247,7 +1249,7 @@ function extractNumericTokens(value: string) {
 function detectLaborValue(text: string, tokens: Array<{ value: number; index: number }>) {
   // The captured figure must be a value cell, never the head of a part number
   // ("Front pillar structural bulb 1063943-00-A" read 1,063,943 labor hours).
-  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d-])/i);
+  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:scan|calibration|r&i|r\s*&\s*i|repair|replace|refinish|labor|test|aim|initialize|program|mask|sand|polish)\b/i.test(text)) {
     return null;
@@ -1256,7 +1258,7 @@ function detectLaborValue(text: string, tokens: Array<{ value: number; index: nu
 }
 
 function detectPaintValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d-])/i);
+  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:paint|refinish|blend|clear coat|mask|jamb|color|sand|polish)\b/i.test(text)) return null;
   return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;
@@ -1505,12 +1507,12 @@ function isNumberedOperationRow(text: string) {
 }
 
 function extractLineNumber(text: string) {
-  // A wrapped dimension or quantity fragment is not a numbered row: "6.5mm",
-  // "8.0x5-0.9" and "3 Ft" printed under a description took line numbers 6, 8
-  // and 3 once the table region reached them, and the duplicate anchor id
-  // shadowed the real line 6.
+  // A wrapped dimension, date or quantity fragment is not a numbered row:
+  // "6.5mm", "8.0x5-0.9", "12/28/2017" and "3 Ft" printed under a description
+  // took line numbers once the table region reached them, and the duplicate
+  // anchor id shadowed the real line 6.
   if (/^\s*\d{1,4}\s+(?:ft|feet|in|inch(?:es)?|oz|ounces?|mm|cm|gal|qt|pcs?)\.?\s*$/i.test(text)) return null;
-  return text.match(/^\s*(?:line\s*)?(\d{1,4})(?![.,x]\d)\b/i)?.[1] ?? null;
+  return text.match(/^\s*(?:line\s*)?(\d{1,4})(?![.,x/]\d)\b/i)?.[1] ?? null;
 }
 
 function detectSection(text: string) {

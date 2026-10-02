@@ -867,10 +867,18 @@ export function explodeGluedRow(rawText: string): string {
       // testing only the last two letters split RO 22279's Hyundai part
       // numbers into "86671BE 000", so no part number read and none matched.
       // A digit inside the alphanumeric run right before the tail is that
-      // signal; "/", "-" or a glued line number before the word are not.
+      // signal, as is a dashed catalog head ("86302-BE200"); "/", "-" inside a
+      // word, or a line number / supplement tag / operation glued to the
+      // front of the row ("45#S01Detail1m"), are not.
       (withinToken.length <= 3 &&
         /[A-Za-z]{2}$/.test(text.slice(0, i)) &&
-        !/\d/.test(text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? ""));
+        !/\d{3,}-[A-Za-z]{1,3}$/.test(text.slice(tokenStart, i)) &&
+        !/\d/.test(
+          (text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? "").replace(
+            tokenStart === 0 ? /^(?:\d{1,3})?(?:S\d{2})?(?:Repl|Rpr|Subl|Refn|Blnd|Algn|Sect|PDR)?(?=[A-Za-z])/ : /^$/,
+            ""
+          )
+        ));
     if (!splittable && boundaryIndex === i) continue;
     if (isColumnBlob(remainder)) {
       const head = text.slice(0, boundaryIndex);
@@ -1831,10 +1839,10 @@ export function findOcrDroppedPointCell(
 export function parseCccSubtotalsCells(text: string): { price: number; labor: number; paint: number } | null {
   for (const raw of (text ?? "").replace(/\r/g, "\n").split("\n")) {
     const line = raw.replace(/\s+/g, " ").trim();
-    // The first SUBTOTALS line, even behind OCR noise ("| SUBTOTALS …"), so
-    // a garbled main rule never hands the target to the Supplement Summary's.
-    if (!/\bSUBTOTALS\b/i.test(line)) continue;
-    const cells = line.replace(/^.*?\bSUBTOTALS\s*/i, "").split(" ").filter(Boolean);
+    // The first SUBTOTALS rule, even behind OCR punctuation noise ("| SUBTOTALS
+    // …"); a description that merely mentions subtotals is not the rule.
+    if (!/^\W*SUBTOTALS\b/i.test(line)) continue;
+    const cells = line.replace(/^\W*SUBTOTALS\s*/i, "").split(" ").filter(Boolean);
     if (
       cells.length !== 3 ||
       !OCR_CELL_MONEY.test(cells[0]) ||

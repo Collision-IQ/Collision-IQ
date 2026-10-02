@@ -2034,6 +2034,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // fields bold, so the raw layer reads "CCllaaiimm ##" and a raw-text regex
   // misses every field on that platform.
   const gateSourceIdentity = readClaimIdentity(normalizeOverprintText(params.sourceText ?? ""));
+  // Advisories are held per comparison and reported only for the estimate the
+  // run compares (below): another estimate's VIN note must not read as this one's.
+  const gateAdvisories = new Map<ComparisonEstimateText, string[]>();
   for (const comparison of params.comparisonEstimateTexts ?? []) {
     if (!comparison.text?.trim()) continue;
     const comparisonIdentity = readClaimIdentity(normalizeOverprintText(comparison.text));
@@ -2041,7 +2044,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     if (!verdict.blocked) {
       // CR-0: a pair that continued on the VIN fallback (or with a VIN
       // advisory) says so where the BLOCKED box would have rendered.
-      for (const warning of verdict.warnings ?? []) warnings.push(warning);
+      gateAdvisories.set(comparison, verdict.warnings ?? []);
       continue;
     }
     appendToolUsageTrace(trace, {
@@ -2094,6 +2097,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       const note = describeExcludedComparisons(selection);
       if (note) warnings.push(note);
     }
+  }
+  for (const comparison of params.comparisonEstimateTexts ?? []) {
+    for (const warning of gateAdvisories.get(comparison) ?? []) warnings.push(warning);
   }
 
   appendToolUsageTrace(trace, {
@@ -3140,13 +3146,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // document with the wrong nouns in it. It is a companion, never a
     // deliverable the run depends on: a failure here is a warning on the
     // run, and the two documents above still ship.
-    // The route labels a comparison from its FILE NAME ("appraisal" reads as
-    // shop). A comparison whose own text reads as insurer-authored is the
-    // insurer's whatever it is called — text only here, never the file name,
-    // so an independent appraiser's file name cannot make it the carrier's.
+    // The route labels a comparison from its FILE NAME, and "appraisal"/"rta"
+    // read as shop. Only there, or with no label at all, may the document's
+    // own insurer-authored text make it the insurer's: a file named as a shop
+    // estimate stays the shop's whatever a note in it says ("BLEND NOT ON
+    // USAA ESTIMATE"), and the text test never reads the file name.
     const comparisonText = params.comparisonEstimateTexts?.[0];
+    const labelFromAmbiguousName =
+      !comparisonText?.estimateRole ||
+      (/appraisal|rta/i.test(comparisonText.fileName ?? "") && !/shop|repair facility/i.test(comparisonText.fileName ?? ""));
     const comparisonRole =
-      comparisonText?.estimateRole === "carrier" || isCarrierAuthoredEstimateDocument({ filename: "", text: comparisonText?.text })
+      comparisonText?.estimateRole === "carrier" ||
+      (labelFromAmbiguousName && isCarrierAuthoredEstimateDocument({ filename: "", text: comparisonText?.text }))
         ? "carrier"
         : comparisonText?.estimateRole;
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {

@@ -83,14 +83,42 @@ describe("real identifiers are still redacted — under-redaction is the worse b
     expect(redactDownloadContent("Zip: 17601")).toContain("[REDACTED_ZIP]");
   });
 
-  it("redacts a plate only when the word after 'plate' has a plate's shape", () => {
-    expect(redactDownloadContent("License plate: MKZ4426")).toContain("[REDACTED_PLATE]");
-    expect(redactDownloadContent("plate number 7abc123 on file")).toContain("[REDACTED_PLATE]");
-    expect(redactDownloadContent("Plate ABC 1234")).toContain("[REDACTED_PLATE]");
-    // Estimate lines that merely name a plate keep their words (RO 22279).
-    expect(redactDownloadContent("Repl Skid plate SE, SEL")).toBe("Repl Skid plate SE, SEL");
-    expect(redactDownloadContent("Repl License plate pad 869413K000")).toBe("Repl License plate pad 869413K000");
-    expect(redactDownloadContent("Repl Skid plate 86671BE000")).toBe("Repl Skid plate 86671BE000");
+  it("redacts anything after 'plate' that could be a plate (fail closed)", () => {
+    for (const text of [
+      "License plate: MKZ4426",
+      "License plate: GOBUCKS",
+      "Plate No. GOBUCKS",
+      "License Plate:GOBUCKSState:OH",
+      "plate number 7abc123 on file",
+      "plate: abc 1234",
+      "Plate ABC 1234",
+      "My license plate is MKZ4426.",
+      "my license plate gobucks",
+      "License plate 7 ABC 123",
+      "Exterior Color: White\nPlate MYCAR",
+      "Vehicle: 2024 Hyundai Kona SE AWD\nPlate CA 7ABC123\nMileage 19294",
+      "Vehicle plate CA 7ABC123",
+      "The vehicle has vanity plate GOBUCKS.",
+      "Ohio plate GOBUCKS",
+      "Customer's plate GOBUCKS was noted",
+      "Skid plate ABC1234",
+    ]) {
+      expect(redactDownloadContent(text), text).toContain("[REDACTED_PLATE]");
+    }
+  });
+
+  it("keeps an estimate line that names a plate part (RO 22279)", () => {
+    for (const text of [
+      "Repl Skid plate SE, SEL",
+      "Repl License plate pad 869413K000",
+      "Repl Front License Plate Bracket 86519-J9000 1 24.10",
+      "R&I License plate lamp",
+      "Repl Skid plate 86671BE000",
+      "23S01R&IRT Rear sill plate00.00Incl.0.0",
+      "Needs proof: Rear sill plate is referenced but final invoice-backed completion is not shown.",
+    ]) {
+      expect(redactDownloadContent(text)).toBe(text);
+    }
   });
 
   it("redacts owner names in both printed orders", () => {

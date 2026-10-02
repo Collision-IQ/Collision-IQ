@@ -104,6 +104,7 @@ describe("D1 — OCR dropped decimal points, restored only where the printed SUB
     expect(row(read.rows, 26)).toMatchObject({ opCode: "Repl", description: "A/M Bumper cover w/o park", partNumber: "HY1100280" });
     expect(row(read.rows, 29)).toMatchObject({ opCode: "Repl", partNumber: "1919.1402" });
     expect(row(read.rows, 12)).toMatchObject({ opCode: "Repl", partNumber: "GEU3151R-72909" });
+    expect(row(read.rows, 11)).toMatchObject({ description: "Opt OEM Emblem", partNumber: "86302-BE200" });
   });
 
   it("a text layer (no OCR header) is read exactly as before", () => {
@@ -154,6 +155,7 @@ describe("D1 — OCR dropped decimal points, restored only where the printed SUB
     expect(parseCccSubtotalsCells("SUBTOTALS 2,487.54 16.8 5.2")).toEqual({ price: 2487.54, labor: 16.8, paint: 5.2 });
     expect(parseCccSubtotalsCells("SUBTOTALS 2,487.54 168 5.2")).toBeNull();
     expect(parseCccSubtotalsCells("SUBTOTALS2,977.6817.67.8")).toBeNull();
+    expect(parseCccSubtotalsCells("51 # Recheck subtotals 0 0.00 0.0 0.0\n| SUBTOTALS 2,487.54 16.8 5.2")).toEqual({ price: 2487.54, labor: 16.8, paint: 5.2 });
   });
 });
 
@@ -317,6 +319,9 @@ describe("D4 — a part number with a two-letter interior is one token", () => {
       laborType: "M",
     });
     expect(parseCccEstimateRow("45#Post-scan1m")).toMatchObject({ description: "Post-scan", qty: 1 });
+    expect(parseCccEstimateRow("45#S01Detail1m1.0")).toMatchObject({ description: "Detail", qty: 1, labor: 1 });
+    expect(parseCccEstimateRow("41S01ReplCalibration1m1.4M")).toMatchObject({ description: "Calibration", qty: 1, labor: 1.4 });
+    expect(parseCccEstimateRow("14 Repl Bumper cover 86511-BE000 1 412.00 2.0 2.5")).toMatchObject({ description: "Bumper cover", partNumber: "86511-BE000" });
     expect(parseCccEstimateRow("12 Repl Grille C25J75 1 45.00 0.3")).toMatchObject({ partNumber: "C25J75" });
   });
 
@@ -367,10 +372,18 @@ describe("D5 — one counterpart per run", () => {
     }
   });
 
+  it("a label the caller only guessed admits nothing: an unmarked shop version never displaces the SOR", () => {
+    const guessed = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
+    const labelled = { ...sor, estimateRole: "carrier" as const };
+    for (const candidates of [[guessed, labelled], [labelled, guessed]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe("SOR-1_22279.pdf");
+    }
+  });
+
   it("names an Estimate of Record as such, never 'supplement 0'", () => {
-    const eor = { fileName: "EOR.pdf", estimateRole: "carrier" as const, text: sorText.replace(/Supplement of Record 1 with Summary/g, "Estimate of Record") };
+    const eor = { fileName: "Carrier EOR.pdf", estimateRole: "carrier" as const, text: sorText.replace(/Supplement of Record 1 with Summary/g, "Estimate of Record") };
     const note = describeExcludedComparisons(selectComparisonCounterpart([eor, sor], { sourceParty: "shop" }));
-    expect(note).toMatch(/EOR\.pdf \(it prints Estimate of Record; SOR-1_22279\.pdf prints supplement 1\)/);
+    expect(note).toMatch(/Carrier EOR\.pdf \(it prints Estimate of Record; SOR-1_22279\.pdf prints supplement 1\)/);
     expect(note).not.toMatch(/supplement 0/);
   });
 
@@ -392,6 +405,8 @@ describe("D6 — a VIN misread on one page is corrected by the same print's own 
     expect(findVin(page("5YJSA1E65NFO88007") + page(VIN) + page(VIN))).toBe(VIN);
     // One later read is not enough: it could itself be the misread of a VIN with no check digit.
     expect(findVin(page("5YJSA1E65NFO88007") + page(VIN))).toBe("5YJSA1E65NF088007");
+    // ... and one printed VIN behind two labels is still one read.
+    expect(findVin(`${page("5YJSA1E65NFO88007")}VIN VIN: ${VIN} x\n`)).toBe("5YJSA1E65NF088007");
   });
 
   it("never swaps in a different vehicle's VIN", () => {
@@ -457,7 +472,11 @@ describe("D8 — a carrier line-read shortfall is stated and bounded, never a re
     expect(text).toMatch(/the lines this read could price add up to \$2,482\.54, so \$5\.00 is on lines whose price was not read/);
     expect(text).toMatch(/the Labor rate row is smaller and the parts row larger by that amount/);
     expect(text).toMatch(/If any of the \$5\.00 on their lines that was not read is a labor-rate adjustment/);
-    expect(text).toMatch(/No counterpart read on their sheet/);
+    // Items that rest on their prices are withheld, and the report says so;
+    // our labor-only lines with no counterpart stand as on a full read.
+    expect(text).not.toMatch(/No counterpart on their sheet \([^)]*\$[\d,.]+ part\)/);
+    expect(text).toMatch(/No counterpart on their sheet \(L40, 1\.0 hr\)/);
+    expect(text).toMatch(/items that rest on their prices \(a priced line of ours with no counterpart on their sheet, sublets and other priced lines, tires\) are not listed/);
     expect((await renderPlainSummaryPdf(model)).pageCount).toBeGreaterThan(0);
   });
 
@@ -521,6 +540,14 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
     expect(result.warnings.join("\n")).not.toMatch(/not identified as the insurer's estimate/);
   });
 
+  it("a file named as a shop estimate stays the shop's whatever a note in it says", async () => {
+    const result = await build([
+      { fileName: "Shop prelim.pdf", sourceDocumentId: "prelim", estimateRole: "shop", text: `${shopVersionText}\nBLEND NOT ON USAA ESTIMATE, ADDED` },
+    ]);
+    expect(result.plainSummaryExportId).toBeUndefined();
+    expect(result.warnings.join("\n")).toMatch(/Shop prelim\.pdf was not identified as the insurer's estimate: it is labelled a shop estimate/);
+  });
+
   it("says why a shop-vs-shop run has no dispute report", async () => {
     const result = await build([{ fileName: "Shop prelim.pdf", sourceDocumentId: "prelim", estimateRole: "shop", text: shopVersionText }]);
     expect(result.plainSummaryExportId).toBeUndefined();
@@ -571,13 +598,32 @@ describe("review — what the report may claim when lines are unread or read dif
     expect(text).not.toMatch(/\$1,408\.60/);
   });
 
-  it("an unread group price is worth its hours only, and says so", () => {
-    const { m } = model21995((d) => (lowerRow(d, 102).price = null));
-    const subframe = m.items.find((item) => /Subframe/.test(item.title));
-    if (subframe) {
-      expect(subframe.detail).toMatch(/No price was read for their L102/);
-      expect(subframe.value).toBeLessThan(100);
+  it("on a partial read, no item rests on their prices", () => {
+    const full = model21995(() => {});
+    const { m, text } = model21995((d) => (lowerRow(d, 102).price = null));
+    expect(m.ledger.unreadCarrierLines).toBe(2000);
+    // No priced no-counterpart, priced-group or tires item; every group item is valued on hours.
+    expect(m.items.some((item) => /^No counterpart.*\$[\d,.]+ part/.test(item.detail))).toBe(false);
+    expect(m.items.some((item) => /^Tires/.test(item.title))).toBe(false);
+    for (const item of m.items.filter((i) => full.m.groups.some((g) => g.label === i.title))) {
+      expect(item.detail).toMatch(/Worth counts the hours only/);
     }
+    expect(text).toMatch(/items that rest on their prices .* are not listed/);
+  });
+
+  it("a carrier row not read at all never inflates an item (dropped L77, L171)", () => {
+    expect(model21995((d) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 77))).text).not.toMatch(/\$1,408\.60/);
+    const { m, text } = model21995((d) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 171)));
+    expect(text).not.toMatch(/theirs \$497\.00/);
+    const transport = m.items.find((item) => /Transport/.test(item.title));
+    expect(transport === undefined || transport.value <= 337.96).toBe(true);
+  });
+
+  it("a dropped carrier calibration row never prints our calibration as 'no counterpart'", () => {
+    const input = clone(disputeInput);
+    input.carrier.lines = input.carrier.lines.filter((l) => l.line !== 35);
+    const text = plainSummaryDocumentText(buildPlainSummaryDocument(buildPlainSummaryModel(input)));
+    expect(text).not.toMatch(/\$469\.00 part/);
   });
 
   it("'no price' is stated as what was read while any carrier price is unread", () => {

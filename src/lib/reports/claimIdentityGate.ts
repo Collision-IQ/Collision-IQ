@@ -207,7 +207,11 @@ export function findVin(text: string): string | null {
     return corrections.get(vin)! >= 2;
   };
   for (const match of text.matchAll(/\bVIN\b\s*[:#-]?/gi)) {
-    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 60);
+    // Each printed VIN is credited to ONE label: the window stops at the next
+    // "VIN", so "VIN VIN: <vin>" is one read, not two agreeing ones.
+    const window = text.slice(match.index + match[0].length, match.index + match[0].length + 60);
+    const nextLabel = window.search(/\bVIN\b/i);
+    const after = nextLabel >= 0 ? window.slice(0, nextLabel) : window;
     const found = scan(after);
     if (found) {
       if (!unvalidated || correctsGuess(found)) return found;
