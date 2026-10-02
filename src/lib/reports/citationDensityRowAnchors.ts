@@ -888,6 +888,72 @@ function countPageChromeRepeats(lines: PdfTextLine[]): Map<PdfTextLine, number> 
 }
 
 /**
+ * The ALTERNATE PARTS SUPPLIERS listing CCC ONE prints after the totals: per
+ * estimate line, who supplies the alternate part ("3
+ * Keystone-Complete-H-Chesapeake #TA1000101C $ 475.00"), under its own column
+ * header "Line Supplier Description Price". It sits below the SUBTOTALS rule,
+ * so it has no U-5 table region and the running section does not advance on
+ * its page; the listing is measured from its own header instead. It runs from
+ * that header down to the page chrome or the next title on the page ("ALTERNATE
+ * PARTS USAGE"), whichever comes first, and a row belongs to it when its
+ * number starts in the Line column, left of where the Supplier column starts.
+ * The street, city and phone lines of a supplier start in the Supplier column.
+ *
+ * Page-local by construction: a listing never carries to a later page and
+ * never becomes the running section. A section-driven read made every line of
+ * the pages after it a supplier row (claim, workfile and VIN chrome on RO 20766
+ * SOR-3 pages 12-13). A listing that continues onto a page without its own
+ * header is not measured; no print in the repo shows one.
+ *
+ * Measured lines only: stored-text synthetic lines carry no geometry.
+ */
+function measureSupplierListings(lines: PdfTextLine[]): Map<number, SupplierListing> {
+  const listings = new Map<number, SupplierListing>();
+  const supplierWord = (line: PdfTextLine) => line.words.find((word) => /^Supplier\b/.test(word.text.trim()));
+  const headers = lines
+    .filter(
+      (line) =>
+        /\bLine\b/.test(line.text) &&
+        /\bSupplier\b/.test(line.text) &&
+        /\b(?:Description|Price)\b/.test(line.text) &&
+        Boolean(supplierWord(line))
+    )
+    .sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y);
+  if (!headers.length) return listings;
+  const chromePages = countPageChromeRepeats(lines);
+  for (const header of headers) {
+    const supplierColumn = supplierWord(header);
+    if (!supplierColumn || listings.has(header.pageNumber)) continue;
+    const top = header.y + header.height;
+    const end = lines
+      .filter(
+        (line) =>
+          line.pageNumber === header.pageNumber &&
+          line.y > top &&
+          ((chromePages.get(line) ?? 0) >= 2 || (!extractLineNumber(line.text) && Boolean(detectSection(line.text))))
+      )
+      .sort((a, b) => a.y - b.y)[0];
+    listings.set(header.pageNumber, {
+      top,
+      bottom: end ? end.y : header.pageHeight,
+      supplierLeft: supplierColumn.x,
+      em: header.height,
+    });
+  }
+  return listings;
+}
+
+/** A supplier listing's rows on one page: the y-range under its header, and
+ * the left edge of its Supplier column. */
+type SupplierListing = { top: number; bottom: number; supplierLeft: number; em: number };
+
+/** True when a measured line opens a row of its page's supplier listing. */
+function opensSupplierListingRow(line: PdfTextLine, listing: SupplierListing | undefined): boolean {
+  if (!listing || !line.words.length) return false;
+  return line.y > listing.top - 2 && line.y < listing.bottom && line.words[0].x < listing.supplierLeft - listing.em / 2;
+}
+
+/**
  * The line-number column, measured per document from the print itself. A
  * description that wraps can start its second line with a digit ("3 Ft" under
  * "Trim Masking Tape-3M 06347-Per", "6.5mm", "8.0x5-0.9"), and read as text
@@ -967,6 +1033,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * belongs to the note, never to the row description. */
   let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
+  const supplierListings = measureSupplierListings(lines);
   const lineNumberColumn = measureLineNumberColumn(lines);
   /** The printed line each operation anchor was opened from. */
   const anchorLines = new Map<EstimateRowAnchor, PdfTextLine>();
@@ -984,6 +1051,9 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     const lineNumber = wrappedPastLineNumberColumn ? null : printedNumber;
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
+    // A numbered row of a supplier listing names the estimate line whose part
+    // it sources: a supplier row by position, whatever its text reads as.
+    if (lineNumber && opensSupplierListingRow(line, supplierListings.get(line.pageNumber))) type = "supplier_row";
     // The running section may only advance on a header that sits INSIDE the
     // measured table region. Cover-page all-caps text ("DORSEY, DAVID",
     // "PHILADELPHIA") has header shape but is not a header, and every row

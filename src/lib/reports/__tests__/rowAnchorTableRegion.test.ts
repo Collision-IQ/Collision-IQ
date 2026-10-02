@@ -378,6 +378,136 @@ describe("a summary table that opens below the rule on the same page", () => {
   });
 });
 
+/*
+ * The ALTERNATE PARTS SUPPLIERS listing. It prints after the summary's rule,
+ * so its page has no table region and the running section does not advance
+ * there; with no supplier section, "3 Keystone-Complete-H-Chesapeake …
+ * $ 475.00" read as an estimate line and was downgraded to guide_row. The
+ * listing is measured from its own column header instead. A section-driven
+ * read is what made every line of the pages after it a supplier row (claim,
+ * workfile and VIN lines on RO 20766 SOR-3 pages 12-13), so the listing must
+ * stay on its page.
+ */
+
+/** A line with measured words, each cell [text, x], as pdf.js reports them. */
+function measured(pageNumber: number, y: number, cells: Array<[string, number]>, height = 8): PdfTextLine {
+  const words: PdfWord[] = cells.map(([text, x]) => ({
+    pageNumber,
+    text,
+    normalizedText: text.toLowerCase(),
+    x,
+    y,
+    width: text.length * 4.4,
+    height,
+    pageWidth: PAGE_WIDTH,
+    pageHeight: PAGE_HEIGHT,
+  }));
+  const text = cells.map(([cell]) => cell).join(" ");
+  const last = words[words.length - 1];
+  return { ...line(pageNumber, y, text, height), x: words[0].x, width: last.x + last.width - words[0].x, words };
+}
+
+/** The 20766 SOR-3 page-11 geometry: Line at 34.6, Supplier at 67.6, Description at 229.5, Price at 538. */
+function supplierListing(pageNumber: number): PdfTextLine[] {
+  return [
+    measured(pageNumber, 27.6, [[SOR_TITLE, 190.2]], 10),
+    measured(pageNumber, 46.6, [["RO Number: 90001", 29]], 10),
+    measured(pageNumber, 61.0, [[VEHICLE, 22.9]]),
+    measured(pageNumber, 113.1, [["ALTERNATE PARTS SUPPLIERS", 211.7]], 9.9),
+    measured(pageNumber, 138.3, [["Line", 34.6], ["Supplier", 67.6], ["Description", 229.5], ["Price", 538]]),
+    measured(pageNumber, 151.8, [["3", 40.9], ["Keystone-Complete-H-Chesapeake", 67.6], ["#TA1000101C", 229.4], ["$ 475.00", 526.6]]),
+    measured(pageNumber, 165.4, [["5415 WEST MILITAR HWY", 67.6], ["A/M CAPA Bumper cover unpainted", 229.5]]),
+    measured(pageNumber, 179.0, [["CHESAPEAKE VA 23321", 67.6]]),
+    measured(pageNumber, 192.5, [["(800) 322-7795", 67.6]]),
+    measured(pageNumber, 206.1, [["17", 36.5], ["Fenix Parts-Philadelphia", 67.6], ["#FX20931", 229.4], ["$ 210.00", 526.6]]),
+    measured(pageNumber, 219.6, [["2100 E ALLEGHENY AVE", 67.6], ["LKQ RT Fender liner", 229.5]]),
+    measured(pageNumber, 233.2, [["PHILADELPHIA PA 19134", 67.6]]),
+    // The footer reads line number 10 ("10/2/2026…"); it is page chrome.
+    measured(pageNumber, 740.7, [["10/2/2026 8:27:55 AM", 24.4], ["300060", 267.3], [`Page ${pageNumber}`, 529.3]]),
+  ];
+}
+
+/** The page CCC ONE prints next: chrome, then vehicle facts that carry no supplier vocabulary. */
+function partsUsagePage(pageNumber: number): PdfTextLine[] {
+  return [
+    ...pageChrome(pageNumber, SOR_TITLE),
+    line(pageNumber, 101.6, "ALTERNATE PARTS USAGE", 9.9),
+    line(pageNumber, 125.3, VEHICLE),
+    line(pageNumber, 149.0, "VIN: KM8HBCAB0RU000000 Production Date: 05/2024 Interior Color:"),
+    line(pageNumber, 162.5, "License: XXX0000 Odometer: 61384 Exterior Color: BLUE"),
+    line(pageNumber, 186.8, "State: PA Condition: Good"),
+    line(pageNumber, 223.2, "Alternate Part Type # Of Available Parts # Of Parts Selected"),
+    line(pageNumber, 236.8, "Aftermarket 1 1"),
+    line(pageNumber, 250.4, "Optional OEM 0 0"),
+  ];
+}
+
+describe("an ALTERNATE PARTS SUPPLIERS listing after the summary (RO 20766 SOR-3 shape)", () => {
+  // Pages 1-4 line items and totals, page 5 the summary, page 6 the listing,
+  // page 7 parts usage, page 8 recall prose.
+  const found = anchorsOf([
+    ...lineItemPages(),
+    ...pageChrome(5, SOR_TITLE),
+    line(5, 113.1, "SUPPLEMENT SUMMARY"),
+    line(5, 138.3, COLUMN_HEADER),
+    line(5, 149.0, "Price $"),
+    line(5, 162.5, "Added Items"),
+    line(5, 176.1, "54 # S03 Seat Belt Inspection 1 0.00 0.5 0.0"),
+    line(5, 189.6, "SUBTOTALS 0.00 0.5 0.0"),
+    ...supplierListing(6),
+    ...partsUsagePage(7),
+    ...recallPage(8),
+  ]);
+  const numberedSupplierRows = found.filter((anchor) => anchor.anchorType === "supplier_row" && anchor.lineNumber);
+
+  it("each listing row anchors as a supplier row under the estimate line it sources", () => {
+    expect(numberedSupplierRows.map((anchor) => [anchor.pageNumber, anchor.lineNumber])).toEqual([
+      [6, "3"],
+      [6, "17"],
+    ]);
+    expect(numberedSupplierRows[0].supplierText).toBe("3 Keystone-Complete-H-Chesapeake #TA1000101C $ 475.00");
+  });
+
+  it("a supplier's street line never claims its street number as a line number", () => {
+    const street = found.find((anchor) => anchor.rowText.startsWith("5415 WEST"));
+    expect(street?.anchorType).not.toBe("estimate_line");
+    expect(street?.anchorType === "supplier_row" && street.lineNumber).toBeFalsy();
+  });
+
+  it("the footer below the listing stays page chrome", () => {
+    const footer = found.find((anchor) => anchor.pageNumber === 6 && /Page 6$/.test(anchor.rowText));
+    expect(footer?.anchorType).toBe("guide_row");
+  });
+
+  it("the listing never leaks onto the pages after it", () => {
+    for (const opening of ["Supplement of Record", "RO Number", "2024 HYUN", "VIN:", "License:", "State:", "Optional OEM"]) {
+      const leaked = found.filter(
+        (anchor) => anchor.pageNumber >= 7 && anchor.rowText.startsWith(opening) && anchor.anchorType === "supplier_row"
+      );
+      expect(leaked, opening).toEqual([]);
+    }
+    expect(found.some((anchor) => /supplier/.test(anchor.section))).toBe(false);
+    expect(operationAnchorsOn(found, [6, 7, 8])).toEqual([]);
+  });
+});
+
+describe("a title below the supplier listing on the same page", () => {
+  // CCC ONE starts ALTERNATE PARTS USAGE on a new page on 20766; if it ever
+  // follows the listing on its page, the title ends the listing, so its
+  // vehicle line ("2024 HYUN…", line-number shape) is not a supplier row.
+  const found = anchorsOf([
+    ...lineItemPages(),
+    ...supplierListing(5),
+    measured(5, 270.4, [["ALTERNATE PARTS USAGE", 223.6]], 9.9),
+    measured(5, 294.1, [[VEHICLE, 22.9]]),
+  ]);
+
+  it("ends the listing", () => {
+    const supplierRows = found.filter((anchor) => anchor.anchorType === "supplier_row" && anchor.lineNumber);
+    expect(supplierRows.map((anchor) => anchor.lineNumber)).toEqual(["3", "17"]);
+  });
+});
+
 describe("measured on the repo's supplement-with-summary prints", () => {
   const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures");
   function fixtureAnchors(relativePath: string): EstimateRowAnchor[] {
@@ -400,6 +530,21 @@ describe("measured on the repo's supplement-with-summary prints", () => {
       expect(anchor?.anchorType, opening).toBe("guide_row");
     }
     expect(linesOn(found, 5)).toEqual(["52", "52", "53", "53", "54"]);
+  });
+
+  it("RO 20766 SOR-3: the page-11 supplier listing row is a supplier row; nothing after it inherits the listing", () => {
+    const found = fixtureAnchors("20766/sor3_words.json");
+    const keystone = found.find((anchor) => anchor.pageNumber === 11 && anchor.rowText.startsWith("3 Keystone-Complete-H-Chesapeake"));
+    expect(keystone?.anchorType).toBe("supplier_row");
+    expect(keystone?.lineNumber).toBe("3");
+    expect(keystone?.supplierText).toMatch(/\$ 475\.00$/);
+    // The one line-numbered supplier row in the document is the listing row.
+    expect(
+      found.filter((anchor) => anchor.anchorType === "supplier_row" && anchor.lineNumber).map((anchor) => [anchor.pageNumber, anchor.lineNumber])
+    ).toEqual([[11, "3"]]);
+    // The page-11 footer and the chrome and vehicle facts of pages 12-13.
+    const chrome = /^(?:Claim #|Workfile ID|Supplement of Record|2018 TESL|VIN:|License:|State:|Silver$|Optional OEM|Reconditioned|Recycled|\d+\/\d+\/\d{4} )/;
+    expect(found.filter((anchor) => anchor.pageNumber >= 11 && chrome.test(anchor.rowText) && anchor.anchorType === "supplier_row")).toEqual([]);
   });
 
   it("RO 22084 SOR-5: pages after the page-7 summary carry no operation rows", () => {
