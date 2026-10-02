@@ -806,26 +806,31 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   // cut the last 2-4 rows off every full page.
   const footerLines = lines.filter((line) => line.y >= line.pageHeight * 0.8 && (chromePages.get(line) ?? 0) >= 3);
   const footerTopY = footerLines.length ? Math.min(...footerLines.map((line) => line.y)) - 4 : null;
+  /** The top an open table carries to pages without a column header; null when
+   * no table is open (before the first header, and after a SUBTOTALS rule). */
   let carriedTop: number | null = null;
-  /** A column header opened the table and no SUBTOTALS rule has closed it. */
-  let tableOpen = false;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
     const pageHeight = pageLines[0]?.pageHeight ?? 792;
-    const header = pageLines
+    const headers = pageLines
       .filter(
         (line) =>
           (/\bLine\b/.test(line.text) && /\bOper\b/i.test(line.text) && /\bDescription\b/i.test(line.text)) ||
           (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
       )
-      .sort((a, b) => a.y - b.y)[0];
-    if (header) {
-      carriedTop = header.y + header.height;
-      tableOpen = true;
-    }
-    if (carriedTop === null) continue; // pages before any header: no region
+      .sort((a, b) => a.y - b.y);
+    const header = headers[0];
+    if (header) carriedTop = header.y + header.height;
+    // A page without a column header of its own has a region only while a
+    // table is open. After the SUBTOTALS rule it is post-table material on
+    // every producer: print-once producers end the table at the rule, and
+    // per-page producers reprint the header on every line-item page. A
+    // "with Summary" print ends on a complete SUPPLEMENT SUMMARY table (header
+    // and rule on one page), then totals, cumulative effects and NHTSA recall
+    // prose whose leading digits ("2020-2025 Model Y…") read as line numbers.
+    if (carriedTop === null) continue;
     let top = header ? header.y + header.height : carriedTop;
-    if (!header && tableOpen) {
+    if (!header) {
       // A continuation page that prints no column header of its own starts
       // its rows right under the repeated page header, which is shorter than
       // the header page's page-header-plus-column-header block. The carried
@@ -838,7 +843,6 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     const subtotals = pageLines
       .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];
-    if (subtotals) tableOpen = false;
     const chromeBottom = Math.min(
       pageHeight - FOOTER_MARGIN,
       footerTopY !== null && footerTopY > top ? footerTopY - 2 : pageHeight - FOOTER_MARGIN
@@ -847,10 +851,9 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
       top,
       bottom: Math.min(subtotals ? subtotals.y + subtotals.height : chromeBottom, chromeBottom),
     });
-    // On per-page-header producers the next header re-establishes the top; on
-    // print-once producers the SUBTOTALS rule ends the table for good.
-    if (subtotals && !header) carriedTop = null;
-    if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
+    // The SUBTOTALS rule closes the table, unless a column header printed
+    // below it opens the next one on the same page.
+    if (subtotals && !headers.some((line) => line.y > subtotals.y)) carriedTop = null;
   }
   return regions;
 }
@@ -883,6 +886,72 @@ function countPageChromeRepeats(lines: PdfTextLine[]): Map<PdfTextLine, number> 
     }
   }
   return repeats;
+}
+
+/**
+ * The ALTERNATE PARTS SUPPLIERS listing CCC ONE prints after the totals: per
+ * estimate line, who supplies the alternate part ("3
+ * Keystone-Complete-H-Chesapeake #TA1000101C $ 475.00"), under its own column
+ * header "Line Supplier Description Price". It sits below the SUBTOTALS rule,
+ * so it has no U-5 table region and the running section does not advance on
+ * its page; the listing is measured from its own header instead. It runs from
+ * that header down to the page chrome or the next title on the page ("ALTERNATE
+ * PARTS USAGE"), whichever comes first, and a row belongs to it when its
+ * number starts in the Line column, left of where the Supplier column starts.
+ * The street, city and phone lines of a supplier start in the Supplier column.
+ *
+ * Page-local by construction: a listing never carries to a later page and
+ * never becomes the running section. A section-driven read made every line of
+ * the pages after it a supplier row (claim, workfile and VIN chrome on RO 20766
+ * SOR-3 pages 12-13). A listing that continues onto a page without its own
+ * header is not measured; no print in the repo shows one.
+ *
+ * Measured lines only: stored-text synthetic lines carry no geometry.
+ */
+function measureSupplierListings(lines: PdfTextLine[]): Map<number, SupplierListing> {
+  const listings = new Map<number, SupplierListing>();
+  const supplierWord = (line: PdfTextLine) => line.words.find((word) => /^Supplier\b/.test(word.text.trim()));
+  const headers = lines
+    .filter(
+      (line) =>
+        /\bLine\b/.test(line.text) &&
+        /\bSupplier\b/.test(line.text) &&
+        /\b(?:Description|Price)\b/.test(line.text) &&
+        Boolean(supplierWord(line))
+    )
+    .sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y);
+  if (!headers.length) return listings;
+  const chromePages = countPageChromeRepeats(lines);
+  for (const header of headers) {
+    const supplierColumn = supplierWord(header);
+    if (!supplierColumn || listings.has(header.pageNumber)) continue;
+    const top = header.y + header.height;
+    const end = lines
+      .filter(
+        (line) =>
+          line.pageNumber === header.pageNumber &&
+          line.y > top &&
+          ((chromePages.get(line) ?? 0) >= 2 || (!extractLineNumber(line.text) && Boolean(detectSection(line.text))))
+      )
+      .sort((a, b) => a.y - b.y)[0];
+    listings.set(header.pageNumber, {
+      top,
+      bottom: end ? end.y : header.pageHeight,
+      supplierLeft: supplierColumn.x,
+      em: header.height,
+    });
+  }
+  return listings;
+}
+
+/** A supplier listing's rows on one page: the y-range under its header, and
+ * the left edge of its Supplier column. */
+type SupplierListing = { top: number; bottom: number; supplierLeft: number; em: number };
+
+/** True when a measured line opens a row of its page's supplier listing. */
+function opensSupplierListingRow(line: PdfTextLine, listing: SupplierListing | undefined): boolean {
+  if (!listing || !line.words.length) return false;
+  return line.y > listing.top - 2 && line.y < listing.bottom && line.words[0].x < listing.supplierLeft - listing.em / 2;
 }
 
 /**
@@ -1000,6 +1069,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * belongs to the note, never to the row description. */
   let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
+  const supplierListings = measureSupplierListings(lines);
   const lineNumberColumn = measureLineNumberColumn(lines);
   /** The printed line each operation anchor was opened from. */
   const anchorLines = new Map<EstimateRowAnchor, PdfTextLine>();
@@ -1020,6 +1090,9 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     const lineNumber = wrappedPastLineNumberColumn ? null : printedNumber;
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
+    // A numbered row of a supplier listing names the estimate line whose part
+    // it sources: a supplier row by position, whatever its text reads as.
+    if (lineNumber && opensSupplierListingRow(line, supplierListings.get(line.pageNumber))) type = "supplier_row";
     // The running section may only advance on a header that sits INSIDE the
     // measured table region. Cover-page all-caps text ("DORSEY, DAVID",
     // "PHILADELPHIA") has header shape but is not a header, and every row
