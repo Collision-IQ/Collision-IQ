@@ -50,13 +50,39 @@ export function readLatestPrintedTimestamp(text: string): number | null {
 }
 
 /**
- * Party tokens in a file name, matched as whole words ("Windsor" is not
- * "SOR", "Spartan" is not "RTA"; "SOR1_22279" and "USAA-SOR" are). The
- * carriers are the ones the authorship test knows.
+ * The estimator a CCC print names ("Written By: NAME, …"), folded to its
+ * letters; null when none is printed. Two estimates written by the same
+ * estimator are the same party's, whatever their file names say: a shop's
+ * own version named "USAA 22279 Final.pdf" is still the shop's.
  */
-const CARRIER_NAME =
-  /(?<![a-z])(?:carriers?|insur(?:ance|er|ers)?|sor|adjusters?|geico|state\s*farm|progressive|allstate|usaa|nationwide|liberty\s*mutual|farmers|travelers)(?![a-z])/i;
-const SHOP_NAME = /(?<![a-z])(?:shop|repair\s*facility|rta|appraisal)(?![a-z])/i;
+export function readPrintedEstimator(text: string): string | null {
+  const name = (text ?? "").match(/Written\s+By:[ \t]*([^,\n]{2,60})/i)?.[1];
+  const folded = name?.toUpperCase().replace(/[^A-Z]+/g, " ").trim() ?? "";
+  return folded.replace(/ /g, "").length >= 3 ? folded : null;
+}
+
+/** True when both prints name an estimator and it is the same one. */
+export function sameEstimator(a: string, b: string): boolean {
+  const left = readPrintedEstimator(a);
+  return left !== null && left === readPrintedEstimator(b);
+}
+
+/**
+ * A file name as words: camel case and every separator split, so tokens
+ * match whole ("GeicoSupplement1" -> "geico supplement1", "SOR-1_22279" ->
+ * "sor 1 22279"; "Windsor" is not "SOR", "Spartan" is not "RTA").
+ */
+const nameWords = (fileName: string) =>
+  ` ${(fileName ?? "")
+    .replace(/\.[A-Za-z0-9]{2,4}$/, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .toLowerCase()} `;
+/** A word that names the insurer's document as such. */
+const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?)\b/;
+/** An insurer's brand: a shop names its own files this way too, so it is weaker evidence. */
+const INSURER_BRAND = /\b(?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)\b/;
+const SHOP_WORD = /\b(?:shop|repair facility|rta|appraisal)\b/;
 
 export type CounterpartCandidate = {
   fileName: string;
@@ -72,10 +98,11 @@ export type CounterpartSelection<T extends CounterpartCandidate> = {
   /** Which printed evidence decided between several of the other party's estimates; null when it did not arise. */
   basis: string | null;
   /**
-   * The estimates left when several were and none could be identified as
-   * the other party's by its name or its text: the counterpart was then
-   * picked among them by print order alone, and nothing says whose it is.
-   * Empty when the party was identified.
+   * The estimates left when several were and nothing settles which one is
+   * the other party's (none marked as theirs, a conflicting mark, or the
+   * most plainly marked one is not the latest): the counterpart was picked
+   * among them, and nothing says whose it is. Empty when the party was
+   * identified.
    */
   unidentified: T[];
 };
@@ -86,6 +113,45 @@ const stamp = (value: number) => {
   return `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 };
 
+/**
+ * The latest of a pool by what the prints state: the supplement number, else
+ * the print time, else the order on the case. Returns the index of the
+ * latest, the basis, and the reason each other one is not it.
+ */
+function orderByPrintedEvidence<T extends CounterpartCandidate>(pool: T[]) {
+  const distinct = (values: Array<number | null>): values is number[] =>
+    values.every((value) => value !== null) && new Set(values).size === values.length;
+  const versions = pool.map((candidate) => readPrintedEstimateVersion(candidate.text));
+  const printed = pool.map((candidate) => readLatestPrintedTimestamp(candidate.text));
+  if (pool.length > 1 && distinct(versions)) {
+    const best = versions.indexOf(Math.max(...versions));
+    const printedAs = (version: number) => (version === 0 ? "Estimate of Record" : `supplement ${version}`);
+    return {
+      best,
+      basis: "printed supplement number" as string | null,
+      rank: versions as number[],
+      reason: (index: number) => `it prints ${printedAs(versions[index]!)}; ${pool[best].fileName} prints ${printedAs(versions[best]!)}`,
+    };
+  }
+  if (pool.length > 1 && distinct(printed)) {
+    const best = printed.indexOf(Math.max(...printed));
+    return {
+      best,
+      basis: "print date" as string | null,
+      rank: printed as number[],
+      reason: (index: number) => `printed ${stamp(printed[index]!)}; ${pool[best].fileName} was printed ${stamp(printed[best]!)}`,
+    };
+  }
+  // Neither printed evidence orders them: the last one on the case.
+  const best = pool.length - 1;
+  return {
+    best,
+    basis: (pool.length > 1 ? "case file order" : null) as string | null,
+    rank: null,
+    reason: () => `${pool[best]?.fileName} comes later on the case, and neither prints a supplement number or print date that orders them`,
+  };
+}
+
 export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   candidates: T[],
   options: {
@@ -93,6 +159,8 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     sourceParty: "shop" | "carrier";
     /** A canonical delta binding names the comparison document outright. */
     pinnedSourceDocumentId?: string | null;
+    /** The annotated estimate's own text: an estimate printing its estimator is the same party's. */
+    sourceText?: string;
   }
 ): CounterpartSelection<T> {
   if (candidates.length <= 1) return { counterpart: candidates[0] ?? null, excluded: [], basis: null, unidentified: [] };
@@ -111,84 +179,92 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     };
   }
 
-  // The other party is what the document's own authorship reads as, OR what
-  // the caller labelled it from a party token in its NAME (a Mitchell
-  // supplement prints no authorship boilerplate). A label the caller only
-  // guessed — the route's last resort labels an unmarked file the opposite
-  // of the source — admits nothing: it let the shop's own later estimate in
-  // as "theirs" ahead of the SOR. A file NAMED as the source party's stays
-  // its own whatever a note in its text says ("BLEND NOT ON USAA ESTIMATE").
-  const otherRole = options.sourceParty === "shop" ? "carrier" : "shop";
-  const partyName = (role: "carrier" | "shop") => (role === "carrier" ? CARRIER_NAME : SHOP_NAME);
-  const carrierAuthored = (candidate: T) => isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: candidate.text });
-  const labelledByName = (candidate: T) => candidate.estimateRole === otherRole && partyName(otherRole).test(candidate.fileName);
-  const namedAsSource = (candidate: T) =>
-    (candidate.estimateRole ?? options.sourceParty) === options.sourceParty && partyName(options.sourceParty).test(candidate.fileName);
-  // A name is chosen by a person; a phrase in the text can be a note. An
-  // estimate whose NAME marks it as theirs outranks one only its text does.
-  const byName = (candidate: T) =>
-    labelledByName(candidate) ||
-    (otherRole === "carrier" && isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: "" }));
-  const byAuthorship = candidates.filter(
-    (candidate) => !namedAsSource(candidate) && (byName(candidate) || carrierAuthored(candidate) === (otherRole === "carrier"))
-  );
-  const namedOther = byAuthorship.filter(byName);
-  const otherParty = namedOther.length ? namedOther : byAuthorship;
-  // Nothing identified as theirs: measure against what is not named as ours,
-  // and say that nothing identifies it unless exactly one such estimate is
-  // left (then it stands as a lone comparison would, on the caller's label).
-  const unnamed = candidates.filter((candidate) => !namedAsSource(candidate));
-  const partyPool = otherParty.length ? otherParty : unnamed.length ? unnamed : candidates;
-  const unidentified = otherParty.length > 0 || unnamed.length <= 1 ? [] : unnamed;
-  // An estimate whose totals cannot be read is not something to measure against.
-  const readable = partyPool.filter((candidate) => candidate.text.trim() && parseEstimateTotalsForPlatform(candidate.text)?.grandTotal != null);
-  const pool = readable.length ? readable : partyPool;
-
   const excluded: CounterpartSelection<T>["excluded"] = [];
-  const partyReason = (candidate: T) =>
-    namedAsSource(candidate)
-      ? options.sourceParty === "shop"
-        ? "its name marks it as a shop estimate, like the annotated one"
-        : "its name marks it as the insurer's, like the annotated one"
-      : options.sourceParty === "shop"
-        ? byAuthorship.includes(candidate)
-          ? "only a phrase in its text reads as the insurer's, and another estimate's name marks it as theirs"
-          : "neither its name nor its text identifies it as the insurer's estimate"
-        : "it was labelled or read as the insurer's estimate, like the annotated one";
+  // An estimate whose totals cannot be read is not something to measure against.
+  const readable = candidates.filter((candidate) => candidate.text.trim() && parseEstimateTotalsForPlatform(candidate.text)?.grandTotal != null);
+  const base = readable.length ? readable : candidates;
   for (const candidate of candidates) {
-    if (!partyPool.includes(candidate)) excluded.push({ candidate, reason: partyReason(candidate) });
-    else if (!pool.includes(candidate)) excluded.push({ candidate, reason: "its totals could not be read" });
+    if (!base.includes(candidate)) excluded.push({ candidate, reason: "its totals could not be read" });
   }
 
-  const distinct = (values: Array<number | null>): values is number[] =>
-    values.every((value) => value !== null) && new Set(values).size === values.length;
-  const versions = pool.map((candidate) => readPrintedEstimateVersion(candidate.text));
-  const printed = pool.map((candidate) => readLatestPrintedTimestamp(candidate.text));
-  let order: number[];
-  let basis: string | null = null;
-  let reason: (index: number) => string;
-  if (pool.length > 1 && distinct(versions)) {
-    order = versions;
-    basis = "printed supplement number";
-    const printedAs = (version: number) => (version === 0 ? "Estimate of Record" : `supplement ${version}`);
-    reason = (index) => `it prints ${printedAs(versions[index]!)}; ${pool[best].fileName} prints ${printedAs(versions[best]!)}`;
-  } else if (pool.length > 1 && distinct(printed)) {
-    order = printed;
-    basis = "print date";
-    reason = (index) => `printed ${stamp(printed[index]!)}; ${pool[best].fileName} was printed ${stamp(printed[best]!)}`;
+  // What each estimate's own print and name say about whose it is. The
+  // caller's label is not evidence here: the route labels an unmarked file
+  // by a last-resort guess. Ours: the same printed estimator, or a name
+  // marking it as the source party's. Theirs, most plainly first: a word
+  // naming the document as theirs, their brand in the name, their authorship
+  // phrase in the text (a shop note — "BLEND NOT ON USAA ESTIMATE" — reads
+  // the same, so it is the weakest).
+  const shopSource = options.sourceParty === "shop";
+  const evidence = new Map(
+    base.map((candidate) => {
+      const words = nameWords(candidate.fileName);
+      const authored = isCarrierAuthoredEstimateDocument({ filename: "", text: candidate.text });
+      const byEstimator = Boolean(options.sourceText) && sameEstimator(options.sourceText!, candidate.text);
+      const ours = byEstimator || (shopSource ? SHOP_WORD.test(words) : INSURER_WORD.test(words) || INSURER_BRAND.test(words));
+      const tier = shopSource
+        ? INSURER_WORD.test(words) ? 3 : INSURER_BRAND.test(words) ? 2 : authored ? 1 : 0
+        : SHOP_WORD.test(words) ? 3 : !authored ? 1 : 0;
+      return [candidate, { ours, byEstimator, tier }] as const;
+    })
+  );
+  const ev = (candidate: T) => evidence.get(candidate)!;
+  const clean = base.filter((candidate) => !ev(candidate).ours && ev(candidate).tier > 0);
+  // A name mark of ours against a mark of theirs is a conflict; the same
+  // printed estimator is proof, never a conflict.
+  const conflicted = base.filter((candidate) => ev(candidate).ours && !ev(candidate).byEstimator && ev(candidate).tier > 0);
+  const unknown = base.filter((candidate) => !ev(candidate).ours && ev(candidate).tier === 0);
+  const theirs = shopSource ? "the insurer's" : "a shop estimate";
+  const oursReason = (candidate: T) =>
+    ev(candidate).byEstimator
+      ? "it prints the same estimator as the annotated estimate, so it is the same party's"
+      : shopSource
+        ? "its name marks it as a shop estimate, like the annotated one"
+        : "its name marks it as the insurer's, like the annotated one";
+  const markedAs = (tier: number) =>
+    tier === 3 ? "its name" : tier === 2 ? "the insurer's name in its file name" : shopSource ? "a phrase in its text" : "its text";
+
+  let pool: T[];
+  let unidentified: T[] = [];
+  if (clean.length) {
+    const topTier = Math.max(...clean.map((candidate) => ev(candidate).tier));
+    const top = clean.filter((candidate) => ev(candidate).tier === topTier);
+    const overall = orderByPrintedEvidence(clean);
+    const latest = clean[overall.best];
+    // The most plainly marked one must also be the latest the prints show,
+    // and no estimate may carry both marks while the best mark is weak.
+    const latestIsTop = overall.rank === null || ev(latest).tier === topTier;
+    if (!latestIsTop || (topTier < 3 && conflicted.length)) unidentified = [...clean, ...conflicted];
+    pool = top;
+    for (const candidate of base) {
+      if (top.includes(candidate) || unidentified.includes(candidate)) continue;
+      if (ev(candidate).ours) excluded.push({ candidate, reason: oursReason(candidate) });
+      else if (clean.includes(candidate)) {
+        excluded.push({ candidate, reason: `only ${markedAs(ev(candidate).tier)} marks it as ${theirs}; ${top[0].fileName} is marked by ${markedAs(topTier)}` });
+      } else excluded.push({ candidate, reason: `neither its name nor its text identifies it as ${theirs}` });
+    }
   } else {
-    // Neither printed evidence orders them: the last one on the case.
-    order = pool.map((_, index) => index);
-    basis = pool.length > 1 ? "case file order" : null;
-    reason = () =>
-      `${pool[best].fileName} comes later on the case, and neither prints a supplement number or print date that orders them`;
+    const ambiguous = [...conflicted, ...unknown];
+    pool = ambiguous.length ? ambiguous : base;
+    if (ambiguous.length > 1) unidentified = ambiguous;
+    for (const candidate of base) {
+      if (!pool.includes(candidate)) excluded.push({ candidate, reason: oursReason(candidate) });
+    }
   }
-  const best = order.indexOf(Math.max(...order));
-  const counterpart = pool[best];
+
+  const order = orderByPrintedEvidence(pool);
+  const counterpart = pool[order.best];
   pool.forEach((candidate, index) => {
-    if (index !== best) excluded.push({ candidate, reason: reason(index) });
+    if (index !== order.best && !excluded.some((entry) => entry.candidate === candidate)) {
+      excluded.push({ candidate, reason: order.reason(index) });
+    }
   });
-  return { counterpart, excluded, basis, unidentified };
+  // Everything the selection set aside that was in the ambiguous set but not the pool.
+  for (const candidate of unidentified) {
+    if (candidate !== counterpart && !excluded.some((entry) => entry.candidate === candidate)) {
+      excluded.push({ candidate, reason: `it may be ${theirs} as well, and nothing printed says which one is` });
+    }
+  }
+  return { counterpart, excluded, basis: order.basis, unidentified };
 }
 
 /** The run warning naming every estimate a selection left out, or null when none was. */

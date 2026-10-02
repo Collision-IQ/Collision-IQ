@@ -17,7 +17,7 @@ import {
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
-import { LedgerNotClosedError } from "./appraisalSummary/gapLedger";
+import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
 import type { MatcherPair } from "./appraisalSummary/argueItems";
 import { buildLowerEstimateFindings } from "./appraisalSummary/lowerEstimateFindings";
 import { buildLowerEstimateCitationPdf } from "./lowerEstimateCitationDensity";
@@ -107,7 +107,7 @@ import {
   isCarrierAuthoredEstimateDocument,
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
-import { describeExcludedComparisons, selectComparisonCounterpart } from "./comparisonCounterpart";
+import { describeExcludedComparisons, sameEstimator, selectComparisonCounterpart } from "./comparisonCounterpart";
 import {
   buildPmCapFlag,
   detectRepairFacilityState,
@@ -1591,9 +1591,15 @@ async function buildLowerEstimateDeliverable(input: {
   // Its stamps and badges value every carrier line at its read price; with
   // part of their sheet's prices unread a highlight would mark a printed
   // price as different from ours when it was simply not read.
-  if (input.model.ledger.unreadCarrierLines > 0) {
+  if (carrierPartlyUnread(input.model.ledger)) {
+    const { unreadCarrierLines: dollars, unreadCarrierHours: hours } = input.model.ledger;
     input.warnings.push(
-      `The Citation Density copy of the comparison estimate was not built: ${input.model.ledger.unreadCarrierLines.toFixed(2)} dollars of its printed parts and miscellaneous total are on lines whose price was not read, so its line values cannot be stamped. The annotated copy of our estimate is delivered instead.`
+      `The Citation Density copy of the comparison estimate was not built: ${[
+        dollars > 0 ? `${dollars.toFixed(2)} dollars of its printed parts and miscellaneous total are on lines whose price was not read` : "",
+        hours > 0 ? `${hours.toFixed(1)} hours of its printed labor are on lines that were not read` : "",
+      ]
+        .filter(Boolean)
+        .join(", and ")}, so its line values cannot be stamped. The annotated copy of our estimate is delivered instead.`
     );
     return undefined;
   }
@@ -2087,6 +2093,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
       sourceParty: sourceDocumentRole,
       pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
+      sourceText: params.sourceText ?? "",
     });
     const chosen = selection.counterpart;
     if (chosen) {
@@ -3153,14 +3160,23 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // The caller's label decides whose the comparison is. Text is never
     // promoted over it: a shop's note ("BLEND NOT ON USAA ESTIMATE") and an
     // independent appraiser's "prepared by" line both read as insurer
-    // authorship. When several estimates were on the case and none could be
-    // identified as the insurer's, the one compared was picked by print
-    // order, and a report naming it "the insurer's" would be a guess.
+    // authorship. Two refusals sit on top of the label: an estimate printing
+    // the same estimator as ours is ours (the route guesses "carrier" for an
+    // unmarked name), and when several estimates were on the case and
+    // nothing printed settles which is the insurer's, a report naming one
+    // "the insurer's" would be a guess.
     const comparisonText = params.comparisonEstimateTexts?.[0];
     const comparisonRole = comparisonText?.estimateRole;
-    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
+    const comparisonIsOurs = sameEstimator(params.sourceText ?? "", comparisonText?.text ?? "");
+    const renameAdvice =
+      'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
+    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {
       warnings.push(
-        `Appraisal Dispute Report not produced: none of ${counterpartPartyUnidentified.join(", ")} could be identified as the insurer's estimate by its name or its text, so the report would be guessing which one is theirs. A file name carrying "SOR", "carrier" or the insurer's name marks it as the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same estimator as our estimate, so it is our own estimate, not the insurer's. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
+      warnings.push(
+        `Appraisal Dispute Report not produced: nothing printed on ${counterpartPartyUnidentified.join(", ")} settles which one is the insurer's estimate, so the report would be guessing. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
@@ -3239,7 +3255,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       warnings.push(
         `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was not identified as the insurer's estimate: ${
           comparisonRole === "shop" ? "it is labelled a shop estimate" : "its author is not identified"
-        }. A file name carrying "SOR", "carrier" or the insurer's name, and not "shop" or "appraisal", marks it as the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        }. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     }
   }

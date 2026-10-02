@@ -344,6 +344,16 @@ describe("D4 — a part number with a two-letter interior is one token", () => {
     expect(parseCccEstimateRow("45#Post-scan1m")).toMatchObject({ description: "Post-scan", qty: 1 });
     expect(parseCccEstimateRow("45#S01Detail1m1.0")).toMatchObject({ description: "Detail", qty: 1, labor: 1 });
     expect(parseCccEstimateRow("41S01ReplCalibration1m1.4M")).toMatchObject({ description: "Calibration", qty: 1, labor: 1.4 });
+    // A qty marker after a description word holding digits splits as on main.
+    for (const [row, description] of [
+      ["45#Nameplate 4MATIC1m", "Nameplate 4MATIC"],
+      ["45#Bracket 2019-UP1m", "Bracket"],
+      ["45#Wiper blade 22in1m", "Wiper blade 22in"],
+      ["6 # Wheel 2019-Up1m", "Wheel 2019-Up"],
+      ["45#Recharge A/C system w/R-1234yf1", "Recharge A/C system w/R-1234yf"],
+    ]) {
+      expect(parseCccEstimateRow(row)).toMatchObject({ description, qty: 1 });
+    }
     expect(parseCccEstimateRow("14 Repl Bumper cover 86511-BE000 1 412.00 2.0 2.5")).toMatchObject({ description: "Bumper cover", partNumber: "86511-BE000" });
     expect(parseCccEstimateRow("12 Repl Grille C25J75 1 45.00 0.3")).toMatchObject({ partNumber: "C25J75" });
   });
@@ -384,14 +394,18 @@ describe("D5 — one counterpart per run", () => {
     }
   });
 
-  it("a supplement the caller labels the insurer's counts as theirs even when its text prints no authorship", () => {
+  it("an insurer's brand in a name is weaker than a word naming the document theirs; when the brand-named one is later, the run cannot say which is theirs", () => {
     const mitchell = readFileSync(path.join(FIXTURE_DIR, "../22132/sor3_mitchell_text.txt"), "utf8");
     expect(readPrintedEstimateVersion(mitchell)).toBe(3);
+    // A shop names its own files after the insurer too ("USAA 22279 Final.pdf"),
+    // so a later brand-named estimate may be either party's.
     const latest = { fileName: "Progressive Supplement 3.pdf", text: mitchell, estimateRole: "carrier" as const };
     const earlier = { fileName: "SOR 1.pdf", text: mitchell.replace(/^([ \t]*Supplement[ \t]+)3([ \t]*)$/m, "$11$2"), estimateRole: "carrier" as const };
     expect(readPrintedEstimateVersion(earlier.text)).toBe(1);
     for (const candidates of [[latest, earlier], [earlier, latest]]) {
-      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe("Progressive Supplement 3.pdf");
+      const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
+      expect(selection.counterpart?.fileName).toBe("SOR 1.pdf");
+      expect(selection.unidentified.map((c) => c.fileName).sort()).toEqual(["Progressive Supplement 3.pdf", "SOR 1.pdf"]);
     }
   });
 
@@ -421,24 +435,64 @@ describe("D5 — one counterpart per run", () => {
     }
   });
 
-  it("a name that marks an estimate as theirs outranks a phrase in another's text", () => {
-    const noted = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `${shopFinal.text}\nBLEND NOT ON USAA ESTIMATE, ADDED` };
-    const labelled = { ...sor, estimateRole: "carrier" as const };
-    for (const candidates of [[noted, labelled], [labelled, noted]]) {
-      const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
-      expect(selection.counterpart?.fileName).toBe("SOR-1_22279.pdf");
-      expect(selection.unidentified).toEqual([]);
+  it("an estimate printing our own estimator is ours, whatever its name or a note in it says (RO 22279 shop final renamed)", () => {
+    const writtenBy = "Written By: ESTIMATOR ONE, 739698";
+    const source = `${writtenBy}\nPreliminary Estimate`;
+    const theirs = { ...sor, estimateRole: "carrier" as const };
+    for (const renamed of [
+      { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const, text: `${writtenBy}\n${shopFinal.text}` },
+      { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `${writtenBy}\n${shopFinal.text}\nBLEND NOT ON USAA ESTIMATE, ADDED` },
+    ]) {
+      for (const candidates of [[renamed, theirs], [theirs, renamed]]) {
+        const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: source });
+        expect(selection.counterpart?.fileName).toBe("SOR-1_22279.pdf");
+        expect(selection.unidentified).toEqual([]);
+        expect(describeExcludedComparisons(selection)).toMatch(/it prints the same estimator as the annotated estimate/);
+      }
+      // Without the printed estimator nothing proves it ours, and it prints
+      // later than the SOR: the run cannot say which is theirs.
+      const blind = selectComparisonCounterpart([renamed, theirs].map((c) => ({ ...c, text: c.text.replace(writtenBy, "") })), { sourceParty: "shop" });
+      expect(blind.unidentified.length).toBe(2);
     }
   });
 
   it("several estimates and none identified as theirs: the pick is reported as unidentified", () => {
     const a = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
-    const b = { ...sor, fileName: "22279 b.pdf", estimateRole: "carrier" as const, text: "Supplement of Record 1\nGrand Total 4,408.16" };
+    const b = { ...sor, fileName: "22279 b.pdf", estimateRole: "carrier" as const };
     const selection = selectComparisonCounterpart([a, b], { sourceParty: "shop" });
     expect(selection.unidentified.map((c) => c.fileName).sort()).toEqual(["22279 b.pdf", "22279 final.pdf"]);
     // One left once our own named versions are set aside stands as a lone comparison would.
     const named = { ...shopFinal, estimateRole: "shop" as const };
     expect(selectComparisonCounterpart([named, b], { sourceParty: "shop" })).toMatchObject({ unidentified: [], counterpart: b });
+  });
+
+  it("reads party words through camel case and separators", () => {
+    const unmarked = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
+    for (const name of ["GeicoSupplement1.pdf", "State-Farm-Supplement-3.pdf", "Liberty_Mutual_Supp1.pdf", "InsuranceEstimate.pdf"]) {
+      const theirs = { ...sor, fileName: name, estimateRole: "carrier" as const };
+      for (const candidates of [[unmarked, theirs], [theirs, unmarked]]) {
+        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: theirs, unidentified: [] });
+      }
+    }
+    const ours = { ...shopFinal, fileName: "ShopFinal22279.pdf", estimateRole: "shop" as const };
+    const geico = { ...sor, fileName: "GeicoSupplement3.pdf", estimateRole: "carrier" as const };
+    expect(selectComparisonCounterpart([ours, geico], { sourceParty: "shop" }).counterpart).toBe(geico);
+  });
+
+  it("an insurer's estimate named 'Appraisal' against an unmarked one: the run cannot say which is theirs", () => {
+    const appraisal = { ...sor, fileName: "Progressive Appraisal.pdf", estimateRole: "shop" as const, text: `USAA approved estimate\n${sorText}` };
+    const unmarked = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
+    for (const candidates of [[appraisal, unmarked], [unmarked, appraisal]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).unidentified.length).toBe(2);
+    }
+  });
+
+  it("an estimate whose totals cannot be read never makes a lone readable one unidentified", () => {
+    const b = { ...sor, fileName: "22279 b.pdf", estimateRole: "carrier" as const };
+    const blank = { fileName: "Estimate.pdf", text: "", estimateRole: "carrier" as const };
+    for (const candidates of [[b, blank], [blank, b]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: b, unidentified: [] });
+    }
   });
 
   it("names an Estimate of Record as such, never 'supplement 0'", () => {
@@ -533,10 +587,33 @@ describe("D8 — a carrier line-read shortfall is stated and bounded, never a re
     // a dropped row hides labor as well as dollars: no item is argued.
     expect(model.items).toEqual([]);
     expect(text).not.toMatch(/No counterpart on their sheet/);
-    expect(text).toMatch(/No item is listed: part of their sheet's prices was not read, so any line of ours could have its counterpart on a line that was not read/);
+    expect(text).toMatch(/No item is listed: part of their sheet was not read, so any line of ours could have its counterpart on a line that was not read/);
     expect(text).not.toMatch(/No hours difference/);
     expect(text).toMatch(/Get a readable copy of their estimate/);
     expect((await renderPlainSummaryPdf(model)).pageCount).toBeGreaterThan(0);
+  });
+
+  it("a dropped carrier row that carries only labor is a partial read too: hours are measured against the printed hours", () => {
+    for (const line of [42, 49, 40]) {
+      const input = clone(disputeInput);
+      input.carrier.lines = input.carrier.lines.filter((l) => l.line !== line);
+      const model = buildPlainSummaryModel(input);
+      expect(model.ledger.unreadCarrierLines).toBe(0);
+      expect(model.ledger.unreadCarrierHours).toBeGreaterThan(0);
+      expect(model.items).toEqual([]);
+      expect(model.facts.adasSentence ?? "").not.toMatch(/more hours of calibration/);
+      const text = plainSummaryDocumentText(buildPlainSummaryDocument(model));
+      expect(text).not.toMatch(/No counterpart on their sheet|theirs 0\.0 hr/);
+      expect(text).toMatch(/prints 22\.0 hr of labor; the lines this read carry \d+\.\d hr, so \d+\.\d hr is on lines that were not read/);
+    }
+  });
+
+  it("a small unread amount never claims a high-dollar line cannot be ruled out, and no variant rests on an unread line", () => {
+    const model = buildPlainSummaryModel(withCarrierLine(38, { price: undefined }));
+    const text = plainSummaryDocumentText(buildPlainSummaryDocument(model));
+    expect(text).not.toMatch(/cannot be ruled out/);
+    expect(text).toMatch(/Nothing on the lines read needs resolving first; part of their sheet was not read/);
+    expect(model.flags.filter((f) => f.kind === "partNumberVariant")).toEqual([]);
   });
 
   it("an over-read still refuses: a price was misread", () => {
@@ -601,7 +678,7 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
       const result = await build([{ ...comparison, sourceDocumentId: "cmp", estimateRole: "shop" }]);
       expect(result.plainSummaryExportId).toBeUndefined();
       expect(result.warnings.join("\n")).toMatch(
-        new RegExp(`${comparison.fileName.replace(/[.]/g, "\\.")} was not identified as the insurer's estimate: it is labelled a shop estimate\\. A file name carrying "SOR", "carrier" or the insurer's name`)
+        new RegExp(`${comparison.fileName.replace(/[.]/g, "\\.")} was not identified as the insurer's estimate: it is labelled a shop estimate\\. Naming the insurer's file with "SOR" or "carrier" as a separate word`)
       );
     }
   });
@@ -613,7 +690,7 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
     ]);
     expect(result.plainSummaryExportId).toBeUndefined();
     expect(result.warnings.join("\n")).toMatch(
-      /Appraisal Dispute Report not produced: none of 22279 (final|b)\.pdf, 22279 (final|b)\.pdf could be identified as the insurer's estimate by its name or its text/
+      /Appraisal Dispute Report not produced: nothing printed on 22279 (final|b)\.pdf, 22279 (final|b)\.pdf settles which one is the insurer's estimate/
     );
   });
 
@@ -684,9 +761,11 @@ describe("review — what the report may claim when lines are unread or read dif
       (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 134)),
       // Their oil pump's price unread: "they pay the part" is not shown.
       (d: Delta) => (lowerRow(d, 61).price = null),
+      // A labor-only row dropped: their L2 R&I bumper (1.6 hr) is the counterpart of our O/H.
+      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 2)),
     ]) {
       const { m, text } = model21995(mutate);
-      expect(m.ledger.unreadCarrierLines).toBeGreaterThan(0);
+      expect(m.ledger.unreadCarrierLines + m.ledger.unreadCarrierHours).toBeGreaterThan(0);
       expect(m.items).toEqual([]);
       expect(text).not.toMatch(/No counterpart on their sheet|They pay the part/);
       expect(text).toMatch(/So no item is listed below/);

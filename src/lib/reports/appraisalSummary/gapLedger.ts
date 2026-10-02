@@ -96,6 +96,27 @@ export function unreadCarrierDollars(carrier: Estimate, opts: LedgerOptions = {}
   return unread > 0 ? unread : 0;
 }
 
+/**
+ * Carrier labor hours on lines that were not read: the printed labor hours
+ * less the hours on the lines read. A dropped row that carries only labor
+ * leaves no unread dollars, and the work on it then reads as "no
+ * counterpart" or "theirs 0.0 hr". Measured on a CCC print, whose line hours
+ * add up to its printed categories (RO 21995 and RO 22279, both sides, to
+ * the tenth); 0 when fully read or not CCC.
+ */
+export function unreadCarrierHours(carrier: Estimate): number {
+  if (carrier.platform !== "ccc") return 0;
+  const printed = carrier.totals.labor.reduce((sum, l) => sum + l.hours, 0);
+  const read = carrier.lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0);
+  const unread = Math.round((printed - read) * 10) / 10;
+  return unread > 0.05 ? unread : 0;
+}
+
+/** Part of the carrier's sheet was not read: dollars, labor hours, or both. */
+export function carrierPartlyUnread(ledger: Pick<GapLedger, "unreadCarrierLines" | "unreadCarrierHours">): boolean {
+  return ledger.unreadCarrierLines > 0 || ledger.unreadCarrierHours > 0;
+}
+
 export function resolveRateBasis(shop: Estimate, carrier: Estimate, opts: LedgerOptions = {}): RateBasis {
   unreadCarrierDollars(carrier, opts);
   const adjustment = nonLaborBuckets(carrier, { strict: false }).rateAdjustment;
@@ -155,6 +176,8 @@ export interface GapLedger {
   rate: RateBasis;
   /** Carrier Parts + Misc dollars on lines whose price was not read (disclosed in the report); 0 when fully read. */
   unreadCarrierLines: number;
+  /** Carrier printed labor hours on lines that were not read (disclosed in the report); 0 when fully read. */
+  unreadCarrierHours: number;
 }
 
 export class LedgerNotClosedError extends Error {}
@@ -206,5 +229,6 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     closes: true,
     rate,
     unreadCarrierLines: unreadCarrierDollars(carrier, opts),
+    unreadCarrierHours: unreadCarrierHours(carrier),
   };
 }

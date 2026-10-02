@@ -79,6 +79,9 @@ const repeatKey = (l: EstimateLine) =>
 
 const LABOR_RANK: Record<LaborCat, number> = { body: 1, paint: 1, other: 1, frame: 2, structural: 2, aluminum: 2, mechanical: 3 };
 
+/** A carrier line at or above this, with no counterpart on our sheet, is resolved first. */
+export const HIGH_DOLLAR = 500;
+
 export function integrityChecks(
   shop: Estimate,
   carrier: Estimate,
@@ -90,7 +93,7 @@ export function integrityChecks(
   } = {}
 ): Flag[] {
   const flags: Flag[] = [];
-  const highDollar = opts.highDollar ?? 500;
+  const highDollar = opts.highDollar ?? HIGH_DOLLAR;
   const shopPartNumbers = new Set(shop.lines.map((l) => partKey(l.partNumber)).filter(Boolean));
 
   // 1. High-dollar carrier lines with no counterpart on our sheet.
@@ -158,6 +161,9 @@ export function integrityChecks(
         ? partner
         : undefined);
     if (!s) continue;
+    // "Ours is nowhere on their sheet" is unverifiable with lines unread; a
+    // number that contradicts the vehicle stands on their line alone.
+    if (!contradicts && opts.carrierLinesIncomplete) continue;
     variantShopLines.add(s.line);
     flags.push({
       kind: contradicts ? "trimConflictPartNumber" : "partNumberVariant",

@@ -867,18 +867,22 @@ export function explodeGluedRow(rawText: string): string {
       // testing only the last two letters split RO 22279's Hyundai part
       // numbers into "86671BE 000", so no part number read and none matched.
       // A digit inside the alphanumeric run right before the tail is that
-      // signal, as is a dashed catalog head in capitals ("86302-BE200"; a
-      // description word such as "2019-Up1m" or "180-Deg1m" still splits);
-      // "/", "-" inside a word, or a line number / supplement tag / operation
-      // glued to the front of the row ("45#S01Detail1m"), are not.
+      // signal, as is a dashed catalog head in capitals ("86302-BE200"); "/",
+      // "-" inside a word, or a line number / supplement tag / operation glued
+      // to the front of the row ("45#S01Detail1m"), are not. Only a tail of 2-3
+      // bare digits continues a part number ("000", "200"): a qty marker
+      // ("1m", "1") splits as always, after "4MATIC", "2019-UP" or "R-1234yf".
       (withinToken.length <= 3 &&
         /[A-Za-z]{2}$/.test(text.slice(0, i)) &&
-        !/\d{3,}-[A-Z]{1,3}$/.test(text.slice(tokenStart, i)) &&
-        !/\d/.test(
-          (text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? "").replace(
-            tokenStart === 0 ? /^(?:\d{1,3})?(?:S\d{2})?(?:Repl|Rpr|Subl|Refn|Blnd|Algn|Sect|PDR)?(?=[A-Za-z])/ : /^$/,
-            ""
-          )
+        !(
+          /^\d{2,3}$/.test(withinToken) &&
+          (/\d{3,}-[A-Z]{1,3}$/.test(text.slice(tokenStart, i)) ||
+            /\d/.test(
+              (text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? "").replace(
+                tokenStart === 0 ? /^(?:\d{1,3})?(?:S\d{2})?(?:Repl|Rpr|Subl|Refn|Blnd|Algn|Sect|PDR)?(?=[A-Za-z])/ : /^$/,
+                ""
+              )
+            ))
         ));
     if (!splittable && boundaryIndex === i) continue;
     if (isColumnBlob(remainder)) {
