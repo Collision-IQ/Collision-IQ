@@ -55,6 +55,8 @@ import { buildEstimateRowAnchorsFromLines, buildPdfTextLines, type PdfTextLine, 
 import { adaptForensicToPlainSummary } from "../plainLanguageSummaryAdapter";
 import {
   describeExcludedComparisons,
+  readPrintedEstimator,
+  sameEstimator,
   readLatestPrintedTimestamp,
   readPrintedEstimateVersion,
   selectComparisonCounterpart,
@@ -344,6 +346,9 @@ describe("D4 — a part number with a two-letter interior is one token", () => {
     expect(parseCccEstimateRow("45#Post-scan1m")).toMatchObject({ description: "Post-scan", qty: 1 });
     expect(parseCccEstimateRow("45#S01Detail1m1.0")).toMatchObject({ description: "Detail", qty: 1, labor: 1 });
     expect(parseCccEstimateRow("41S01ReplCalibration1m1.4M")).toMatchObject({ description: "Calibration", qty: 1, labor: 1.4 });
+    // A short tail other than a qty marker stays on the part number.
+    expect(parseCccEstimateRow("1 Repl Bumper bracket 62090-5AA0B 1 89.00 0.3 0.0")).toMatchObject({ description: "Bumper bracket", partNumber: "62090-5AA0B", qty: 1, price: 89 });
+    expect(parseCccEstimateRow("1 Repl Bracket 57704FL01B 1 245.00 0.0 0.0")).toMatchObject({ partNumber: "57704FL01B", qty: 1, price: 245 });
     // A qty marker after a description word holding digits splits as on main.
     for (const [row, description] of [
       ["45#Nameplate 4MATIC1m", "Nameplate 4MATIC"],
@@ -404,7 +409,8 @@ describe("D5 — one counterpart per run", () => {
     expect(readPrintedEstimateVersion(earlier.text)).toBe(1);
     for (const candidates of [[latest, earlier], [earlier, latest]]) {
       const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
-      expect(selection.counterpart?.fileName).toBe("SOR 1.pdf");
+      // Unsettled: the dispute report is refused, the forensic run uses the latest.
+      expect(selection.counterpart?.fileName).toBe("Progressive Supplement 3.pdf");
       expect(selection.unidentified.map((c) => c.fileName).sort()).toEqual(["Progressive Supplement 3.pdf", "SOR 1.pdf"]);
     }
   });
@@ -436,7 +442,7 @@ describe("D5 — one counterpart per run", () => {
   });
 
   it("an estimate printing our own estimator is ours, whatever its name or a note in it says (RO 22279 shop final renamed)", () => {
-    const writtenBy = "Written By: ESTIMATOR ONE, 739698";
+    const writtenBy = "Written By: JANE ROE, 739698";
     const source = `${writtenBy}\nPreliminary Estimate`;
     const theirs = { ...sor, estimateRole: "carrier" as const };
     for (const renamed of [
@@ -493,6 +499,32 @@ describe("D5 — one counterpart per run", () => {
     for (const candidates of [[b, blank], [blank, b]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: b, unidentified: [] });
     }
+  });
+
+  it("a redacted or placeholder estimator proves nothing; a real name does", () => {
+    for (const placeholder of ["[REDACTED], 739698", "XXXXXXXX, 1", "ESTIMATOR, REDACTED", "ADJUSTER NAME, License Number: 1", "NAME REDACTED, 2", "OSKAR, 3"]) {
+      expect(readPrintedEstimator(`Written By: ${placeholder}`)).toBeNull();
+    }
+    expect(sameEstimator("Written By: [REDACTED], 739698", "Written By: [REDACTED], License Number: 271128")).toBe(false);
+    expect(readPrintedEstimator("Written By: Jane  Roe, License Number: 1")).toBe("JANE ROE");
+    // The SOR with the same placeholder as ours is still theirs.
+    const ours = "Written By: [REDACTED], 739698\nPreliminary Estimate";
+    const theirs = { ...sor, estimateRole: "carrier" as const, text: `Written By: [REDACTED], License Number: 271128\n${sorText}` };
+    const final = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `Written By: [REDACTED], 739698\n${shopFinal.text}` };
+    expect(selectComparisonCounterpart([final, theirs], { sourceParty: "shop", sourceText: ours }).counterpart?.fileName).toBe("SOR-1_22279.pdf");
+  });
+
+  it("the insurer's versions named differently are one appraiser's: the latest is compared", () => {
+    const appraiser = "Written By: MONICA ROE, License Number: 271128";
+    const older = { ...sor, fileName: "Insurance estimate 22279.pdf", estimateRole: "carrier" as const, text: `${appraiser}\n${sorText.replace(/Supplement of Record 1 with Summary/g, "Estimate of Record")}` };
+    const latest = { ...sor, fileName: "USAA_22279.pdf", estimateRole: "carrier" as const, text: `${appraiser}\n${sorText}` };
+    for (const candidates of [[older, latest], [latest, older]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: latest, unidentified: [] });
+    }
+    // Nothing ties them together: unsettled, but measured against the latest.
+    const blind = selectComparisonCounterpart([older, latest].map((c) => ({ ...c, text: c.text.replace(appraiser, "") })), { sourceParty: "shop" });
+    expect(blind.unidentified.length).toBe(2);
+    expect(blind.counterpart?.fileName).toBe("USAA_22279.pdf");
   });
 
   it("names an Estimate of Record as such, never 'supplement 0'", () => {
@@ -604,7 +636,7 @@ describe("D8 — a carrier line-read shortfall is stated and bounded, never a re
       expect(model.facts.adasSentence ?? "").not.toMatch(/more hours of calibration/);
       const text = plainSummaryDocumentText(buildPlainSummaryDocument(model));
       expect(text).not.toMatch(/No counterpart on their sheet|theirs 0\.0 hr/);
-      expect(text).toMatch(/prints 22\.0 hr of labor; the lines this read carry \d+\.\d hr, so \d+\.\d hr is on lines that were not read/);
+      expect(text).toMatch(/prints 22\.0 hr of labor; the lines this read carry \d+\.\d hr, so \d+\.\d hr of it was not read: a line, or a line's hours, that this read missed/);
     }
   });
 

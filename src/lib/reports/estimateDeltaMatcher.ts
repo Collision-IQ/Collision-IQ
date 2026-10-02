@@ -869,13 +869,14 @@ export function explodeGluedRow(rawText: string): string {
       // A digit inside the alphanumeric run right before the tail is that
       // signal, as is a dashed catalog head in capitals ("86302-BE200"); "/",
       // "-" inside a word, or a line number / supplement tag / operation glued
-      // to the front of the row ("45#S01Detail1m"), are not. Only a tail of 2-3
-      // bare digits continues a part number ("000", "200"): a qty marker
-      // ("1m", "1") splits as always, after "4MATIC", "2019-UP" or "R-1234yf".
+      // to the front of the row ("45#S01Detail1m"), are not. A qty tail is one
+      // digit, or one digit and a lowercase marker ("1", "1m"): that splits as
+      // always, after "4MATIC", "2019-UP" or "R-1234yf". Any other short tail
+      // ("000", "200", "0B", "6S") continues the part number.
       (withinToken.length <= 3 &&
         /[A-Za-z]{2}$/.test(text.slice(0, i)) &&
         !(
-          /^\d{2,3}$/.test(withinToken) &&
+          !/^\d[a-z]?$/.test(withinToken) &&
           (/\d{3,}-[A-Z]{1,3}$/.test(text.slice(tokenStart, i)) ||
             /\d/.test(
               (text.slice(tokenStart, i).match(/[A-Za-z0-9]*$/)?.[0] ?? "").replace(

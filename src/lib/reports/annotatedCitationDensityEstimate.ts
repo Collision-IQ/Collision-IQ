@@ -1596,7 +1596,7 @@ async function buildLowerEstimateDeliverable(input: {
     input.warnings.push(
       `The Citation Density copy of the comparison estimate was not built: ${[
         dollars > 0 ? `${dollars.toFixed(2)} dollars of its printed parts and miscellaneous total are on lines whose price was not read` : "",
-        hours > 0 ? `${hours.toFixed(1)} hours of its printed labor are on lines that were not read` : "",
+        hours > 0 ? `${hours.toFixed(1)} hours of its printed labor were not read on any line` : "",
       ]
         .filter(Boolean)
         .join(", and ")}, so its line values cannot be stamped. The annotated copy of our estimate is delivered instead.`
@@ -3172,7 +3172,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {
       warnings.push(
-        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same estimator as our estimate, so it is our own estimate, not the insurer's. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same estimator ("Written By") as our estimate, so it reads as our own estimate, not the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
       warnings.push(

@@ -523,7 +523,7 @@ export function unreadCarrierNote(model: PlainSummaryModel): string {
     L.unreadCarrierHours > 0
       ? `${dollars ? "Their sheet" : model.header.theirs} prints ${hr(L.laborHours.carrier)} of labor; the lines this read carry ${hr(
           Math.round((L.laborHours.carrier - L.unreadCarrierHours) * 10) / 10
-        )}, so ${hr(L.unreadCarrierHours)} is on lines that were not read.`
+        )}, so ${hr(L.unreadCarrierHours)} of it was not read: a line, or a line's hours, that this read missed.`
       : "",
     "The rows above use the printed totals, so the total difference is exact.",
     dollars && L.laborRate > 0
