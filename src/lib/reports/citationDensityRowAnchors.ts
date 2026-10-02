@@ -1094,9 +1094,12 @@ function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchor
   if (isGenericOrMalformedAnchorText(line.text)) return false;
   const normalized = normalizeMatchText(line.text);
   if (!normalized) return false;
-  // A numbered row starts its own anchor; a wrapped size or date fragment
-  // ("6.5mm", "8.2x12.2", "12/28/2017 …") continues the row above it.
-  if (extractLineNumber(line.text) !== null) return false;
+  // Anything that opens with a digit is never appended to the row above: a
+  // wrapped "3 Ft", "12/28/2017 …" or the footer print stamp lands AFTER the
+  // row's value cells, and the re-parse then read it as the row's labor
+  // (masking tape at 3.0 hr) or lost the row on a print too short to measure
+  // its footer as chrome.
+  if (/^\d{1,4}\b/.test(normalized)) return false;
   // End-of-table boundary: the last estimate row must never absorb the totals
   // header or the page's trailing prose ("Category Basis Rate Cost $ This
   // estimate is based on our initial visual inspection…") — a badge anchored

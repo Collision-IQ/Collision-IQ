@@ -257,13 +257,19 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
   section("Check this first", [
     facts.checkFirst.length
       ? { kind: "bullets", items: facts.checkFirst.map((f) => f.text) }
-      : { kind: "paragraph", text: "Nothing on either sheet needs resolving before the items below." },
+      : {
+          kind: "paragraph",
+          text:
+            model.ledger.unreadCarrierLines > 0
+              ? `Nothing on the lines read needs resolving first. ${money(model.ledger.unreadCarrierLines)} of their lines' prices was not read, so a high-dollar line only they wrote cannot be ruled out (see the note under the ledger).`
+              : "Nothing on either sheet needs resolving before the items below.",
+        },
   ]);
 
   // 4. Items worth arguing.
   const shown = model.items.slice(0, MAX_ITEMS);
   const rest = model.items.slice(MAX_ITEMS);
-  const itemBlocks: ForensicBlock[] = [
+  const itemBlocks: ForensicBlock[] = model.ledger.unreadCarrierLines > 0 ? [] : [
     {
       kind: "paragraph",
       text: `Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first.${
@@ -271,7 +277,12 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       }`,
     },
   ];
-  if (shown.length) {
+  if (model.ledger.unreadCarrierLines > 0) {
+    itemBlocks.push({
+      kind: "paragraph",
+      text: "No item is listed: part of their sheet's prices was not read, so any line of ours could have its counterpart on a line that was not read (see the note under the ledger). The ledger above closes on both sheets' printed totals; the Forensic Estimate Analysis lists every line difference that was read.",
+    });
+  } else if (shown.length) {
     itemBlocks.push({
       kind: "table",
       columns: [
@@ -285,19 +296,7 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       })),
     });
   } else {
-    itemBlocks.push({
-      kind: "paragraph",
-      text:
-        model.ledger.unreadCarrierLines > 0
-          ? "No hours difference is left on the lines read. Items that rest on their prices are not listed while part of their sheet's prices is unread (see the note under the ledger)."
-          : "No hours or parts difference is left once equivalent operations are grouped.",
-    });
-  }
-  if (shown.length && model.ledger.unreadCarrierLines > 0) {
-    itemBlocks.push({
-      kind: "note",
-      text: "Part of their sheet's prices is unread, so items that rest on their prices (a priced line of ours with no counterpart on their sheet, sublets and other priced lines, tires) are not listed and the items above are valued on hours only. The Forensic Estimate Analysis lists every line difference that was read.",
-    });
+    itemBlocks.push({ kind: "paragraph", text: "No hours or parts difference is left once equivalent operations are grouped." });
   }
   if (rest.length) {
     itemBlocks.push({
@@ -357,7 +356,9 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
           ? "Resolve the \"Check this first\" items with the carrier before anything else; a high-dollar line nobody can explain undermines every other argument."
           : "Confirm both sheets are the latest versions before anything else.",
         "Clean up our own sheet and send the corrected version, so the carrier is answering our final numbers.",
-        "Send the STRONG items first, each with the carrier's own line or note quoted. Then the NEEDS PROOF items, each with its P-page, OEM procedure or invoice attached.",
+        model.ledger.unreadCarrierLines > 0
+          ? "Get a readable copy of their estimate, so every line price can be read, and run this report again to list the items worth arguing."
+          : "Send the STRONG items first, each with the carrier's own line or note quoted. Then the NEEDS PROOF items, each with its P-page, OEM procedure or invoice attached.",
         "Ask for a reinspection with both appraisers present and the damaged assemblies off for anything still open.",
       ],
     },
@@ -518,7 +519,7 @@ export function unreadCarrierNote(model: PlainSummaryModel): string {
     L.laborRate > 0
       ? `If any of the ${money(L.unreadCarrierLines)} is a labor-rate adjustment, the Labor rate row is smaller and the parts row larger by that amount.`
       : "",
-    "So no item below rests on their prices: a priced line of ours with no counterpart on their sheet, sublets and other priced lines, and tires are not listed, the remaining items are valued on hours only, and a line of theirs described as having no price may be one whose price was not read. The Forensic Estimate Analysis lists every line difference that was read.",
+    "So no item is listed below: any line of ours could have its counterpart on a line that was not read, and a line of theirs described as having no price may be one whose price was not read. The Forensic Estimate Analysis lists every line difference that was read.",
   ]
     .filter(Boolean)
     .join(" ");

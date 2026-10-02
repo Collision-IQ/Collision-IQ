@@ -21,10 +21,15 @@
  * D6 — the SOR's page-1 VIN OCR'd O for 9: a false "VINs differ" warning.
  * D7 — what the report then said: a false "not on our sheet" for the carrier's
  *      A/M bumper cover (our L30 is the same part, OEM), "theirs 0.0 hr" for
- *      calibration (their road test left out), an O/0 part-number "variant",
- *      and "Skid plate [REDACTED_PLATE], SEL".
+ *      calibration (their road test left out), and an O/0 part-number
+ *      "variant". (Download redaction still turns "Skid plate SE" into
+ *      "Skid plate [REDACTED_PLATE]" as on main: every way of keeping the
+ *      trim word that was tried also kept some real plate, and privacy
+ *      fails closed.)
  * D8 — the class: any carrier line-read SHORTFALL refused the whole report.
- *      It is now stated, bounded and disclosed; an over-read still refuses.
+ *      On a CCC carrier it is now stated, bounded and disclosed, and no line
+ *      item is argued (a counterpart may sit on a line not read); an
+ *      over-read still refuses.
  *
  * Fixtures are PII-free: tests/fixtures/22279/sor1_ocr_rows_text.txt is the
  * production OCR text of the SOR's line-item, totals and summary pages (page 1
@@ -287,6 +292,24 @@ describe("D3 — continuation pages keep the rows printed under their own chrome
     expect(l99!.height).toBeLessThan(20);
   });
 
+  it("a footer print stamp never joins the last row of a print too short to measure its footer (RO 22084 shop, pages 1-2)", () => {
+    const twoPages = wordFixture("22084", "shop_words.json").filter((word) => word.pageNumber <= 2);
+    const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(twoPages), { sourceDocumentRole: "shop", sourceDocumentId: "shop-22084" });
+    const l31 = fixtureAnchors.find((anchor) => anchor.lineNumber === "31" && anchor.anchorType === "estimate_line");
+    expect(l31?.rowText).toMatch(/R&I LT Outer support/);
+    expect(l31?.rowText).not.toMatch(/Page \d|\d{1,2}:\d{2}/);
+    expect(l31!.height).toBeLessThan(30);
+  });
+
+  it("a wrapped '3 Ft' is never appended after a row's value cells (masking tape is not 3.0 hr)", () => {
+    for (const [ro, line] of [["20766", "48"], ["20766", "55"]] as const) {
+      const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture(ro, "shop_words.json")), { sourceDocumentRole: "shop", sourceDocumentId: `shop-${ro}` });
+      const tape = fixtureAnchors.find((anchor) => anchor.lineNumber === line && anchor.anchorType === "estimate_line");
+      expect(tape?.rowText).toMatch(/Masking Tape/);
+      expect(tape?.rowText).not.toMatch(/\b3 Ft\b/);
+    }
+  });
+
   it("anchor ids are unique and line 6 is the real row (RO 22084 SOR-5)", () => {
     const fixtureAnchors = buildEstimateRowAnchorsFromLines(buildPdfTextLines(wordFixture("22084", "sor5_words.json")), {
       sourceDocumentRole: "carrier",
@@ -344,7 +367,7 @@ describe("D5 — one counterpart per run", () => {
       const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
       expect(selection.counterpart?.fileName).toBe("SOR-1_22279.pdf");
       expect(describeExcludedComparisons(selection)).toMatch(
-        /^Compared against SOR-1_22279\.pdf only\. Not compared: Shop_final_22279\.pdf \(it was neither labelled nor read as the insurer's estimate\)/
+        /^Compared against SOR-1_22279\.pdf only\. Not compared: Shop_final_22279\.pdf \(its name marks it as a shop estimate, like the annotated one\)/
       );
     }
   });
@@ -378,6 +401,44 @@ describe("D5 — one counterpart per run", () => {
     for (const candidates of [[guessed, labelled], [labelled, guessed]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe("SOR-1_22279.pdf");
     }
+  });
+
+  it("knows every carrier the authorship test knows, as a whole word in the name", () => {
+    const mitchell = readFileSync(path.join(FIXTURE_DIR, "../22132/sor3_mitchell_text.txt"), "utf8");
+    const supplement1 = mitchell.replace(/^([ \t]*Supplement[ \t]+)3([ \t]*)$/m, "$11$2");
+    for (const carrier of ["USAA", "Travelers", "Nationwide", "Liberty Mutual", "Farmers"]) {
+      const latest = { fileName: `${carrier} Supplement 3.pdf`, text: mitchell, estimateRole: "carrier" as const };
+      const earlier = { fileName: `${carrier} estimate.pdf`, text: supplement1, estimateRole: "carrier" as const };
+      for (const candidates of [[latest, earlier], [earlier, latest]]) {
+        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe(`${carrier} Supplement 3.pdf`);
+      }
+    }
+    // "Windsor" is not "SOR"; "SOR1_22279" still is.
+    const windsor = { ...shopFinal, fileName: "Windsor Collision final.pdf", estimateRole: "carrier" as const };
+    const sorGlued = { ...sor, fileName: "SOR1_22279.pdf", estimateRole: "carrier" as const };
+    for (const candidates of [[windsor, sorGlued], [sorGlued, windsor]]) {
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" }).counterpart?.fileName).toBe("SOR1_22279.pdf");
+    }
+  });
+
+  it("a name that marks an estimate as theirs outranks a phrase in another's text", () => {
+    const noted = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const, text: `${shopFinal.text}\nBLEND NOT ON USAA ESTIMATE, ADDED` };
+    const labelled = { ...sor, estimateRole: "carrier" as const };
+    for (const candidates of [[noted, labelled], [labelled, noted]]) {
+      const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
+      expect(selection.counterpart?.fileName).toBe("SOR-1_22279.pdf");
+      expect(selection.unidentified).toEqual([]);
+    }
+  });
+
+  it("several estimates and none identified as theirs: the pick is reported as unidentified", () => {
+    const a = { ...shopFinal, fileName: "22279 final.pdf", estimateRole: "carrier" as const };
+    const b = { ...sor, fileName: "22279 b.pdf", estimateRole: "carrier" as const, text: "Supplement of Record 1\nGrand Total 4,408.16" };
+    const selection = selectComparisonCounterpart([a, b], { sourceParty: "shop" });
+    expect(selection.unidentified.map((c) => c.fileName).sort()).toEqual(["22279 b.pdf", "22279 final.pdf"]);
+    // One left once our own named versions are set aside stands as a lone comparison would.
+    const named = { ...shopFinal, estimateRole: "shop" as const };
+    expect(selectComparisonCounterpart([named, b], { sourceParty: "shop" })).toMatchObject({ unidentified: [], counterpart: b });
   });
 
   it("names an Estimate of Record as such, never 'supplement 0'", () => {
@@ -448,10 +509,6 @@ describe("D7 — the Appraisal Dispute Report for Shop final vs SOR-1 is produce
     );
   });
 
-  it("keeps a trim code and a part word after 'plate'", () => {
-    expect(text).not.toMatch(/REDACTED_PLATE/);
-  });
-
   it("renders past the wording gate", async () => {
     expect((await renderPlainSummaryPdf(model)).pageCount).toBeGreaterThan(0);
   });
@@ -472,11 +529,13 @@ describe("D8 — a carrier line-read shortfall is stated and bounded, never a re
     expect(text).toMatch(/the lines this read could price add up to \$2,482\.54, so \$5\.00 is on lines whose price was not read/);
     expect(text).toMatch(/the Labor rate row is smaller and the parts row larger by that amount/);
     expect(text).toMatch(/If any of the \$5\.00 on their lines that was not read is a labor-rate adjustment/);
-    // Items that rest on their prices are withheld, and the report says so;
-    // our labor-only lines with no counterpart stand as on a full read.
-    expect(text).not.toMatch(/No counterpart on their sheet \([^)]*\$[\d,.]+ part\)/);
-    expect(text).toMatch(/No counterpart on their sheet \(L40, 1\.0 hr\)/);
-    expect(text).toMatch(/items that rest on their prices \(a priced line of ours with no counterpart on their sheet, sublets and other priced lines, tires\) are not listed/);
+    // A dropped row and an unread price cell look the same to the ledger, and
+    // a dropped row hides labor as well as dollars: no item is argued.
+    expect(model.items).toEqual([]);
+    expect(text).not.toMatch(/No counterpart on their sheet/);
+    expect(text).toMatch(/No item is listed: part of their sheet's prices was not read, so any line of ours could have its counterpart on a line that was not read/);
+    expect(text).not.toMatch(/No hours difference/);
+    expect(text).toMatch(/Get a readable copy of their estimate/);
     expect((await renderPlainSummaryPdf(model)).pageCount).toBeGreaterThan(0);
   });
 
@@ -533,11 +592,29 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
     ).rejects.toBeInstanceOf(CitationDensityAnnotationError);
   });
 
-  it("a comparison whose own text is the insurer's is not refused for its file name", async () => {
+  it("the caller's label decides: a shop note or an appraiser's 'prepared by' never makes a comparison the insurer's", async () => {
+    for (const comparison of [
+      { fileName: "Spartan Collision prelim.pdf", text: `${shopVersionText}\nBLEND NOT ON USAA ESTIMATE, ADDED` },
+      { fileName: "Appraisal - J Smith.pdf", text: `${carrierText}\nPrepared by: J. Smith, Independent Appraiser` },
+      { fileName: "Appraisal S2.pdf", text: `USAA approved estimate\n${carrierText}` },
+    ]) {
+      const result = await build([{ ...comparison, sourceDocumentId: "cmp", estimateRole: "shop" }]);
+      expect(result.plainSummaryExportId).toBeUndefined();
+      expect(result.warnings.join("\n")).toMatch(
+        new RegExp(`${comparison.fileName.replace(/[.]/g, "\\.")} was not identified as the insurer's estimate: it is labelled a shop estimate\\. A file name carrying "SOR", "carrier" or the insurer's name`)
+      );
+    }
+  });
+
+  it("several unmarked estimates and none identified as the insurer's: no dispute report, and it says why", async () => {
     const result = await build([
-      { fileName: "Appraisal S2.pdf", sourceDocumentId: "sor2", estimateRole: "shop", text: `USAA approved estimate\n${carrierText}` },
+      { fileName: "22279 final.pdf", sourceDocumentId: "final", estimateRole: "carrier", text: shopVersionText },
+      { fileName: "22279 b.pdf", sourceDocumentId: "b", estimateRole: "carrier", text: carrierText },
     ]);
-    expect(result.warnings.join("\n")).not.toMatch(/not identified as the insurer's estimate/);
+    expect(result.plainSummaryExportId).toBeUndefined();
+    expect(result.warnings.join("\n")).toMatch(
+      /Appraisal Dispute Report not produced: none of 22279 (final|b)\.pdf, 22279 (final|b)\.pdf could be identified as the insurer's estimate by its name or its text/
+    );
   });
 
   it("a file named as a shop estimate stays the shop's whatever a note in it says", async () => {
@@ -598,17 +675,33 @@ describe("review — what the report may claim when lines are unread or read dif
     expect(text).not.toMatch(/\$1,408\.60/);
   });
 
-  it("on a partial read, no item rests on their prices", () => {
-    const full = model21995(() => {});
-    const { m, text } = model21995((d) => (lowerRow(d, 102).price = null));
-    expect(m.ledger.unreadCarrierLines).toBe(2000);
-    // No priced no-counterpart, priced-group or tires item; every group item is valued on hours.
-    expect(m.items.some((item) => /^No counterpart.*\$[\d,.]+ part/.test(item.detail))).toBe(false);
-    expect(m.items.some((item) => /^Tires/.test(item.title))).toBe(false);
-    for (const item of m.items.filter((i) => full.m.groups.some((g) => g.label === i.title))) {
-      expect(item.detail).toMatch(/Worth counts the hours only/);
+  it("on a partial read, no item is argued: an unread price and a dropped row look the same", () => {
+    for (const mutate of [
+      (d: Delta) => (lowerRow(d, 102).price = null),
+      // Dropped: their L102 replaces the subframe with 5.5 hr, so "no
+      // counterpart" for our crossmember R&I would be false.
+      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 102)),
+      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 134)),
+      // Their oil pump's price unread: "they pay the part" is not shown.
+      (d: Delta) => (lowerRow(d, 61).price = null),
+    ]) {
+      const { m, text } = model21995(mutate);
+      expect(m.ledger.unreadCarrierLines).toBeGreaterThan(0);
+      expect(m.items).toEqual([]);
+      expect(text).not.toMatch(/No counterpart on their sheet|They pay the part/);
+      expect(text).toMatch(/So no item is listed below/);
     }
-    expect(text).toMatch(/items that rest on their prices .* are not listed/);
+  });
+
+  it("'Check this first' never says nothing needs resolving while a carrier price is unread", () => {
+    const dual = (d: Delta) => (lowerRow(d, 98).description = String(lowerRow(d, 98).description).replace(/quad-motor/i, "dual-motor"));
+    expect(model21995(dual).text).toMatch(/Carrier L169 "Damper Module Assembly" \(\$1,980\.00\) is not on our sheet/);
+    const { text } = model21995((d) => {
+      dual(d);
+      lowerRow(d, 169).price = null;
+    });
+    expect(text).not.toMatch(/Nothing on either sheet needs resolving/);
+    expect(text).toMatch(/Nothing on the lines read needs resolving first\. \$1,980\.00 of their lines' prices was not read, so a high-dollar line only they wrote cannot be ruled out/);
   });
 
   it("a carrier row not read at all never inflates an item (dropped L77, L171)", () => {

@@ -2080,6 +2080,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // totals, coverage, release gate, forensic names, the dispute report — sees
   // only it. Pooling them read RO 22279's Shop final lines under its SOR's
   // totals.
+  // Names the estimates left when none of them could be identified as the
+  // other party's: the one compared was then picked by print order alone.
+  let counterpartPartyUnidentified: string[] | null = null;
   if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
     const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
       sourceParty: sourceDocumentRole,
@@ -2096,6 +2099,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       };
       const note = describeExcludedComparisons(selection);
       if (note) warnings.push(note);
+      if (selection.unidentified.length) counterpartPartyUnidentified = selection.unidentified.map((candidate) => candidate.fileName);
     }
   }
   for (const comparison of params.comparisonEstimateTexts ?? []) {
@@ -3146,21 +3150,19 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // document with the wrong nouns in it. It is a companion, never a
     // deliverable the run depends on: a failure here is a warning on the
     // run, and the two documents above still ship.
-    // The route labels a comparison from its FILE NAME, and "appraisal"/"rta"
-    // read as shop. Only there, or with no label at all, may the document's
-    // own insurer-authored text make it the insurer's: a file named as a shop
-    // estimate stays the shop's whatever a note in it says ("BLEND NOT ON
-    // USAA ESTIMATE"), and the text test never reads the file name.
+    // The caller's label decides whose the comparison is. Text is never
+    // promoted over it: a shop's note ("BLEND NOT ON USAA ESTIMATE") and an
+    // independent appraiser's "prepared by" line both read as insurer
+    // authorship. When several estimates were on the case and none could be
+    // identified as the insurer's, the one compared was picked by print
+    // order, and a report naming it "the insurer's" would be a guess.
     const comparisonText = params.comparisonEstimateTexts?.[0];
-    const labelFromAmbiguousName =
-      !comparisonText?.estimateRole ||
-      (/appraisal|rta/i.test(comparisonText.fileName ?? "") && !/shop|repair facility/i.test(comparisonText.fileName ?? ""));
-    const comparisonRole =
-      comparisonText?.estimateRole === "carrier" ||
-      (labelFromAmbiguousName && isCarrierAuthoredEstimateDocument({ filename: "", text: comparisonText?.text }))
-        ? "carrier"
-        : comparisonText?.estimateRole;
-    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
+    const comparisonRole = comparisonText?.estimateRole;
+    if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
+      warnings.push(
+        `Appraisal Dispute Report not produced: none of ${counterpartPartyUnidentified.join(", ")} could be identified as the insurer's estimate by its name or its text, so the report would be guessing which one is theirs. A file name carrying "SOR", "carrier" or the insurer's name marks it as the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
       // with the line-item comparison withheld those lines are unread, and a
       // ledger over unread lines would state figures nobody checked.
@@ -3237,7 +3239,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       warnings.push(
         `Appraisal Dispute Report not produced: it is written for our estimate measured against the insurer's, and ${comparisonName} was not identified as the insurer's estimate: ${
           comparisonRole === "shop" ? "it is labelled a shop estimate" : "its author is not identified"
-        }, and its text does not read as insurer-authored. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        }. A file name carrying "SOR", "carrier" or the insurer's name, and not "shop" or "appraisal", marks it as the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     }
   }

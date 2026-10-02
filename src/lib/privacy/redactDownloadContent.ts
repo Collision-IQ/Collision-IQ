@@ -26,41 +26,6 @@ const PLATE_FALLBACK_PATTERN =
 	/(\b(?:license\s*plate|plate)\s*(?:number|no\.?|#)?\s*[:#-]?\s*)([A-Z0-9][A-Z0-9 -]{1,10})/gi;
 
 /**
- * Text after "plate" is redacted — FAIL CLOSED — unless it is plainly an
- * estimate line, by one of three measured shapes:
- *
- * - "License plate" directly followed by a part noun ("pad", "Bracket",
- *   "LAMP"): the part, not the plate (RO 22279: "License plate pad 869413K000"
- *   lost "pad 869413K").
- * - A part noun directly before "plate" on the SAME line ("Skid plate",
- *   "sill plate") followed by a token that cannot be a plate: no digit, not
- *   a 5-8 letter vanity, not a short state/letter group before digits, or a
- *   9+ character part number (RO 22279: "Skid plate SE, SEL" printed as
- *   "Skid plate [REDACTED_PLATE], SEL").
- * - Digits running straight into a decimal: a glued money cell
- *   ("sill plate00.00Incl.").
- *
- * A labelled value ("Plate:", "Plate No.", "Plate #") is always redacted.
- */
-const PLATE_PART_BEFORE =
-	/\b(?:skid|sill|scuff|kick|splash|shield|step|tow|bed|base|mounting|reinforcement|name|face|wear|striker|anchor|backing|cover|heat|seal|seat)\s*$/i;
-const LICENSE_PLATE_PART_AFTER =
-	/^(?:pad|bracket|lamp|light|mount|mounting|pocket|frame|screw|bolt|holder|housing|assy|assembly|bezel|garnish|molding|trim|cover|panel|lens|socket|bulb|harness|wiring|kit|filler|base|plate|retainer|clip|nut)\b/i;
-
-function keepPlateText(prefix: string, value: string, before: string, after: string): boolean {
-	const rest = value.trim();
-	if (/^\d+$/.test(rest) && /^\.\d/.test(after)) return true;
-	if (/(?:number|no\.|#|[:#-])\s*$/i.test(prefix)) return false;
-	if (/license\s*plate/i.test(prefix)) return LICENSE_PLATE_PART_AFTER.test(rest);
-	if (!PLATE_PART_BEFORE.test(before.slice(before.lastIndexOf("\n") + 1))) return false;
-	const [first = "", second = ""] = rest.split(/[\s-]+/);
-	if (first.length >= 9) return true;
-	const plateShaped =
-		/\d/.test(first) || /^[A-Z]{5,8}$/.test(first) || (/^[A-Za-z]{1,4}$/.test(first) && /\d/.test(second));
-	return !plateShaped;
-}
-
-/**
  * A labelled value is only redacted when it has the SHAPE of the datum its
  * label claims. Without this, "…estimates exist for this claim: the shop's
  * estimate at $26,006.59…" matched the claim rule, the value group ate
@@ -223,9 +188,9 @@ export function redactDownloadContent(text: string): string {
 	// Generic fallback patterns second.
 	redacted = redacted.replace(STREET_ADDRESS_PATTERN, "[REDACTED_ADDRESS]");
 	redacted = redacted.replace(STATE_ZIP_PATTERN, (_match, prefix: string) => `${prefix}[REDACTED_ZIP]`);
-	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (match, prefix: string, value: string, offset: number, whole: string) =>
-		keepPlateText(prefix, value, whole.slice(0, offset), whole.slice(offset + match.length)) ? match : `${prefix}[REDACTED_PLATE]`
-	);
+	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (_match, prefix: string) => {
+		return `${prefix}[REDACTED_PLATE]`;
+	});
 
 	// A carrier is named in prose far more often than after an "Insurer:" label
 	// ("USAA's estimate at $22,886.68"), so sweep the known-carrier vocabulary

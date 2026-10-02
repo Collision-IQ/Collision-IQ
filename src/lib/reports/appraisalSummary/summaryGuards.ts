@@ -58,7 +58,7 @@ export function buildSummaryFacts(
     adasSentence:
       adas && adas.exclusions.length
         ? `The carrier's own calibration line says its time ${adas.exclusions[0].toLowerCase()}. That is the work our calibration lines cover.`
-        : adas && adasDiff > 0
+        : adas && adasDiff > 0 && ledger.unreadCarrierLines === 0
           ? `We wrote ${adasDiff.toFixed(1)} more hours of calibration and diagnostics than the carrier.`
           : null,
     checkFirst: flags.filter((f) => checkFirstKinds.has(f.kind)),

@@ -49,9 +49,14 @@ export function readLatestPrintedTimestamp(text: string): number | null {
   return latest;
 }
 
-/** The file-name party tokens the citation-density route labels a comparison from. */
-const CARRIER_NAME = /carrier|insur|sor|geico|state farm|progressive|allstate/i;
-const SHOP_NAME = /shop|repair facility|rta|appraisal/i;
+/**
+ * Party tokens in a file name, matched as whole words ("Windsor" is not
+ * "SOR", "Spartan" is not "RTA"; "SOR1_22279" and "USAA-SOR" are). The
+ * carriers are the ones the authorship test knows.
+ */
+const CARRIER_NAME =
+  /(?<![a-z])(?:carriers?|insur(?:ance|er|ers)?|sor|adjusters?|geico|state\s*farm|progressive|allstate|usaa|nationwide|liberty\s*mutual|farmers|travelers)(?![a-z])/i;
+const SHOP_NAME = /(?<![a-z])(?:shop|repair\s*facility|rta|appraisal)(?![a-z])/i;
 
 export type CounterpartCandidate = {
   fileName: string;
@@ -66,6 +71,13 @@ export type CounterpartSelection<T extends CounterpartCandidate> = {
   excluded: Array<{ candidate: T; reason: string }>;
   /** Which printed evidence decided between several of the other party's estimates; null when it did not arise. */
   basis: string | null;
+  /**
+   * The estimates left when several were and none could be identified as
+   * the other party's by its name or its text: the counterpart was then
+   * picked among them by print order alone, and nothing says whose it is.
+   * Empty when the party was identified.
+   */
+  unidentified: T[];
 };
 
 const stamp = (value: number) => {
@@ -83,7 +95,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     pinnedSourceDocumentId?: string | null;
   }
 ): CounterpartSelection<T> {
-  if (candidates.length <= 1) return { counterpart: candidates[0] ?? null, excluded: [], basis: null };
+  if (candidates.length <= 1) return { counterpart: candidates[0] ?? null, excluded: [], basis: null, unidentified: [] };
 
   const pinned = options.pinnedSourceDocumentId
     ? candidates.find((candidate) => candidate.sourceDocumentId === options.pinnedSourceDocumentId)
@@ -95,6 +107,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
         .filter((candidate) => candidate !== pinned)
         .map((candidate) => ({ candidate, reason: `the case's bound delta pair names ${pinned.fileName}` })),
       basis: "the bound delta pair",
+      unidentified: [],
     };
   }
 
@@ -103,26 +116,47 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   // supplement prints no authorship boilerplate). A label the caller only
   // guessed — the route's last resort labels an unmarked file the opposite
   // of the source — admits nothing: it let the shop's own later estimate in
-  // as "theirs" ahead of the SOR.
+  // as "theirs" ahead of the SOR. A file NAMED as the source party's stays
+  // its own whatever a note in its text says ("BLEND NOT ON USAA ESTIMATE").
   const otherRole = options.sourceParty === "shop" ? "carrier" : "shop";
+  const partyName = (role: "carrier" | "shop") => (role === "carrier" ? CARRIER_NAME : SHOP_NAME);
   const carrierAuthored = (candidate: T) => isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: candidate.text });
-  const labelledByName = (candidate: T) =>
-    candidate.estimateRole === otherRole && (otherRole === "carrier" ? CARRIER_NAME : SHOP_NAME).test(candidate.fileName);
-  const otherParty = candidates.filter(
-    (candidate) => labelledByName(candidate) || carrierAuthored(candidate) === (options.sourceParty === "shop")
+  const labelledByName = (candidate: T) => candidate.estimateRole === otherRole && partyName(otherRole).test(candidate.fileName);
+  const namedAsSource = (candidate: T) =>
+    (candidate.estimateRole ?? options.sourceParty) === options.sourceParty && partyName(options.sourceParty).test(candidate.fileName);
+  // A name is chosen by a person; a phrase in the text can be a note. An
+  // estimate whose NAME marks it as theirs outranks one only its text does.
+  const byName = (candidate: T) =>
+    labelledByName(candidate) ||
+    (otherRole === "carrier" && isCarrierAuthoredEstimateDocument({ filename: candidate.fileName, text: "" }));
+  const byAuthorship = candidates.filter(
+    (candidate) => !namedAsSource(candidate) && (byName(candidate) || carrierAuthored(candidate) === (otherRole === "carrier"))
   );
-  const partyPool = otherParty.length ? otherParty : candidates;
+  const namedOther = byAuthorship.filter(byName);
+  const otherParty = namedOther.length ? namedOther : byAuthorship;
+  // Nothing identified as theirs: measure against what is not named as ours,
+  // and say that nothing identifies it unless exactly one such estimate is
+  // left (then it stands as a lone comparison would, on the caller's label).
+  const unnamed = candidates.filter((candidate) => !namedAsSource(candidate));
+  const partyPool = otherParty.length ? otherParty : unnamed.length ? unnamed : candidates;
+  const unidentified = otherParty.length > 0 || unnamed.length <= 1 ? [] : unnamed;
   // An estimate whose totals cannot be read is not something to measure against.
   const readable = partyPool.filter((candidate) => candidate.text.trim() && parseEstimateTotalsForPlatform(candidate.text)?.grandTotal != null);
   const pool = readable.length ? readable : partyPool;
 
   const excluded: CounterpartSelection<T>["excluded"] = [];
-  const partyReason =
-    options.sourceParty === "shop"
-      ? "it was neither labelled nor read as the insurer's estimate"
-      : "it was labelled or read as the insurer's estimate, like the annotated one";
+  const partyReason = (candidate: T) =>
+    namedAsSource(candidate)
+      ? options.sourceParty === "shop"
+        ? "its name marks it as a shop estimate, like the annotated one"
+        : "its name marks it as the insurer's, like the annotated one"
+      : options.sourceParty === "shop"
+        ? byAuthorship.includes(candidate)
+          ? "only a phrase in its text reads as the insurer's, and another estimate's name marks it as theirs"
+          : "neither its name nor its text identifies it as the insurer's estimate"
+        : "it was labelled or read as the insurer's estimate, like the annotated one";
   for (const candidate of candidates) {
-    if (otherParty.length && !otherParty.includes(candidate)) excluded.push({ candidate, reason: partyReason });
+    if (!partyPool.includes(candidate)) excluded.push({ candidate, reason: partyReason(candidate) });
     else if (!pool.includes(candidate)) excluded.push({ candidate, reason: "its totals could not be read" });
   }
 
@@ -154,7 +188,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   pool.forEach((candidate, index) => {
     if (index !== best) excluded.push({ candidate, reason: reason(index) });
   });
-  return { counterpart, excluded, basis };
+  return { counterpart, excluded, basis, unidentified };
 }
 
 /** The run warning naming every estimate a selection left out, or null when none was. */

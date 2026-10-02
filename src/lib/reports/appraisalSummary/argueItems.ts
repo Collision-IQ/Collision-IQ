@@ -78,9 +78,11 @@ export function argueItems(params: {
   carrierLinesIncomplete?: boolean;
 }): ArgueItem[] {
   const { shop, carrier, groups, usedShop, flags, pairs } = params;
-  // With part of their sheet unread, "no price" and "no counterpart" are what
-  // this read found, not what their sheet says.
-  const incomplete = params.carrierLinesIncomplete === true;
+  // Part of their sheet unread — a price cell not read, or a whole row not
+  // read, which the ledger cannot tell apart: any line of ours may have its
+  // counterpart on a line that was not read, and any group may be missing one
+  // of theirs. No item is argued; the ledger still closes on printed totals.
+  if (params.carrierLinesIncomplete === true) return [];
   const shopLine = new Map(shop.lines.map((l) => [l.line, l]));
   const carrierLine = new Map(carrier.lines.map((l) => [l.line, l]));
   const paintRate = shopRateFor(shop, "paint", 0);
@@ -108,25 +110,13 @@ export function argueItems(params: {
     return `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr: the same hours. The difference is in the priced lines: ours ${money(ours)}, theirs ${theirs > 0 ? money(theirs) : "none priced"}.`;
   };
 
-  // Part of their sheet's prices unread (a price cell not read, a row not
-  // read at all, or a sublet that prints blank by design — the ledger cannot
-  // tell which): no item may rest on a carrier price. Groups are valued on
-  // hours; parent-part items and our priced lines with no counterpart are
-  // not listed.
-  const hoursValue = (lines: number[], byLine: Map<number, EstimateLine>) =>
-    round2(lines.reduce((sum, line) => { const l = byLine.get(line); return sum + (l ? (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) : 0); }, 0));
-
   // Strong — the carrier's own exclusion note on an equivalence group.
   for (const group of groups) {
-    const diff = incomplete
-      ? round2(hoursValue(group.shopLines, shopLine) - hoursValue(group.carrierLines, carrierLine))
-      : round2(group.shopValue - group.carrierValue);
+    const diff = round2(group.shopValue - group.carrierValue);
     if (diff <= 0) continue;
     const excluded = group.exclusions.length > 0;
     const sides = `Ours ${group.shopHours.toFixed(1)} hr, theirs ${group.carrierHours.toFixed(1)} hr`;
-    const detail = incomplete
-      ? `${sides}${excluded ? `. Their own line says the time ${group.exclusions[0].toLowerCase()}` : ""}. Part of their sheet's prices was not read, so the priced lines are not compared; Worth counts the hours only.`
-      : excluded
+    const detail = excluded
       ? `${sides}. Their own line says the time ${group.exclusions[0].toLowerCase()}.`
       : group.shopHours === 0 && group.carrierHours === 0
         ? group.carrierValue === 0 && group.carrierLines.length > 0
@@ -167,8 +157,6 @@ export function argueItems(params: {
 
   // Strong — the carrier pays the parent part and leaves the child off.
   for (const rule of PARENT_PARTS) {
-    // Netted against their companion prices, so not stated on a partial read.
-    if (incomplete) continue;
     const children = shop.lines.filter((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc) && (l.price ?? 0) > 0);
     const carrierHasChild = carrier.lines.some((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc));
     const parents = carrier.lines.filter((l) => rule.parent.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0);
@@ -203,10 +191,6 @@ export function argueItems(params: {
     if (!lines.length || lines.some((l) => claimed.has(l.line))) continue;
     const theirs = pair.carrierLine !== undefined ? carrierLine.get(pair.carrierLine) : undefined;
     if (theirs && usedShopCarrierLine(groups, theirs.line)) continue;
-    // A priced line of ours with "no counterpart" on a partial read may have
-    // one among their unread priced rows. Unread DOLLARS cannot hide a
-    // labor-only counterpart, so a labor-only line stands as on a full read.
-    if (incomplete && !theirs && lines.some((l) => (l.price ?? 0) > 0)) continue;
     const ourHours = round2(lines.reduce((sum, l) => sum + hoursOf(l), 0));
     const hours = round2(ourHours - hoursOf(theirs));
     const partValue = theirs ? 0 : lines.reduce((sum, l) => sum + (l.price ?? 0), 0);
