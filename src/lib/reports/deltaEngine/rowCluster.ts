@@ -914,3 +914,14 @@ export function parseSubtotalsFromWords(wordsByPage: Map<number, Word[]>): Subto
   }
   return null;
 }
+
+/**
+ * Line hours reproduce a printed hours total within 0.2 hr (the extra hundredth
+ * absorbs float noise in the sum); a total the document does not print
+ * reconciles. One rule for every line read checked against its own print: the
+ * typed-cell column-identity guard (RC-3) and the Appraisal Dispute Report's
+ * adapter.
+ */
+export function hoursReconcile(lineHours: number, printed: number | null): boolean {
+  return printed === null || Math.abs(lineHours - printed) <= 0.21;
+}

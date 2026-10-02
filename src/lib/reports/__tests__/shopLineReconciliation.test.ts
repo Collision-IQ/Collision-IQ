@@ -13,12 +13,18 @@
  * The fixture is synthetic (the PDFs carry PII and are not in the
  * repository): the same Parts + Misc, line-read total and two lost rows, on a
  * small pair built to close to the cent, entering through the same adapter the
- * pipeline calls.
+ * pipeline calls. Whether RO 22279's two rows carried hours is not known here,
+ * so both shapes are covered: priced rows with no hours (the report ships with
+ * its absence claims withheld) and rows that carry hours (no report: every
+ * hour it quotes would rest on an incomplete read, as the typed lane already
+ * rules).
  */
 import { describe, expect, it } from "vitest";
 import type { EstimateDeltaRow } from "../estimateDeltaMatcher";
 import { tokenizeDescription } from "../estimateDeltaMatcher";
 import type { ForensicReconciliation, ReconciliationRow } from "../forensicEstimateAnalysis";
+import { hoursReconcile } from "../deltaEngine/rowCluster";
+import { lineHoursRead } from "../appraisalSummary/estimateFromDeltaRows";
 import { buildGapLedger } from "../appraisalSummary/gapLedger";
 import { integrityChecks } from "../appraisalSummary/integrityChecks";
 import { buildLowerEstimateFindings } from "../appraisalSummary/lowerEstimateFindings";
@@ -121,9 +127,12 @@ const shopRows: EstimateDeltaRow[] = [
   row(12, "Repl", "Grille", { pn: "SYN10012", price: 100.19, labor: 0.5 }),
   row(20, "Rpr", "RT Fender", { labor: 6, paint: 2.5 }),
   row(21, "Rpr", "Hood", { labor: 4, paint: 2 }),
-  row(22, "Rpr", "LT Fender", { labor: 2.5 }),
-  row(SKID_PLATE, "Repl", "Skid plate", { pn: "SYN10034", price: 504.49, labor: 1 }),
-  row(REINFORCEMENT, "Repl", "Reinforcement", { pn: "SYN10035", price: 502.5, labor: 2.5 }),
+  row(22, "Rpr", "LT Fender", { labor: 6 }),
+  // Priced with no hours of their own, so losing them leaves the hours whole:
+  // the report is produced and only its absence claims are at stake. Losing
+  // rows that carry hours refuses the report (see "line hours" below).
+  row(SKID_PLATE, "Repl", "Skid plate", { pn: "SYN10034", price: 504.49 }),
+  row(REINFORCEMENT, "Repl", "Reinforcement", { pn: "SYN10035", price: 502.5 }),
   row(40, null, "Hazardous waste disposal", { price: 5 }),
   row(41, "Subl", "Pre-repair scan", { price: 125 }),
   row(42, "Subl", "Post-repair scan", { price: 120 }),
@@ -149,8 +158,8 @@ const carrierRows: EstimateDeltaRow[] = [
 /** A part only the carrier wrote, $612.00, at the end of its sheet. */
 const carrierOnlyPart = row(32, "Repl", "Front tow hook bracket", { pn: "SYN20032", price: 612 });
 
-function input(params: { shop: EstimateDeltaRow[]; carrier?: EstimateDeltaRow[]; carrierExtra?: number }): PlainSummaryInput {
-  const adapted = adaptForensicToPlainSummary({
+function adapt(params: { shop: EstimateDeltaRow[]; carrier?: EstimateDeltaRow[]; carrierExtra?: number }) {
+  return adaptForensicToPlainSummary({
     reconciliation: reconciliation(params.carrierExtra),
     rows: { higher: params.shop, lower: params.carrier ?? carrierRows, deltas: [] },
     higherDocumentName: "Shop estimate.pdf",
@@ -160,6 +169,10 @@ function input(params: { shop: EstimateDeltaRow[]; carrier?: EstimateDeltaRow[];
     vehicleLabel: "Synthetic test vehicle",
     generatedAt: "2026-10-02T12:00:00.000Z",
   });
+}
+
+function input(params: Parameters<typeof adapt>[0]): PlainSummaryInput {
+  const adapted = adapt(params);
   if (!adapted.ok) throw new Error(adapted.reason);
   return adapted.input;
 }
@@ -178,10 +191,11 @@ describe("our line read is reconciled with the carrier-side rule", () => {
   });
 
   it("a row read twice is unreconciled too, and is stated without a negative figure", () => {
-    const twice = buildPlainSummaryModel(input({ shop: [...shopRows, { ...shopRows[2], lineNumber: 43 }] }));
-    expect(twice.ledger.shopLineRead).toEqual({ lineTotal: 3842.63, printed: 2977.68, residual: -864.95, closes: false });
+    const scan = shopRows.find((r) => r.lineNumber === 41)!;
+    const twice = buildPlainSummaryModel(input({ shop: [...shopRows, { ...scan, lineNumber: 43 }] }));
+    expect(twice.ledger.shopLineRead).toEqual({ lineTotal: 3102.68, printed: 2977.68, residual: -125, closes: false });
     const [flag] = of(twice.flags, "shopLinesUnreconciled");
-    expect(flag.text).toContain("add up to $3,842.63, but it prints $2,977.68 for parts and other priced items, a $864.95 difference");
+    expect(flag.text).toContain("add up to $3,102.68, but it prints $2,977.68 for parts and other priced items, a $125.00 difference");
     expect(flag.text).not.toMatch(/-\$/);
     expect(lintSummaryText(flag.text, twice.lint)).toEqual([]);
   });
@@ -284,5 +298,49 @@ describe("partial fixtures (strictLines off) are not held to the print", () => {
     const { shop, carrier } = input({ shop: shopRowsDropped });
     expect(buildGapLedger(shop, carrier, { strictLines: false }).shopLineRead).toBeNull();
     expect(of(integrityChecks(shop, carrier), "carrierOnlyHighDollar").map((f) => f.lines.carrier)).toEqual([[28]]);
+  });
+});
+
+describe("line hours: both sheets are held to their printed labor hours, column by column", () => {
+  const without = (rows: EstimateDeltaRow[], line: number) => rows.filter((r) => r.lineNumber !== line);
+  const edit = (rows: EstimateDeltaRow[], line: number, cells: Partial<EstimateDeltaRow>) =>
+    rows.map((r) => (r.lineNumber === line ? { ...r, ...cells } : r));
+  const refusal = (params: Parameters<typeof adapt>[0]) => {
+    const adapted = adapt(params);
+    return adapted.ok ? null : adapted.reason;
+  };
+
+  it("a whole read closes on both sides", () => {
+    expect(lineHoursRead(whole.shop)).toEqual({ labor: { lines: 20, printed: 20 }, paint: { lines: 8, printed: 8 }, closes: true });
+    expect(lineHoursRead(whole.carrier)).toEqual({ labor: { lines: 15, printed: 15 }, paint: { lines: 6, printed: 6 }, closes: true });
+  });
+
+  it("losing a row that carries hours ships no report, and the reason states the figures", () => {
+    expect(refusal({ shop: without(shopRows, 21) })).toBe(
+      "our estimate's lines carry 16.0 labor and 6.0 paint hours as read, but it prints 20.0 and 8.0, so any hour the report quoted could be a misread line rather than what the estimate says"
+    );
+  });
+
+  it("paint hours read into the labor column are refused even though the total closes", () => {
+    // The shape the text lane reads on the repository's CCC fixtures: labor too high, paint too low.
+    expect(refusal({ shop: edit(shopRows, 20, { labor: 8.5, paint: null }) })).toMatch(
+      /^our estimate's lines carry 22\.5 labor and 5\.5 paint hours as read, but it prints 20\.0 and 8\.0/
+    );
+  });
+
+  it("their sheet is held to the same rule, and both are named when both fail", () => {
+    expect(refusal({ shop: shopRows, carrier: without(carrierRows, 19) })).toMatch(
+      /^their estimate's lines carry 12\.0 labor and 5\.0 paint hours as read, but it prints 15\.0 and 6\.0/
+    );
+    expect(refusal({ shop: without(shopRows, 21), carrier: without(carrierRows, 19) })).toMatch(
+      /^our estimate's lines carry 16\.0 .*; their estimate's lines carry 12\.0 /
+    );
+  });
+
+  it("allows the typed lane's 0.2 hr and no more", () => {
+    expect(refusal({ shop: edit(shopRows, 22, { labor: 6.2 }) })).toBeNull();
+    expect(refusal({ shop: edit(shopRows, 22, { labor: 6.3 }) })).toMatch(/20\.3 labor/);
+    // The one rule the column-identity guard (RC-3) also applies.
+    expect([hoursReconcile(28.2, 28), hoursReconcile(27.8, 28), hoursReconcile(28.3, 28), hoursReconcile(5, null)]).toEqual([true, true, false, true]);
   });
 });
