@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -956,6 +957,41 @@ function measureDescriptionCellEnd(row: PdfTextLine, rowText: string, cellLeft: 
   return rowText.startsWith(cell) ? cell.length : null;
 }
 
+/**
+ * A row anchor's id. A printed line number names the row
+ * ("doc:p3:47:estimate_line"). An anchor with no line number (section,
+ * totals, supplier and guide rows, unnumbered notes) is named by its own
+ * printed text, hashed, never by where it falls in the anchor list.
+ *
+ * The id used to take the anchor's list position instead. Adding or dropping
+ * any anchor renumbered every unnumbered anchor after it, so a finding that
+ * carried an id from an earlier extraction could resolve to a different row
+ * without tripping the stale-anchor check, and the position could equal a
+ * printed number on the same page: the cover page's "4 Wheel Drive…" line 4
+ * and the fourth anchor were both p1:4:guide_row.
+ *
+ * The text key starts with a letter, so it can never equal a line number.
+ * The same text printed twice on one page as the same anchor type takes an
+ * occurrence suffix in reading order (".2", ".3"), which changes only if a
+ * copy of that same text is added or removed above it.
+ */
+function buildRowAnchorId(
+  documentId: string,
+  line: PdfTextLine,
+  lineNumber: string | null,
+  type: EstimateRowAnchorType,
+  unnumberedIds: Set<string>
+): string {
+  if (lineNumber) return `${documentId}:p${line.pageNumber}:${lineNumber}:${type}`;
+  const key = `t${createHash("sha1").update(line.normalizedText).digest("hex").slice(0, 10)}`;
+  let anchorId = `${documentId}:p${line.pageNumber}:${key}:${type}`;
+  for (let occurrence = 2; unnumberedIds.has(anchorId); occurrence += 1) {
+    anchorId = `${documentId}:p${line.pageNumber}:${key}.${occurrence}:${type}`;
+  }
+  unnumberedIds.add(anchorId);
+  return anchorId;
+}
+
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
   const anchors: EstimateRowAnchor[] = [];
   let section = "";
@@ -971,6 +1007,8 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * one lands after the first instead of ahead of it. */
   const wrapInsertOffsets = new Map<EstimateRowAnchor, number>();
   const estimateTotalsRows = measureEstimateTotalsRows(lines);
+  /** Ids already given to anchors with no line number (see buildRowAnchorId). */
+  const unnumberedAnchorIds = new Set<string>();
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
     if (isGenericOrMalformedAnchorText(line.text)) continue;
@@ -1055,7 +1093,13 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     }, 2);
     const geometry = buildAnchorGeometry(rect);
     const anchor: EstimateRowAnchor = {
-      anchorId: `${options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`}:p${line.pageNumber}:${lineNumber ?? anchors.length + 1}:${type}`,
+      anchorId: buildRowAnchorId(
+        options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
+        line,
+        lineNumber,
+        type,
+        unnumberedAnchorIds
+      ),
       sourceDocumentId: options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
       sourceDocumentRole: options.sourceDocumentRole,
       pageNumber: line.pageNumber,
@@ -1341,7 +1385,9 @@ function extractNumericTokens(value: string) {
 }
 
 function detectLaborValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  // The captured figure must be a value cell, never the head of a part number
+  // ("Front pillar structural bulb 1063943-00-A" read 1,063,943 labor hours).
+  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:scan|calibration|r&i|r\s*&\s*i|repair|replace|refinish|labor|test|aim|initialize|program|mask|sand|polish)\b/i.test(text)) {
     return null;
@@ -1350,7 +1396,7 @@ function detectLaborValue(text: string, tokens: Array<{ value: number; index: nu
 }
 
 function detectPaintValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:paint|refinish|blend|clear coat|mask|jamb|color|sand|polish)\b/i.test(text)) return null;
   return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;
