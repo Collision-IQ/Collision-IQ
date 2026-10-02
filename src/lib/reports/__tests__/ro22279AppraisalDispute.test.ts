@@ -58,6 +58,7 @@ import {
   namesAnotherPartysEstimate,
   printedPartyConflict,
   readPrintedEstimator,
+  readPrintedLetterhead,
   readPrintedFederalId,
   readPrintedWorkfileId,
   sameEstimator,
@@ -572,13 +573,13 @@ describe("D5 — one counterpart per run", () => {
     const theirs = { ...sor, fileName: "USAA Supplement 1.pdf", estimateRole: "carrier" as const };
     // Either side hires an independent appraiser: set aside, it may have been
     // the insurer's own, so a brand-named estimate beside it is theirs only
-    // when it prints a workfile that is not ours.
+    // when it prints an insurance company's letterhead.
     for (const candidates of [[ia, theirs], [theirs, ia]]) {
       const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop" });
       expect(selection.counterpart).toBe(theirs);
       expect(selection.unidentified.length).toBe(2);
     }
-    const printedTheirs = { ...theirs, text: `Workfile ID: 9f8e7d6c\n${sorText}` };
+    const printedTheirs = { ...theirs, text: `USAA CASUALTY INSURANCE COMPANY\nWorkfile ID: 9f8e7d6c\n${sorText}` };
     for (const candidates of [[ia, printedTheirs], [printedTheirs, ia]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: "Workfile ID: a1b2c3d4" })).toMatchObject({ counterpart: printedTheirs, unidentified: [] });
     }
@@ -674,7 +675,7 @@ describe("R10 — what an estimate prints outranks what its file is called", () 
   const theirs = (fileName: string, workfile = "Phone: (800) 000-0000 Workfile ID: 9f8e7d6c") => ({
     fileName,
     estimateRole: "carrier" as const,
-    text: [workfile, "Written By: MONICA ROE, License Number: 271128, 9/23/2026 9:49:27 AM", "USAA approved estimate", sorText].filter(Boolean).join("\n"),
+    text: ["USAA CASUALTY INSURANCE COMPANY", workfile, "Written By: MONICA ROE, License Number: 271128, 9/23/2026 9:49:27 AM", "USAA approved estimate", sorText].filter(Boolean).join("\n"),
   });
   // Another party's licensed appraiser, printed after the SOR.
   const otherAppraiser = (fileName: string) => ours(fileName, "Written By: JOHN DOE, License Number: 5", false);
@@ -871,10 +872,10 @@ describe("R11 — ties by print at every tier, references by what they name", ()
   const ourTotals = ["Preliminary Estimate", "10/1/2026 6:10:33 PM 300060 Page 1", "ESTIMATE TOTALS", "Subtotal 5,350.68", "Sales Tax $ 5,350.68 @ 6.0000 % 321.04", "Grand Total 5,671.72"];
   // Our version on a platform that prints neither our workfile nor our estimator.
   const ourUnprinted = (fileName: string) => ({ fileName, estimateRole: "carrier" as const, text: ["Conestoga Collision", "Estimator: DANIEL KRAMER", ...ourTotals].join("\n") });
-  const insurer = (fileName: string, { version = 1, workfile = "9f8e7d6c", writtenBy = "MONICA ROE, License Number: 271128", printed = "9/23/2026 9:49:27 AM", letterhead = "USAA CASUALTY INSURANCE COMPANY" } = {}) => ({
+  const insurer = (fileName: string, { version = 1, workfile = "9f8e7d6c", writtenBy = "MONICA ROE, License Number: 271128", printed = "9/23/2026 9:49:27 AM", letterhead = "USAA CASUALTY INSURANCE COMPANY", claim = "0123456789012" } = {}) => ({
     fileName,
     estimateRole: "carrier" as const,
-    text: [letterhead, `Phone: (800) 000-0000 Workfile ID: ${workfile}`, `Written By: ${writtenBy}, ${printed}`, sorText.replace(/Supplement of Record 1 with Summary/g, `Supplement of Record ${version} with Summary`)].join("\n"),
+    text: [letterhead, `Claim #: ${claim}`, `Phone: (800) 000-0000 Workfile ID: ${workfile}`, `Written By: ${writtenBy}, ${printed}`, sorText.replace(/Supplement of Record 1 with Summary/g, `Supplement of Record ${version} with Summary`)].join("\n"),
   });
   const pick = (candidates: Array<{ fileName: string; text: string; estimateRole: "carrier" }>) => selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText });
 
@@ -948,7 +949,7 @@ describe("R11 — ties by print at every tier, references by what they name", ()
   });
 
   it("names another party's appraiser however the name is ordered or abbreviated, and an insurer-hired one as the insurer's", () => {
-    for (const name of ["Insd appraiser 22279.pdf", "Clmt appraiser 22279.pdf", "Appraiser - Insured 22279.pdf", "Appraiser (owner) 22279.pdf", "Appraiser hired by insured 22279.pdf", "Appraiser estimate for insured 22279.pdf", "Indep appraiser 22279.pdf"]) {
+    for (const name of ["Insd appraiser 22279.pdf", "Appraiser - Insured 22279.pdf", "Appraiser (owner) 22279.pdf", "Appraiser hired by insured 22279.pdf", "Appraiser estimate for insured 22279.pdf", "Indep appraiser 22279.pdf"]) {
       expect(namesAnotherPartysEstimate(name)).toBe(true);
     }
     for (const name of [
@@ -958,6 +959,8 @@ describe("R11 — ties by print at every tier, references by what they name", ()
       "USAA appraiser for owner.pdf",
       "State Farm appraiser estimate for insured.pdf",
       "Appraiser estimate - insured copy.pdf",
+      // In a liability claim the claimant's vehicle is appraised by the insurer.
+      "Clmt appraiser 22279.pdf",
     ]) {
       expect(namesAnotherPartysEstimate(name)).toBe(false);
     }
@@ -969,7 +972,10 @@ describe("R11 — ties by print at every tier, references by what they name", ()
     for (const candidates of [[ia, revised], [revised, ia]]) {
       const selection = pick(candidates);
       expect(selection.unidentified.length).toBe(2);
-      expect(describeExcludedComparisons(selection)).toMatch(/USAA 22279 revised\.pdf \(it prints the same Workfile ID as Independent appraiser 22279\.pdf, which is set aside\)/);
+      // Only set-aside estimates are left, so the one compared says it is set aside.
+      expect(describeExcludedComparisons(selection)).toMatch(
+        /^Compared against USAA 22279 revised\.pdf only, though it is itself set aside \(it prints the same Workfile ID as Independent appraiser 22279\.pdf, which is set aside\)\. Not compared: Independent appraiser 22279\.pdf/
+      );
     }
   });
 
@@ -980,6 +986,145 @@ describe("R11 — ties by print at every tier, references by what they name", ()
     const brand = { ...insurer("USAA 22279.pdf"), text: noWorkfile(insurer("USAA 22279.pdf").text).replace(/Written By: [^\n]*\n/, "") };
     for (const candidates of [[ia, brand], [brand, ia]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: "Written By: JANE ROE, 739698" })).toMatchObject({ counterpart: brand, unidentified: [] });
+    }
+  });
+});
+
+/*
+ * Round 12 reviewed the round-11 fix and found what its letterhead tie and
+ * its "printed not ours" exemption let through: an insurer letterhead is a
+ * whole company's (a prior claim's estimate joined the SOR); a shop named
+ * "Progressive Auto Body" read as an insurer; an outside appraiser's print is
+ * "not ours" without being the insurer's; an IA writing on the insurer's
+ * profile pulled the SOR aside with it; the insurer's supplement printed from
+ * our system was dropped for the older SOR; and more appraiser name shapes.
+ */
+describe("R12 — a company letterhead is not a claim, and not ours is not theirs", () => {
+  const ourHeader = "Workfile ID:\nFederal ID:\na1b2c3d4\n12-3456789";
+  const sourceText = `conestogacollision.com\n${ourHeader}\nWritten By: JANE ROE, 739698\nPreliminary Supplement 1 with Summary`;
+  const totals = ["Preliminary Estimate", "10/1/2026 6:10:33 PM 300060 Page 1", "ESTIMATE TOTALS", "Subtotal 5,350.68", "Sales Tax $ 5,350.68 @ 6.0000 % 321.04", "Grand Total 5,671.72"];
+  const insurer = (fileName: string, { version = 1, workfile = "9f8e7d6c", writtenBy = "MONICA ROE, License Number: 271128", printed = "9/23/2026 9:49:27 AM", letterhead = "USAA CASUALTY INSURANCE COMPANY", claim = "0123456789012" } = {}) => ({
+    fileName,
+    estimateRole: "carrier" as const,
+    text: [letterhead, `Claim #: ${claim}`, `Phone: (800) 000-0000 Workfile ID: ${workfile}`, `Written By: ${writtenBy}, ${printed}`, sorText.replace(/Supplement of Record 1 with Summary/g, `Supplement of Record ${version} with Summary`)].join("\n"),
+  });
+  const doe = (fileName: string, printed = "10/1/2026 6:10:33 PM") => ({
+    fileName,
+    estimateRole: "carrier" as const,
+    text: ["DOE AUTO APPRAISALS LLC", "Workfile ID: 7c7c1e2a", "Written By: JOHN DOE, License Number: 5", ...totals.map((line) => line.replace("10/1/2026 6:10:33 PM", printed))].join("\n"),
+  });
+  // The insurer's estimate printed from our own system: our header, their writer.
+  const assignment = (fileName: string, writtenBy = "MONICA ROE") => ({ fileName, estimateRole: "carrier" as const, text: ["conestogacollision.com", ourHeader, `Written By: ${writtenBy}, 9/23/2026 9:49:27 AM`, sorText].join("\n") });
+  const pick = (candidates: Array<{ fileName: string; text: string; estimateRole: "carrier" }>) => selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText });
+  const orders = <C,>(a: C, b: C) => [[a, b], [b, a]];
+
+  it("another claim's estimate from the same insurer never joins the SOR on its letterhead", () => {
+    const sor = insurer("SOR-1 22279.pdf");
+    const prior = insurer("Prior loss estimate 2025.pdf", { version: 2, workfile: "5d0c4e21", writtenBy: "KEVIN FIELD, License Number: 384512", printed: "3/14/2025 9:00:00 AM", claim: "0123456789099" });
+    for (const candidates of orders(sor, prior)) {
+      const selection = pick(candidates);
+      expect(selection.counterpart === prior && selection.unidentified.length === 0).toBe(false);
+    }
+    // The same claim under the same letterhead is one writer's: settled on the latest.
+    const desk = insurer("SOR-2 22279.pdf", { version: 2, workfile: "1a2b3c4d", writtenBy: "DESK REVIEWER, License Number: 6" });
+    for (const candidates of orders(sor, desk)) expect(pick(candidates)).toMatchObject({ counterpart: desk, unidentified: [] });
+  });
+
+  it("printing something not ours does not make an outside appraiser the insurer's", () => {
+    // The SOR printed from our system is set aside; an outside appraiser's brand-named file is not settled as theirs.
+    for (const name of ["USAA 22279 Appraiser.pdf", "USAA 22279 J Doe.pdf"]) {
+      for (const candidates of orders(assignment("SOR-1 22279.pdf"), doe(name))) {
+        expect(pick(candidates).unidentified.length).toBe(2);
+      }
+    }
+    // Its revision joining it by print does not lift the bare "appraiser" guard.
+    const revised = doe("22279 revised.pdf", "10/2/2026 9:00:00 AM");
+    for (const candidates of [[assignment("SOR-1 22279.pdf"), doe("Appraiser J Doe 22279.pdf"), revised], [revised, doe("Appraiser J Doe 22279.pdf"), assignment("SOR-1 22279.pdf")]]) {
+      expect(pick(candidates).unidentified.length).toBe(3);
+    }
+    // A shop named for a brand word is not an insurer's letterhead.
+    for (const shopName of ["Progressive Auto Body", "Nationwide Collision Center", "Farmers Collision & Glass"]) {
+      const shopSource = sourceText.replace("conestogacollision.com", shopName);
+      const second = { fileName: "22279 supplement.pdf", estimateRole: "carrier" as const, text: [shopName, ourHeader, "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
+      const unprinted = { fileName: "USAA 22279 Final estimate.pdf", estimateRole: "carrier" as const, text: [shopName, "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
+      for (const candidates of orders(second, unprinted)) {
+        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: shopSource }).unidentified.length).toBe(2);
+      }
+    }
+  });
+
+  it("an independent appraiser writing on the insurer's profile is the insurer's, and never takes the SOR aside", () => {
+    const ia = insurer("Independent appraiser 22279.pdf", { version: 0, writtenBy: "PAT SMITH, License Number: 8", printed: "9/16/2026 9:00:00 AM" });
+    const ia0 = { ...ia, text: ia.text.replace(/Supplement of Record 0 with Summary/g, "Estimate of Record") };
+    const sor = insurer("SOR-1 22279.pdf");
+    for (const candidates of orders(ia0, sor)) expect(pick(candidates)).toMatchObject({ counterpart: sor, unidentified: [] });
+    // Beside our own SOR-named file that nothing ties to us: unsettled, never ours.
+    const ours = { fileName: "SOR 22279 - our supplement.pdf", estimateRole: "carrier" as const, text: ["conestogacollision.com", "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
+    for (const candidates of [[ia0, sor, ours], [ours, sor, ia0]]) {
+      const selection = pick(candidates);
+      expect(selection.counterpart === ours && selection.unidentified.length === 0).toBe(false);
+    }
+    // Alone, its insurer letterhead lifts the name check.
+    expect(namesAnotherPartysEstimate(ia0.fileName, ia0.text, sourceText)).toBe(false);
+    expect(namesAnotherPartysEstimate(ia0.fileName, doe("x").text, sourceText)).toBe(true);
+  });
+
+  it("the insurer's later version printed from our system joins its SOR by the licensed appraiser", () => {
+    const sor1 = insurer("SOR 1 22279.pdf");
+    const sor2 = { fileName: "SOR 2 22279.pdf", estimateRole: "carrier" as const, text: ["conestogacollision.com", ourHeader, "Written By: MONICA ROE, License Number: 271128, 9/30/2026 9:00:00 AM", sorText.replace(/Supplement of Record 1 with Summary/g, "Supplement of Record 2 with Summary")].join("\n") };
+    for (const candidates of orders(sor1, sor2)) {
+      // Compared against the later version; the gate then refuses it for printing our workfile.
+      expect(pick(candidates)).toMatchObject({ counterpart: sor2, unidentified: [] });
+    }
+  });
+
+  it("one print read two ways, or three versions chained by print, settle in any upload order", () => {
+    const mitchell = readFileSync(path.join(FIXTURE_DIR, "../frk1b-mitchell-text.txt"), "utf8");
+    const textLayer = { fileName: "SOR 1.pdf", estimateRole: "carrier" as const, text: mitchell };
+    const ocr = { fileName: "SOR 2.pdf", estimateRole: "carrier" as const, text: `[[OCR text recovered]]\n===== Page 1 =====\n${mitchell.replace(/^Progressive Specialty Insurance CoProgressive Specialty Insurance Co/, "Progressive Specialty Insurance Co")}` };
+    expect(readPrintedLetterhead(textLayer.text)).toBe(readPrintedLetterhead(ocr.text));
+    const mitchellSource = readFileSync(path.join(FIXTURE_DIR, "../frk2-mitchell-text.txt"), "utf8");
+    for (const candidates of orders(textLayer, ocr)) {
+      // One print of one claim: settled (it prints no version or date that orders the two).
+      expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: mitchellSource }).unidentified).toEqual([]);
+    }
+    const eor = { ...insurer("SOR EOR 22279.pdf", { writtenBy: "KEVIN FIELD, License Number: 7", printed: "9/16/2026 9:00:00 AM" }) };
+    const record = { ...eor, text: eor.text.replace(/Supplement of Record 1 with Summary/g, "Estimate of Record") };
+    const first = insurer("SOR 1 22279.pdf");
+    const second = insurer("SOR 2 22279.pdf", { version: 2, workfile: "9f8e7d6e", letterhead: "USAA CASUALTY lNSURANCE COMPANY", printed: "9/30/2026 9:00:00 AM" });
+    for (const candidates of [[record, first, second], [second, first, record], [record, second, first], [first, record, second], [second, record, first], [first, second, record]]) {
+      expect(pick(candidates)).toMatchObject({ counterpart: second, unidentified: [] });
+    }
+  });
+
+  it("reads appraiser names by whose appraiser they name, not where the file went", () => {
+    for (const name of [
+      "Appraiser for insured vs USAA 22279.pdf",
+      "Appraiser hired by owner re USAA SOR 22279.pdf",
+      "USAA 22279 - Appraiser for insured.pdf",
+      "USAA claim 22279 appraiser - insured.pdf",
+      "USAA 22279 Insured's independent appraiser.pdf",
+      "Insured IA estimate 22279.pdf",
+      "Owner's IA 22279.pdf",
+      "Independent appraiser estimate for USAA claim 22279.pdf",
+    ]) {
+      expect(namesAnotherPartysEstimate(name)).toBe(true);
+    }
+    for (const name of [
+      "Appraiser estimate from owner.pdf",
+      "Appraiser est sent to insured.pdf",
+      "Copy to insured - appraiser estimate.pdf",
+      "Progressive claimant appraiser estimate.pdf",
+      "USAA SOR 3 per award.pdf",
+      "SOR 2 post award.pdf",
+      "Appraiser report for owner USAA.pdf",
+    ]) {
+      expect(namesAnotherPartysEstimate(name)).toBe(false);
+    }
+    // A copy made for the insurer names its recipient.
+    for (const name of ["22279 Supplement 2 - Insurance copy.pdf", "22279 Final - adjuster copy.pdf"]) {
+      const ours = { fileName: name, estimateRole: "carrier" as const, text: ["conestogacollision.com", "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
+      for (const candidates of orders(ours, insurer("USAA 22279.pdf"))) expect(pick(candidates).counterpart?.fileName).toBe("USAA 22279.pdf");
     }
   });
 });

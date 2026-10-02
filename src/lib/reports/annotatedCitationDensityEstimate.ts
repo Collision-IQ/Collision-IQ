@@ -3180,7 +3180,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     const comparisonName = comparisonText?.fileName ?? "the comparison estimate";
     const comparisonIsOurs = samePrintedParty(params.sourceText ?? "", comparisonText?.text ?? "");
     const comparisonPrintConflict = printedPartyConflict(params.sourceText ?? "", comparisonText?.text ?? "");
-    const comparisonIsAnotherParty = namesAnotherPartysEstimate(comparisonText?.fileName ?? "");
+    const comparisonIsAnotherParty = namesAnotherPartysEstimate(comparisonText?.fileName ?? "", comparisonText?.text ?? "", params.sourceText ?? "");
     const renameAdvice =
       'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {

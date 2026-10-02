@@ -15,6 +15,7 @@
  * version or print date is used only when the documents print one.
  */
 import { isCarrierAuthoredEstimateDocument } from "./citationDensitySourcePdf";
+import { readClaimIdentity, sameClaimNumber } from "./claimIdentityGate";
 import { parseEstimateTotalsForPlatform } from "./estimatePlatform";
 
 /**
@@ -95,8 +96,8 @@ export function sameEstimator(a: string, b: string): boolean {
 }
 
 // Header labels as OCR reads them too ("Workfile lD", "Workfile 1D").
-const WORKFILE_LABEL = String.raw`Work\s*f[il1|]le\s*[I1l|]D`;
-const FEDERAL_LABEL = String.raw`(?:Federal|Tax)\s*[I1l|]D`;
+const WORKFILE_LABEL = String.raw`Work\s*f[iIl1|]{2}e\s*[I1l|]D`;
+const FEDERAL_LABEL = String.raw`(?:Federa[lI1|](?:\s*Tax)?\s*[I1l|]D|Tax\s*[I1l|]D|FEIN)(?:\s*(?:#|No\.?))?`;
 const FEDERAL_VALUE = String.raw`[0-9OoIl|]{2}[- ]?[0-9OoIl|]{7}`;
 const BARE_LABEL = /^[A-Za-z][A-Za-z0-9 #./|&'()-]{0,30}:$/;
 
@@ -189,20 +190,30 @@ export function readPrintedFederalId(text: string): string | null {
  * or too short to name anyone.
  */
 export function readPrintedLetterhead(text: string): string | null {
+  const generic = /^(?:(?:PRELIMINARY|FINAL|ESTIMATE|SUPPLEMENT|OF|RECORD|WITH|SUMMARY|PAGE|REPAIR|DAMAGE|APPRAISAL|REPORT|WORKFILE|ID|CLAIM)\s*)+$/;
+  let seen = 0;
   for (const raw of (text ?? "").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("[[") || /^=+\s*Page\b/i.test(line)) continue;
+    // OCR noise or a logo read as a few marks is skipped, within the first lines.
+    if (++seen > 3) return null;
     const words = ocrLetters(line).toUpperCase().replace(/[^A-Z]+/g, " ").trim();
-    const generic = /^(?:(?:PRELIMINARY|FINAL|ESTIMATE|SUPPLEMENT|OF|RECORD|WITH|SUMMARY|PAGE|REPAIR|DAMAGE|APPRAISAL|REPORT|WORKFILE|ID|CLAIM)\s*)+$/;
-    return words.replace(/ /g, "").length >= 6 && !generic.test(words) ? words : null;
+    const letters = words.replace(/ /g, "");
+    if (letters.length < 6 || generic.test(words)) continue;
+    // A text layer can set the letterhead twice on one line ("Progressive
+    // Specialty Insurance CoProgressive Specialty Insurance Co"); OCR reads it once.
+    const half = letters.length / 2;
+    return letters.length % 2 === 0 && letters.slice(0, half) === letters.slice(half) ? letters.slice(0, half) : letters;
   }
   return null;
 }
-/** A letterhead naming an insurance company, by kind or by brand: the print is the insurer's. */
+/**
+ * A letterhead naming an insurance company by kind ("... INSURANCE
+ * COMPANY", "... CASUALTY", "... MUTUAL ..."). A brand word alone is not
+ * enough: shops are named "Progressive Auto Body" and "Nationwide Collision".
+ */
 const namesInsuranceCompany = (letterhead: string | null) =>
-  Boolean(letterhead) &&
-  (/\b(?:insurance|casualty|mutual|indemnity|assurance|underwriters|automobile association)\b/.test(letterhead!.toLowerCase()) ||
-    INSURER_BRAND.test(` ${letterhead!.toLowerCase()} `));
+  letterhead !== null && /INSURANCE|CASUALTY|MUTUAL|INDEMNITY|ASSURANCE|UNDERWRITERS|AUTOMOBILEASSOCIATION/.test(letterhead);
 
 export type PrintedPartyMatch = "estimator" | "Workfile ID" | "Federal ID";
 
@@ -273,7 +284,7 @@ const marksInsurer = (words: string) => INSURER_WORD.test(words) || INSURER_APPR
  * brand nor a word about the insurer ("vs carrier") makes one the insurer's.
  */
 const OTHER_PARTY =
-  /\b(?:(?:insureds?|insd|policy ?holders?|owners?|claimants?|clmt|customers?|our|my)(?: s)? appr(?:aisers?)?|umpires?|award|public adjusters?)\b/;
+  /\b(?:insureds?|insd|policy ?holders?|owners?|customers?|our|my)(?: s)?(?: (?:own|independent|indep|hired|licensed|private))? (?:appr(?:aisers?)?|ia)\b|\bumpires?\b|\b(?<!(?:per|post|after) )award\b|\bpublic adjusters?\b/;
 /**
  * The same parties named anywhere in an appraiser's file name ("Appraiser -
  * Insured", "Appraiser hired by owner", "Appraiser estimate for insured"),
@@ -281,7 +292,12 @@ const OTHER_PARTY =
  * estimate for insured" is State Farm's). A copy sent to the insured
  * ("insured copy") names its recipient, not its author.
  */
-const PARTY_ANYWHERE = /\b(?:insureds?|insd|policy ?holders?|owners?|claimants?|clmt)\b(?!(?: s)? copy)/;
+const PARTY_ANYWHERE = /\b(?:insureds?|insd|policy ?holders?|owners?)\b/;
+/** A party named as where the file went or came from ("from owner", "sent to insured", "owner copy"), not whose appraiser wrote it. */
+const PARTY_REFERENCE =
+  /\b(?:from|to|sent to|copy to|via)(?: the)? (?:insureds?|insd|policy ?holders?|owners?|customers?)\b|\b(?:insureds?|insd|policy ?holders?|owners?|customers?)(?: s)? (?:copy|forwarded)\b/g;
+/** The claim prefix a shop puts on every file ("USAA 22279 ...", "USAA claim 22279 ..."): the insurer's name there files it, it does not author it. */
+const CLAIM_PREFIX = /^ (?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)(?: claim)? \d+ /;
 const APPRAISER_ANY = /\bappr(?:aisers?)?\b/;
 /** An independent appraiser ("IA") is hired by either side: another party's only when nothing in the name marks it the insurer's. */
 const INDEPENDENT_APPRAISER = /\b(?:independent|indep|ia)(?: s)? appr(?:aisers?)?\b/;
@@ -298,6 +314,8 @@ const DOC_TERM = "sor\\d*(?: \\d+)?";
 const INSURER_REFERENCE = new RegExp(
   [
     `\\b(?:to|for|vs|versus|v|against|with|w|request(?:ed)?)(?: the)?(?: (?:${PARTY_TERM}(?: \\d+)?|${DOC_TERM}))+\\b`,
+    // A copy made for the insurer names its recipient ("insurance copy", "adjuster copy").
+    `\\b(?:${PARTY_TERM} )+copy\\b`,
     `\\b(?:re|post|after|per)(?: the)?(?: ${PARTY_TERM})* ${DOC_TERM}\\b`,
     `\\b(?:${PARTY_TERM} )*${DOC_TERM} (?:response|rebuttal|reply|changes)\\b`,
   ].join("|"),
@@ -315,19 +333,37 @@ const authorshipWords = (words: string) => ` ${words.replace(INSURER_REFERENCE, 
  */
 function appraiserNamed(fileName: string): "other" | "independent" | null {
   const words = nameWords(fileName);
-  if (OTHER_PARTY.test(words)) return "other";
-  if (APPRAISER_ANY.test(words) && PARTY_ANYWHERE.test(words) && !marksInsurer(words)) return "other";
-  const hiredByInsurer = marksInsurer(authorshipWords(words)) || new RegExp(`\\bfor(?: the)? ${PARTY_TERM}\\b`).test(words);
+  const partyWords = ` ${words.replace(PARTY_REFERENCE, " ").replace(/\s+/g, " ").trim()} `;
+  if (OTHER_PARTY.test(partyWords)) return "other";
+  // Marks of the insurer that are its authorship, not its claim prefix or a
+  // reference to it ("Appraiser for insured vs USAA").
+  const authored = authorshipWords(words.replace(CLAIM_PREFIX, " "));
+  if (APPRAISER_ANY.test(partyWords) && PARTY_ANYWHERE.test(partyWords) && !marksInsurer(authored)) return "other";
+  // "for USAA" says the insurer hired it; "for USAA claim 22279" only files it.
+  const hiredByInsurer = marksInsurer(authored) || new RegExp(`\\bfor(?: the)? ${PARTY_TERM}\\b(?! claim)`).test(words);
   return INDEPENDENT_APPRAISER.test(words) && !hiredByInsurer ? "independent" : null;
 }
 
 /**
+ * An independent appraiser whose print sets an insurance company's
+ * letterhead (not ours) writes on the insurer's own profile: it is the
+ * insurer's estimate, whatever the file is called.
+ */
+const printsInsurerLetterhead = (text: string, sourceText: string) => {
+  const letterhead = readPrintedLetterhead(text);
+  return namesInsuranceCompany(letterhead) && letterhead !== readPrintedLetterhead(sourceText);
+};
+
+/**
  * True when a file's name marks it as an appraiser's estimate that is not
  * shown to be the insurer's (an insured's, owner's or independent
- * appraiser, an umpire, an appraisal award, a public adjuster).
+ * appraiser, an umpire, an appraisal award, a public adjuster). Given its
+ * text, an independent appraiser printing an insurance company's
+ * letterhead is the insurer's.
  */
-export function namesAnotherPartysEstimate(fileName: string): boolean {
-  return appraiserNamed(fileName) !== null;
+export function namesAnotherPartysEstimate(fileName: string, text = "", sourceText = ""): boolean {
+  const named = appraiserNamed(fileName);
+  return named === "other" || (named === "independent" && !printsInsurerLetterhead(text, sourceText));
 }
 
 type SetAside = "conflict" | "other" | "independent";
@@ -353,6 +389,8 @@ export type CounterpartSelection<T extends CounterpartCandidate> = {
    * identified.
    */
   unidentified: T[];
+  /** Why the estimate compared was itself set aside, when only set-aside estimates were left; null otherwise. */
+  counterpartCaveat?: string | null;
 };
 
 const stamp = (value: number) => {
@@ -478,22 +516,45 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   const writer = (candidate: T) => readPrintedEstimator(candidate.text);
   const workfile = (candidate: T) => readPrintedWorkfileId(candidate.text);
   const letterhead = (candidate: T) => readPrintedLetterhead(candidate.text);
-  // Two prints one party made: the same licensed appraiser, the same CCC
-  // workfile, the same letterhead, or the same print uploaded twice.
+  const claim = (candidate: T) => readClaimIdentity(candidate.text).claimNumber;
+  const insurerLetterhead = (candidate: T) => printsInsurerLetterhead(candidate.text, sourceText);
+  // Two prints one writer made on one claim: the same licensed appraiser,
+  // the same CCC workfile, or the same print uploaded twice. A letterhead
+  // is a whole company's (an insurer prints it on every claim), so it ties
+  // two prints only when they also print the same claim number.
   const tiedBy = (a: T, b: T): string | null => {
     if (a.text.replace(/\s+/g, " ").trim() === b.text.replace(/\s+/g, " ").trim()) return "print";
     if (workfile(a) !== null && workfile(a) === workfile(b)) return "Workfile ID";
     if (writer(a) !== null && sameEstimator(a.text, b.text) && (printsAppraiserLicense(a.text) || printsAppraiserLicense(b.text))) return "licensed appraiser";
-    if (letterhead(a) !== null && letterhead(a) === letterhead(b)) return "letterhead";
+    const claimA = claim(a);
+    const claimB = claim(b);
+    if (letterhead(a) !== null && letterhead(a) === letterhead(b) && claimA && claimB && sameClaimNumber(claimA, claimB)) return "letterhead and claim number";
     return null;
   };
+  // Lifted back before anything is weighed: an independent appraiser whose
+  // print is the insurer's (its letterhead, or a print tie to a file named
+  // as the insurer's), and a print of our workfile that names the same
+  // licensed appraiser as an insurer-marked file (the insurer's later
+  // version printed from our system; our own estimator never prints their
+  // appraiser and license).
+  const insurerMarked = (candidate: T) => !ev(candidate).setAside && !ev(candidate).ours && ev(candidate).tier > 0;
+  for (const candidate of base) {
+    const kind = ev(candidate).setAside;
+    if (kind === "independent" && (insurerLetterhead(candidate) || base.some((other) => ev(other).tier === 3 && insurerMarked(other) && tiedBy(candidate, other)))) {
+      ev(candidate).setAside = null;
+    } else if (kind === "conflict" && base.some((other) => insurerMarked(other) && tiedBy(candidate, other) === "licensed appraiser")) {
+      ev(candidate).setAside = null;
+    }
+  }
   // Set aside before anything is weighed: our workfile under another
   // writer's name, another party's appraiser ("Insured's Appraiser
   // 22279.pdf"), and any estimate that party's print ties to it (its own
-  // revision under a brand-only name is still that appraiser's).
+  // revision under a brand-only name is still that appraiser's) unless the
+  // estimate is plainly the insurer's (an SOR-type name, or the insurer's
+  // letterhead).
   const setAsides = base.filter((candidate) => ev(candidate).setAside);
   for (const candidate of base) {
-    if (ev(candidate).setAside || ev(candidate).ours || !shopSource) continue;
+    if (ev(candidate).setAside || ev(candidate).ours || !shopSource || ev(candidate).tier === 3 || insurerLetterhead(candidate)) continue;
     const named = setAsides.find((other) => ev(other).setAside !== "conflict" && tiedBy(candidate, other));
     if (named) {
       ev(candidate).setAside = ev(named).setAside;
@@ -557,22 +618,28 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     // named "USAA 22279 Final.pdf" or "Response to USAA SOR 1.pdf" sits
     // beside the insurer's file, and the later print would win. Several are
     // one party's only when what they print ties them.
-    const untied = top.some((candidate) => candidate !== top[0] && !tiedBy(candidate, top[0]));
+    const linked = new Set<T>([top[0]]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const candidate of top) {
+        if (!linked.has(candidate) && [...linked].some((other) => tiedBy(candidate, other))) {
+          linked.add(candidate);
+          grew = true;
+        }
+      }
+    }
+    const untied = linked.size < top.length;
     // A bare "appraiser" beside another party's appraiser shows nothing
-    // about whose appraiser it is. And an estimate set aside as an
-    // independent appraiser's, or for printing our workfile under another
-    // writer, may have been the insurer's own: a weakly marked estimate left
-    // beside it is the insurer's only when its print shows it is not ours
-    // (another workfile, an insurance company's letterhead, or a licensed
-    // appraiser who is not our estimator).
-    const sourceWorkfile = readPrintedWorkfileId(sourceText);
-    const printedNotOurs = (candidate: T) =>
-      (sourceWorkfile !== null && workfile(candidate) !== null && workfile(candidate) !== sourceWorkfile) ||
-      namesInsuranceCompany(letterhead(candidate)) ||
-      (printsAppraiserLicense(candidate.text) && writer(candidate) !== null && !sameEstimator(sourceText, candidate.text));
+    // about whose appraiser it is, also when its own revision joins it by
+    // print. And an estimate set aside as an independent appraiser's, or for
+    // printing our workfile under another writer, may have been the
+    // insurer's own: a weakly marked estimate left beside it is the
+    // insurer's only when it prints an insurance company's letterhead.
+    // Printing something not ours is not enough: an outside appraiser's
+    // print is not ours either.
     const besideSetAside =
-      (setAsides.length > 0 && top.every((candidate) => ev(candidate).bareAppraiser)) ||
-      (topTier < 3 && setAsides.some((candidate) => ev(candidate).setAside !== "other") && !top.every(printedNotOurs));
+      (setAsides.length > 0 && marked.every((candidate) => ev(candidate).bareAppraiser)) ||
+      (topTier < 3 && setAsides.some((candidate) => ev(candidate).setAside !== "other") && !top.every(insurerLetterhead));
     if (!latestIsTop || weakDisagree || untied || besideSetAside) {
       unidentified = [...new Set([...top, ...clean, ...conflicted, ...(topTier < 3 ? unknown : []), ...(besideSetAside ? setAsides : [])])];
     }
@@ -617,12 +684,16 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
       excluded.push({ candidate, reason: `it may be ${theirs} as well, and nothing printed says which one is` });
     }
   }
-  return { counterpart, excluded, basis: order.basis, unidentified };
+  // When only set-aside estimates were left, the one compared is itself
+  // set aside: it is named as compared, with that reason, never as both.
+  const counterpartCaveat = excluded.find((entry) => entry.candidate === counterpart)?.reason ?? null;
+  return { counterpart, excluded: excluded.filter((entry) => entry.candidate !== counterpart), basis: order.basis, unidentified, counterpartCaveat };
 }
 
 /** The run warning naming every estimate a selection left out, or null when none was. */
 export function describeExcludedComparisons<T extends CounterpartCandidate>(selection: CounterpartSelection<T>): string | null {
   if (!selection.counterpart || selection.excluded.length === 0) return null;
   const reasons = selection.excluded.map(({ candidate, reason }) => `${candidate.fileName} (${reason})`).join("; ");
-  return `Compared against ${selection.counterpart.fileName} only. Not compared: ${reasons}. To annotate a different version, select it as the estimate to annotate.`;
+  const caveat = selection.counterpartCaveat ? `, though it is itself set aside (${selection.counterpartCaveat})` : "";
+  return `Compared against ${selection.counterpart.fileName} only${caveat}. Not compared: ${reasons}. To annotate a different version, select it as the estimate to annotate.`;
 }
