@@ -21,7 +21,7 @@
  * own subtotals; if they do not, LedgerNotClosedError is thrown and the report
  * is not produced (the same philosophy as the R24 release gate).
  */
-import { nonLaborBuckets } from "./nonLaborBuckets";
+import { lineReconciliation, nonLaborBuckets, type LineReconciliation } from "./nonLaborBuckets";
 import { round2, type Estimate, type LaborCat, type LaborTotal } from "./types";
 
 type Family = "body" | "paint" | "mech" | "struct" | "other";
@@ -127,6 +127,14 @@ export interface GapLedger {
   tax: number;
   closes: true;
   rate: RateBasis;
+  /**
+   * Our sheet's line prices against its own printed Parts + Misc: the check
+   * resolveRateBasis makes of the carrier's, made of ours. It never refuses the
+   * ledger (no bucket is built from our lines); when it does not close, no
+   * claim that our sheet lacks a line is printed, and the residual is stated
+   * instead. null when strictLines is off.
+   */
+  shopLineRead: LineReconciliation | null;
 }
 
 export class LedgerNotClosedError extends Error {}
@@ -177,5 +185,11 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     tax,
     closes: true,
     rate,
+    shopLineRead: (opts.strictLines ?? true) ? lineReconciliation(shop) : null,
   };
+}
+
+/** Our sheet's line read, when it was checked and does not close. */
+export function unreconciledShopRead(ledger: GapLedger): LineReconciliation | null {
+  return ledger.shopLineRead && !ledger.shopLineRead.closes ? ledger.shopLineRead : null;
 }
