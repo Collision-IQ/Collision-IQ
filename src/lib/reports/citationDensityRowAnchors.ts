@@ -797,22 +797,17 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   // SUBTOTALS rule — so continuation pages keep their region instead of
   // losing every anchor.
   const FOOTER_MARGIN = 40;
-  // Footer chrome is detected GEOMETRICALLY: a line position that repeats at
-  // the same y (±4pt) on 3+ pages in the bottom fifth of the page is page
-  // chrome, never table content — no date/Page-N text test involved.
-  const bottomBandPages = new Map<number, Set<number>>();
-  for (const [pageNumber, pageLines] of byPage) {
-    for (const line of pageLines) {
-      if (line.y < line.pageHeight * 0.8) continue;
-      const bucket = Math.round(line.y / 8);
-      const pages = bottomBandPages.get(bucket) ?? new Set<number>();
-      if (!pages.size) bottomBandPages.set(bucket, pages);
-      pages.add(pageNumber);
-    }
-  }
-  const footerBuckets = [...bottomBandPages.entries()].filter(([, pages]) => pages.size >= 3).map(([bucket]) => bucket);
-  const footerTopY = footerBuckets.length ? Math.min(...footerBuckets) * 8 - 4 : null;
+  const chromePages = countPageChromeRepeats(lines);
+  // Footer chrome: a repeated line (see countPageChromeRepeats) on 3+ pages in
+  // the bottom fifth of the page. Repetition is by TEXT at the same y, not by
+  // y alone: CCC prints line items on a fixed pitch, so the last rows of every
+  // full page also share a y, and a position-only test read them as footer and
+  // cut the last 2-4 rows off every full page.
+  const footerLines = lines.filter((line) => line.y >= line.pageHeight * 0.8 && (chromePages.get(line) ?? 0) >= 3);
+  const footerTopY = footerLines.length ? Math.min(...footerLines.map((line) => line.y)) - 4 : null;
   let carriedTop: number | null = null;
+  /** A column header opened the table and no SUBTOTALS rule has closed it. */
+  let tableOpen = false;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
     const pageHeight = pageLines[0]?.pageHeight ?? 792;
@@ -823,12 +818,26 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
           (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
       )
       .sort((a, b) => a.y - b.y)[0];
-    if (header) carriedTop = header.y + header.height;
+    if (header) {
+      carriedTop = header.y + header.height;
+      tableOpen = true;
+    }
     if (carriedTop === null) continue; // pages before any header: no region
-    const top = header ? header.y + header.height : carriedTop;
+    let top = header ? header.y + header.height : carriedTop;
+    if (!header && tableOpen) {
+      // A continuation page that prints no column header of its own starts
+      // its rows right under the repeated page header, which is shorter than
+      // the header page's page-header-plus-column-header block. The carried
+      // top therefore sits a row or two BELOW this page's first rows. Those
+      // rows begin where this page's repeated chrome (title, RO/claim line,
+      // vehicle line) ends; the chrome itself stays outside the region.
+      const chromeAbove = pageLines.filter((line) => line.y < carriedTop! - 2 && (chromePages.get(line) ?? 0) >= 2);
+      if (chromeAbove.length) top = Math.min(top, Math.max(...chromeAbove.map((line) => line.y + line.height)));
+    }
     const subtotals = pageLines
       .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];
+    if (subtotals) tableOpen = false;
     const chromeBottom = Math.min(
       pageHeight - FOOTER_MARGIN,
       footerTopY !== null && footerTopY > top ? footerTopY - 2 : pageHeight - FOOTER_MARGIN
@@ -843,6 +852,36 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
   }
   return regions;
+}
+
+/**
+ * Page chrome is text the producer prints on every page: the page header
+ * (title, RO/claim number, the vehicle line) and the footer (print stamp,
+ * "Page N"). For each line, the number of pages that print the SAME text at
+ * the same y (±4pt), counting its own page. Digits are masked so a page
+ * counter or print time does not make the footer unique. Position alone is
+ * not chrome: line items sit on a fixed pitch, so rows share a y across pages
+ * too. Two rows with the same masked text at the same y on different pages
+ * are rare, and the cost is only that the row stays outside the region, as
+ * every such row did before chrome was measured by text.
+ */
+function countPageChromeRepeats(lines: PdfTextLine[]): Map<PdfTextLine, number> {
+  const byText = new Map<string, PdfTextLine[]>();
+  for (const line of lines) {
+    const key = line.text.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+    if (!key) continue;
+    const group = byText.get(key) ?? [];
+    if (!group.length) byText.set(key, group);
+    group.push(line);
+  }
+  const repeats = new Map<PdfTextLine, number>();
+  for (const group of byText.values()) {
+    for (const line of group) {
+      const pages = new Set(group.filter((other) => Math.abs(other.y - line.y) <= 4).map((other) => other.pageNumber));
+      repeats.set(line, pages.size);
+    }
+  }
+  return repeats;
 }
 
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
@@ -879,16 +918,16 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // operation-type anchors may only exist INSIDE a region. A line-numbered
     // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
     // or below the SUBTOTALS rule is structurally non-anchorable.
-    if (
-      tableRegions.size > 0 &&
-      (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")
-    ) {
-      const region = tableRegions.get(line.pageNumber);
-      const inRegion = region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false;
-      if (!inRegion) type = "guide_row";
+    const region = tableRegions.get(line.pageNumber);
+    const inRegion = tableRegions.size === 0 || (region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false);
+    if (!inRegion && (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")) {
+      type = "guide_row";
     }
 
-    if (!lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+    // Nor does text outside the region continue a row: the last row above the
+    // SUBTOTALS rule must not absorb a totals block the print does not label
+    // in words the totals test knows (an OCR'd "ESTIMATETOTALS").
+    if (inRegion && !lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
       // A NOTE wraps. Its second line carries no "Note:" prefix of its own
       // ("Note: PARTS: … LABOR:" / "Time includes R&R grommets and gasket."),
       // so testing that line in isolation reads it as row description and the
