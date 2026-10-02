@@ -15,7 +15,7 @@
  * when the units plus tax reproduce the printed gap within $0.01; otherwise it
  * is null and nothing is printed.
  */
-import { shopRateFor, type GapLedger } from "./gapLedger";
+import { shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
 import { normalizePartNumber, qualifierStem } from "./integrityChecks";
 import { classifyNonLabor } from "./nonLaborBuckets";
 import type { MatcherPair } from "./argueItems";
@@ -56,6 +56,8 @@ export function buildShortPayView(params: {
   pairs: MatcherPair[];
 }): ShortPayView | null {
   const { ledger } = params;
+  // "Lines ours does not have" needs every line of ours read.
+  if (unreconciledShopRead(ledger)) return null;
   const { units } = assignUnits(params);
   const total = round2(units.reduce((sum, u) => sum + u.diff, 0) + ledger.tax);
   // The line read must account for every printed hour and dollar, or the

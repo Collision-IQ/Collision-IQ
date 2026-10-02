@@ -96,7 +96,7 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
   const partType = partTypeEvidence(shop, carrier);
   const { groups, usedShop } = groupEquivalents(shop, carrier);
-  const flags = integrityChecks(shop, carrier, { pairs: input.pairs });
+  const flags = integrityChecks(shop, carrier, { pairs: input.pairs, shopLineRead: ledger.shopLineRead });
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
   const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(

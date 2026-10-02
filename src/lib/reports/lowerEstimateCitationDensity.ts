@@ -27,7 +27,8 @@ import { findCollidingWords, rectsIntersect, type PlacementRect, type PlacementW
 import { parseEstimateRows, parseTotalsFromWords, type CellBox, type EstimateRow, type Word } from "./deltaEngine/rowCluster";
 import type { PdfWord } from "./citationDensityRowAnchors";
 import { labelCat } from "./appraisalSummary/estimateFromDeltaRows";
-import { LABOR_FAMILY } from "./appraisalSummary/gapLedger";
+import { LABOR_FAMILY, unreconciledShopRead } from "./appraisalSummary/gapLedger";
+import { shopLineReadSentence } from "./appraisalSummary/integrityChecks";
 import type { LowerEntry, LowerFinding, LowerFindingSet, StampField } from "./appraisalSummary/lowerEstimateFindings";
 import type { PlainSummaryModel } from "./plainLanguageSummary";
 
@@ -386,6 +387,8 @@ function appendIndex(
       `Gross: this estimate short-pays ${money(model.shortPay.shortPaid)} of our lines and carries ${money(model.shortPay.carrierOver)} that ours does not or pays more on; with tax that is the ${money(L.gap)} difference.`
     );
   }
+  const unreadShop = unreconciledShopRead(L);
+  if (unreadShop) write(shopLineReadSentence(unreadShop));
   y -= 6;
 
   const entryText = (e: LowerEntry) => (e.kind === "check" ? `CHECK: ${e.text}` : e.text);

@@ -40,6 +40,23 @@ export interface NonLaborBuckets {
 
 export class NonLaborParseError extends Error {}
 
+/** One sheet's priced lines against its own printed Parts + Misc. */
+export interface LineReconciliation {
+  /** Σ line prices, bucketed as above. */
+  lineTotal: number;
+  /** Printed Parts + Misc (hours-priced supplies are not in it; no line carries them). */
+  printed: number;
+  /** printed − lineTotal. Positive: printed dollars no line read accounts for. */
+  residual: number;
+  /** Within $0.05 of the print. */
+  closes: boolean;
+}
+
+function reconcile(estimate: Estimate, lineTotal: number): LineReconciliation {
+  const printed = round2(estimate.totals.parts + estimate.totals.misc);
+  return { lineTotal, printed, residual: round2(printed - lineTotal), closes: Math.abs(lineTotal - printed) <= 0.05 };
+}
+
 /**
  * Sum each bucket from the line prices. `strict` (the production default)
  * requires the line prices to reproduce the printed Parts + Misc totals to
@@ -58,11 +75,22 @@ export function nonLaborBuckets(estimate: Estimate, opts: { strict?: boolean } =
   buckets.sublet = round2(buckets.sublet);
   buckets.shopSupply = round2(buckets.shopSupply);
   buckets.total = round2(buckets.part + buckets.rateAdjustment + buckets.sublet + buckets.shopSupply);
-  const printed = round2(estimate.totals.parts + estimate.totals.misc);
-  if (strict && Math.abs(buckets.total - printed) > 0.05) {
+  const read = reconcile(estimate, buckets.total);
+  if (strict && !read.closes) {
     throw new NonLaborParseError(
-      `${estimate.fileName}: line prices sum to ${buckets.total.toFixed(2)}, but the printed non-labor total is ${printed.toFixed(2)}`
+      `${estimate.fileName}: line prices sum to ${read.lineTotal.toFixed(2)}, but the printed non-labor total is ${read.printed.toFixed(2)}`
     );
   }
   return buckets;
+}
+
+/**
+ * The strict guard's check, reported instead of thrown. The ledger is built
+ * from the carrier's buckets, so the carrier's read must close or nothing is
+ * printed; no bucket is built from ours, so a read of our sheet that does not
+ * close withholds what the report may say our sheet lacks (RO 22279: two rows
+ * lost upstream, and the carrier's reinforcement read as "not on our sheet").
+ */
+export function lineReconciliation(estimate: Estimate): LineReconciliation {
+  return reconcile(estimate, nonLaborBuckets(estimate, { strict: false }).total);
 }

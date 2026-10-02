@@ -10,11 +10,12 @@
  */
 import type { MatcherPair } from "./argueItems";
 import { shopRateFor } from "./gapLedger";
-import { classifyNonLabor } from "./nonLaborBuckets";
+import { classifyNonLabor, type LineReconciliation } from "./nonLaborBuckets";
 import { round2, type Estimate, type EstimateLine, type LaborCat } from "./types";
 
 export type FlagKind =
   | "carrierOnlyHighDollar"
+  | "shopLinesUnreconciled"
   | "trimConflictPartNumber"
   | "partNumberVariant"
   | "duplicatePartNumber"
@@ -66,16 +67,29 @@ const repeatKey = (l: EstimateLine) =>
 
 const LABOR_RANK: Record<LaborCat, number> = { body: 1, paint: 1, other: 1, frame: 2, structural: 2, aluminum: 2, mechanical: 3 };
 
+/** Why no sentence may say our sheet lacks a line: the read of it does not close. */
+export function shopLineReadSentence(read: LineReconciliation): string {
+  // Either sign: lines lost from the read, or a line misread or read twice.
+  return `Our sheet did not read cleanly: the line prices read from it add up to ${money(read.lineTotal)}, but it prints ${money(read.printed)} for parts and other priced items, a ${money(Math.abs(read.residual))} difference: some of our lines were not read, or were misread. Until that is reconciled, nothing here says a carrier line is missing from our sheet.`;
+}
+
 export function integrityChecks(
   shop: Estimate,
   carrier: Estimate,
-  opts: { highDollar?: number; pairs?: MatcherPair[] } = {}
+  opts: {
+    highDollar?: number;
+    pairs?: MatcherPair[];
+    /** Our sheet's line read (GapLedger.shopLineRead). When it does not close, check 1 asserts no absence. */
+    shopLineRead?: LineReconciliation | null;
+  } = {}
 ): Flag[] {
   const flags: Flag[] = [];
   const highDollar = opts.highDollar ?? 500;
   const shopPartNumbers = new Set(shop.lines.map((l) => normalizePartNumber(l.partNumber)).filter(Boolean));
+  const unreadShop = opts.shopLineRead && !opts.shopLineRead.closes ? opts.shopLineRead : null;
 
   // 1. High-dollar carrier lines with no counterpart on our sheet.
+  const unmatched: EstimateLine[] = [];
   for (const c of carrier.lines) {
     if ((c.price ?? 0) < highDollar) continue;
     const kind = classifyNonLabor(c);
@@ -84,6 +98,10 @@ export function integrityChecks(
     const hasPartNumber = Boolean(c.partNumber) && shopPartNumbers.has(normalizePartNumber(c.partNumber));
     const hasDescription = shop.lines.some((s) => baseStem(s.desc) === baseStem(c.desc));
     if (hasPartNumber || hasDescription) continue;
+    unmatched.push(c);
+    // "Not on our sheet" is an absence claim about every line of our sheet; it
+    // is only made when the lines read reproduce what the sheet prints.
+    if (unreadShop) continue;
     const samePrice = shop.lines.find((s) => s.price === c.price);
     const samePriceOnCarrier = carrier.lines.find((x) => x !== c && x.price === c.price);
     flags.push({
@@ -98,6 +116,21 @@ export function integrityChecks(
             (samePriceOnCarrier ? ` and their own L${samePriceOnCarrier.line} "${samePriceOnCarrier.desc}"` : "") +
             ". Confirm whether it is a separate part or the same part written twice."
           : " Either we are missing it or it was written in error; confirm which before arguing anything else."),
+    });
+  }
+  if (unreadShop) {
+    flags.push({
+      kind: "shopLinesUnreconciled",
+      side: "shop",
+      lines: { carrier: unmatched.map((c) => c.line) },
+      dollars: unreadShop.residual,
+      text:
+        shopLineReadSentence(unreadShop) +
+        (unmatched.length
+          ? ` Not found among the lines read: carrier ${unmatched
+              .map((c) => `L${c.line} "${c.desc}" (${money(c.price!)})`)
+              .join(", ")}. Look for ${unmatched.length === 1 ? "it" : "them"} on our printed sheet before arguing anything else.`
+          : ""),
     });
   }
 
