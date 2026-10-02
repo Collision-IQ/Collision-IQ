@@ -805,26 +805,31 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
   // cut the last 2-4 rows off every full page.
   const footerLines = lines.filter((line) => line.y >= line.pageHeight * 0.8 && (chromePages.get(line) ?? 0) >= 3);
   const footerTopY = footerLines.length ? Math.min(...footerLines.map((line) => line.y)) - 4 : null;
+  /** The top an open table carries to pages without a column header; null when
+   * no table is open (before the first header, and after a SUBTOTALS rule). */
   let carriedTop: number | null = null;
-  /** A column header opened the table and no SUBTOTALS rule has closed it. */
-  let tableOpen = false;
   for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
     const pageLines = byPage.get(pageNumber)!;
     const pageHeight = pageLines[0]?.pageHeight ?? 792;
-    const header = pageLines
+    const headers = pageLines
       .filter(
         (line) =>
           (/\bLine\b/.test(line.text) && /\bOper\b/i.test(line.text) && /\bDescription\b/i.test(line.text)) ||
           (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
       )
-      .sort((a, b) => a.y - b.y)[0];
-    if (header) {
-      carriedTop = header.y + header.height;
-      tableOpen = true;
-    }
-    if (carriedTop === null) continue; // pages before any header: no region
+      .sort((a, b) => a.y - b.y);
+    const header = headers[0];
+    if (header) carriedTop = header.y + header.height;
+    // A page without a column header of its own has a region only while a
+    // table is open. After the SUBTOTALS rule it is post-table material on
+    // every producer: print-once producers end the table at the rule, and
+    // per-page producers reprint the header on every line-item page. A
+    // "with Summary" print ends on a complete SUPPLEMENT SUMMARY table (header
+    // and rule on one page), then totals, cumulative effects and NHTSA recall
+    // prose whose leading digits ("2020-2025 Model Y…") read as line numbers.
+    if (carriedTop === null) continue;
     let top = header ? header.y + header.height : carriedTop;
-    if (!header && tableOpen) {
+    if (!header) {
       // A continuation page that prints no column header of its own starts
       // its rows right under the repeated page header, which is shorter than
       // the header page's page-header-plus-column-header block. The carried
@@ -837,7 +842,6 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     const subtotals = pageLines
       .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];
-    if (subtotals) tableOpen = false;
     const chromeBottom = Math.min(
       pageHeight - FOOTER_MARGIN,
       footerTopY !== null && footerTopY > top ? footerTopY - 2 : pageHeight - FOOTER_MARGIN
@@ -846,10 +850,9 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
       top,
       bottom: Math.min(subtotals ? subtotals.y + subtotals.height : chromeBottom, chromeBottom),
     });
-    // On per-page-header producers the next header re-establishes the top; on
-    // print-once producers the SUBTOTALS rule ends the table for good.
-    if (subtotals && !header) carriedTop = null;
-    if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
+    // The SUBTOTALS rule closes the table, unless a column header printed
+    // below it opens the next one on the same page.
+    if (subtotals && !headers.some((line) => line.y > subtotals.y)) carriedTop = null;
   }
   return regions;
 }
