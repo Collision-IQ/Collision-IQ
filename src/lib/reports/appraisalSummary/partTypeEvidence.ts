@@ -7,7 +7,7 @@
  * part number carries the same price. A part-type claim may be printed only
  * when a document shows a non-OEM part.
  */
-import type { Estimate } from "./types";
+import type { Estimate, EstimateLine } from "./types";
 
 // "Opt OEM" / "Alt OEM" are factory parts from another channel, not non-OEM.
 const NON_OEM_TOKEN = /\b(A\/M|Non[- ]?OEM|CAPA|NSF|LKQ|RCY|USED|Recond(itioned)?|Recored?|Reman(ufactured)?|Sect|Economy)\b/i;
@@ -24,15 +24,13 @@ export interface PartTypeEvidence {
   bothAllOem: boolean;
 }
 
+/** The line writes a non-OEM part (aftermarket, recycled, reconditioned …), by its typed source or its printed text. */
+export function isNonOemLine(l: EstimateLine): boolean {
+  return (l.partSource ?? []).some((source) => NON_OEM_SOURCE.has(source)) || NON_OEM_TOKEN.test(`${l.desc} ${l.partNumber ?? ""}`);
+}
+
 export function partTypeEvidence(shop: Estimate, carrier: Estimate): PartTypeEvidence {
-  const scan = (e: Estimate) =>
-    e.lines
-      .filter(
-        (l) =>
-          (l.partSource ?? []).some((source) => NON_OEM_SOURCE.has(source)) ||
-          NON_OEM_TOKEN.test(`${l.desc} ${l.partNumber ?? ""}`)
-      )
-      .map((l) => l.line);
+  const scan = (e: Estimate) => e.lines.filter(isNonOemLine).map((l) => l.line);
   const carrierNonOemLines = scan(carrier);
   const shopNonOemLines = scan(shop);
   const usage = carrier.altPartsUsage;

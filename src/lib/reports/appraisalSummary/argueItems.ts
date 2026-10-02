@@ -74,8 +74,15 @@ export function argueItems(params: {
   usedShop: Set<number>;
   flags: Flag[];
   pairs: MatcherPair[];
+  /** Some of the carrier's printed dollars sit on lines whose price was not read. */
+  carrierLinesIncomplete?: boolean;
 }): ArgueItem[] {
   const { shop, carrier, groups, usedShop, flags, pairs } = params;
+  // Part of their sheet unread — a price cell not read, or a whole row not
+  // read, which the ledger cannot tell apart: any line of ours may have its
+  // counterpart on a line that was not read, and any group may be missing one
+  // of theirs. No item is argued; the ledger still closes on printed totals.
+  if (params.carrierLinesIncomplete === true) return [];
   const shopLine = new Map(shop.lines.map((l) => [l.line, l]));
   const carrierLine = new Map(carrier.lines.map((l) => [l.line, l]));
   const paintRate = shopRateFor(shop, "paint", 0);

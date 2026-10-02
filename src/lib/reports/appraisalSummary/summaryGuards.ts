@@ -9,7 +9,7 @@
  * sentence ("zero aftermarket") can never excuse a claim in another, and a
  * "$0.00" in one row cannot be paired with "sublet" three sections away.
  */
-import { unreconciledShopRead, type GapLedger } from "./gapLedger";
+import { carrierPartlyUnread, unreconciledShopRead, type GapLedger } from "./gapLedger";
 import type { Flag } from "./integrityChecks";
 import type { GroupDelta } from "./operationEquivalence";
 import type { PartTypeEvidence } from "./partTypeEvidence";
@@ -58,7 +58,7 @@ export function buildSummaryFacts(
     adasSentence:
       adas && adas.exclusions.length
         ? `The carrier's own calibration line says its time ${adas.exclusions[0].toLowerCase()}. That is the work our calibration lines cover.`
-        : adas && adasDiff > 0
+        : adas && adasDiff > 0 && !carrierPartlyUnread(ledger)
           ? `We wrote ${adasDiff.toFixed(1)} more hours of calibration and diagnostics than the carrier.`
           : null,
     checkFirst: flags.filter((f) => checkFirstKinds.has(f.kind)),

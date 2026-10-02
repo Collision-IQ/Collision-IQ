@@ -1,0 +1,1225 @@
+{
+ "preparedDate": "2026-10-02",
+ "vehicle": "2024 Hyundai Kona SE AWD",
+ "roNumber": "22279",
+ "identity": [],
+ "shop": {
+  "role": "shop",
+  "fileName": "Shop final 22279.pdf",
+  "vehicle": "2024 HYUN Kona SE AWD 4D UTV 4",
+  "totals": {
+   "parts": 1852.2,
+   "misc": 1125.48,
+   "labor": [
+    {
+     "cat": "body",
+     "label": "Body Labor",
+     "hours": 17.6,
+     "rate": 75,
+     "cost": 1320
+    },
+    {
+     "cat": "paint",
+     "label": "Paint Labor",
+     "hours": 7.8,
+     "rate": 75,
+     "cost": 585
+    }
+   ],
+   "paintSupplies": {
+    "hours": 7.8,
+    "rate": 60,
+    "cost": 468
+   },
+   "subtotal": 5350.68,
+   "tax": 321.04,
+   "grandTotal": 5671.72
+  },
+  "lines": [
+   {
+    "line": 6,
+    "oper": "Rpr",
+    "desc": "Lift gate w/o power gate",
+    "hours": 6,
+    "laborCat": "body",
+    "paintHours": 2.2,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 7,
+    "oper": "Add",
+    "desc": "for Clear Coat",
+    "hours": 0.9,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 8,
+    "oper": "Repl",
+    "desc": "Emblem",
+    "partNumber": "86302BE200",
+    "qty": 1,
+    "price": 40.5,
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 9,
+    "oper": "Repl",
+    "desc": "Nameplate \"KONA\"",
+    "partNumber": "86310BE000",
+    "qty": 1,
+    "price": 52.43,
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 10,
+    "oper": "Repl",
+    "desc": "Nameplate \"HTRAC\"",
+    "partNumber": "86316BE000",
+    "qty": 1,
+    "price": 22.43,
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 11,
+    "oper": "R&I",
+    "desc": "Molding primed",
+    "hours": 0.2,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 12,
+    "oper": "R&I",
+    "desc": "Camera kit",
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 13,
+    "oper": "R&I",
+    "desc": "License plate",
+    "hours": 0.2,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 14,
+    "oper": "Repl",
+    "desc": "License plate pad 869413k000",
+    "qty": 2,
+    "price": 3.16,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 15,
+    "oper": "Rpr",
+    "desc": "Lift gate glass Hyundai w/o",
+    "hours": 0.5,
+    "laborCat": "body",
+    "note": "Per shop policy and OEM standards, the owner was provided OEM Position Statements showing that non-OEM parts may fail, risk safety, or void warranties. Only new OEM parOE docs available via this link: https://collisionacademy.egnyte.com/fl/w98v4CYvQbkW 3UPDATE NOTES 4#****Work Authorization Secured**** 1 5LIFT GATE 6*RprLift gate w/o power gate6.02.2 7Add for Clear Coat0.9 8*ReplEmblem86302BE200140.500.1 9*ReplNameplate \"KONA\"86310BE000152.430.1 10*ReplNameplate \"HTRAC\"86316BE000122.430.1 11*R&IMolding primed0.2 12R&ICamera kitm0.3 13#R&ILicense plate0.2 14#ReplLicense plate pad869413k00023.16 15*RprLift gate glass Hyundai w/o privacy tint 0.5 Lift weatherstrip, mask for prep, refinish and remove post-refinish",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 16,
+    "oper": "R&I",
+    "desc": "Upper trim panel gray",
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 17,
+    "oper": "R&I",
+    "desc": "RT Side trim gray",
+    "hours": 0.2,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 18,
+    "oper": "R&I",
+    "desc": "LT Side trim gray",
+    "hours": 0.2,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 19,
+    "oper": "R&I",
+    "desc": "Lower trim panel w/o power gate gray",
+    "hours": 0.4,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 20,
+    "oper": "",
+    "desc": "Clean adhesive",
+    "qty": 1,
+    "price": 3,
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 21,
+    "oper": "",
+    "desc": "Mask for primer",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 22,
+    "oper": "",
+    "desc": "Feather/Prime/Block",
+    "qty": 1,
+    "hours": 1,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 23,
+    "oper": "",
+    "desc": "Cavity Wax Plus-3M 08852-Per 5",
+    "qty": 1,
+    "price": 15.4,
+    "hours": 0.2,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 24,
+    "oper": "",
+    "desc": "Trim Masking Tape-3M 06347-Per",
+    "qty": 1,
+    "price": 7.08,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 26,
+    "oper": "R&I",
+    "desc": "Tail lamp assy w/o EV",
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 27,
+    "oper": "",
+    "desc": "Set back, secure Protect wiring &",
+    "qty": 1,
+    "price": 2.5,
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 29,
+    "oper": "O/H",
+    "desc": "bumper assy",
+    "hours": 2.5,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 30,
+    "oper": "Repl",
+    "desc": "Bumper cover w/o park assist",
+    "partNumber": "86650BE020AS",
+    "qty": 1,
+    "price": 712.98,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 31,
+    "oper": "Repl",
+    "desc": "Tow eye cap",
+    "partNumber": "86617BE000",
+    "qty": 1,
+    "price": 10.49,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 32,
+    "oper": "Rpr",
+    "desc": "RT Cover SE, SEL",
+    "hours": 1,
+    "laborCat": "body",
+    "paintHours": 1.1,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 33,
+    "oper": "Add",
+    "desc": "for Clear Coat",
+    "hours": 0.4,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 34,
+    "oper": "Repl",
+    "desc": "Skid plate SE, SEL",
+    "partNumber": "86671BE000",
+    "qty": 1,
+    "price": 504.49,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 35,
+    "oper": "Repl",
+    "desc": "Reinforcement",
+    "partNumber": "86631BE200",
+    "qty": 1,
+    "price": 502.5,
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 36,
+    "oper": "Repl",
+    "desc": "Prep unprimed bumper",
+    "qty": 1,
+    "hours": 0.7,
+    "laborCat": "body",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 37,
+    "oper": "",
+    "desc": "Flex additive (Per flexible panel)",
+    "qty": 1,
+    "price": 12,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 38,
+    "oper": "",
+    "desc": "Raw plastic primer (Per raw plastic panel)",
+    "qty": 1,
+    "price": 15,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 39,
+    "oper": "",
+    "desc": "Set back, secure Protect wiring &",
+    "qty": 1,
+    "price": 2.5,
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 40,
+    "oper": "",
+    "desc": "Test fit-Front bumper",
+    "qty": 1,
+    "hours": 1,
+    "laborCat": "body",
+    "note": "Required to ensure all mounting areas are undamaged/in-line for proper fitment prior to final refinish to avoid damage to newly painted components (2 techs)",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 42,
+    "oper": "Subl",
+    "desc": "Pre-repair scan",
+    "qty": 1,
+    "price": 201,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 43,
+    "oper": "Subl",
+    "desc": "In-proc repair scan",
+    "qty": 1,
+    "price": 167.5,
+    "note": "In Process scans are necessary part of the repair process prior to completing calibrations to confirm readiness and prevent calibration failure. Quote only to be reconciled with invoice",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 44,
+    "oper": "",
+    "desc": "REVVAdas Report",
+    "qty": 1,
+    "price": 25,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 45,
+    "oper": "Subl",
+    "desc": "Blind spot radar calibration",
+    "qty": 1,
+    "price": 469,
+    "note": "Please see ADAS report for supporting documentation. Quote only to be reconciled with invoice",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 46,
+    "oper": "Subl",
+    "desc": "Post-repair scan",
+    "qty": 1,
+    "price": 167.5,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 47,
+    "oper": "",
+    "desc": "Final road test for safety & quality check",
+    "qty": 1,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 49,
+    "oper": "",
+    "desc": "Interior Protection kit",
+    "qty": 1,
+    "price": 3.22,
+    "hours": 0.1,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 50,
+    "oper": "",
+    "desc": "Pre wash vehicle",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 51,
+    "oper": "",
+    "desc": "Mask for refinishing",
+    "qty": 1,
+    "price": 10,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 52,
+    "oper": "",
+    "desc": "Mask jambs (0.3 Hours and $3.00 per panel)",
+    "qty": 1,
+    "price": 3,
+    "hours": 0.3,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 53,
+    "oper": "",
+    "desc": "Tint color",
+    "qty": 1,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 54,
+    "oper": "",
+    "desc": "Finish sand & polish (0.5 Refinish per panel)",
+    "qty": 1,
+    "paintHours": 1,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 55,
+    "oper": "",
+    "desc": "Clean vehicle for delivery",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.5,
+    "laborCat": "body",
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 56,
+    "oper": "",
+    "desc": "Hazardous waste removal",
+    "qty": 1,
+    "price": 5,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 57,
+    "oper": "",
+    "desc": "Solid waste removal",
+    "qty": 1,
+    "price": 5,
+    "manual": true,
+    "partSource": []
+   }
+  ],
+  "platform": "ccc"
+ },
+ "carrier": {
+  "role": "carrier",
+  "fileName": "SOR-1 22279.pdf",
+  "vehicle": "2024 HYUN Kona SE AWD 4D UTV 4",
+  "totals": {
+   "parts": 1889.04,
+   "misc": 598.5,
+   "labor": [
+    {
+     "cat": "body",
+     "label": "Body Labor",
+     "hours": 16.3,
+     "rate": 65,
+     "cost": 1059.5
+    },
+    {
+     "cat": "paint",
+     "label": "Paint Labor",
+     "hours": 5.2,
+     "rate": 65,
+     "cost": 338
+    },
+    {
+     "cat": "mechanical",
+     "label": "Mechanical Labor",
+     "hours": 0.5,
+     "rate": 100,
+     "cost": 50
+    }
+   ],
+   "paintSupplies": {
+    "hours": 5.2,
+    "rate": 43,
+    "cost": 223.6
+   },
+   "subtotal": 4158.64,
+   "tax": 249.52,
+   "grandTotal": 4408.16
+  },
+  "lines": [
+   {
+    "line": 9,
+    "oper": "Rpr",
+    "desc": "Lift gate w/o power gate",
+    "partNumber": "72800BE020",
+    "qty": 0,
+    "price": 0,
+    "hours": 6,
+    "laborCat": "body",
+    "paintHours": 2.2,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 10,
+    "oper": "Add",
+    "desc": "for Clear Coat",
+    "qty": 0,
+    "price": 0,
+    "hours": 0,
+    "paintHours": 0.9,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 11,
+    "oper": "Repl",
+    "desc": "Opt OEM Emblem",
+    "partNumber": "86302-BE200",
+    "qty": 1,
+    "price": 98.56,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": [
+     "Opt OEM"
+    ]
+   },
+   {
+    "line": 12,
+    "oper": "Repl",
+    "desc": "Opt OEM Nameplate \"KONA\"",
+    "partNumber": "GEU3151R-72909",
+    "qty": 1,
+    "price": 108.78,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": [
+     "Opt OEM"
+    ]
+   },
+   {
+    "line": 13,
+    "oper": "Repl",
+    "desc": "Opt OEM Nameplate \"HTRAC\"",
+    "partNumber": "86316-BE00O",
+    "qty": 1,
+    "price": 56.72,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": [
+     "Opt OEM"
+    ]
+   },
+   {
+    "line": 14,
+    "oper": "R&I",
+    "desc": "Molding primed",
+    "partNumber": "87310BEQ0O",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 15,
+    "oper": "R&I",
+    "desc": "Camera kit",
+    "partNumber": "99240BEQ00",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.3,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 16,
+    "oper": "R&I",
+    "desc": "Upper trim panel black 81720BEOOONNB",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 17,
+    "oper": "R&I",
+    "desc": "License plate",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 18,
+    "oper": "R&I",
+    "desc": "RT Side trim black 81740BEOOONNB",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 19,
+    "oper": "R&I",
+    "desc": "LT Side trim black 81730BEOOONNB",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 20,
+    "oper": "R&I",
+    "desc": "Lower trim panel w/o power gate 81710BEQOOONNB",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.4,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 21,
+    "oper": "Rpr",
+    "desc": "Lift gate glass Hyundai -mask",
+    "partNumber": "87110BEQ10",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.5,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 23,
+    "oper": "R&I",
+    "desc": "Tail lamp assy w/o EV",
+    "partNumber": "92490BEQ00",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.3,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 25,
+    "oper": "O/H",
+    "desc": "bumper assy",
+    "qty": 0,
+    "price": 0,
+    "hours": 2.5,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 26,
+    "oper": "Repl",
+    "desc": "A/M Bumper cover w/o park",
+    "partNumber": "HY1100280",
+    "qty": 1,
+    "price": 699.74,
+    "paintHours": 0,
+    "manual": false,
+    "partSource": [
+     "A/M"
+    ]
+   },
+   {
+    "line": 27,
+    "oper": "Add",
+    "desc": "for skid plate",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.3,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 28,
+    "oper": "Repl",
+    "desc": "Reinforcement",
+    "partNumber": "86631BE200",
+    "qty": 1,
+    "price": 508.25,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 29,
+    "oper": "Repl",
+    "desc": "A/M Skid plate SE, SEL",
+    "partNumber": "1919.1402",
+    "qty": 1,
+    "price": 398.43,
+    "paintHours": 0,
+    "manual": false,
+    "partSource": [
+     "A/M"
+    ]
+   },
+   {
+    "line": 30,
+    "oper": "Repl",
+    "desc": "License Plate pad",
+    "partNumber": "869413K000",
+    "qty": 2,
+    "price": 3.16,
+    "hours": 0.1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 31,
+    "oper": "Rpr",
+    "desc": "RTCoverSE, SEL",
+    "partNumber": "866A6BEO00AS",
+    "qty": 0,
+    "price": 0,
+    "hours": 1,
+    "laborCat": "body",
+    "paintHours": 1.1,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 32,
+    "oper": "Overlap",
+    "desc": "Major Non-Adj. Panel",
+    "qty": 0,
+    "price": 0,
+    "hours": 0,
+    "paintHours": -0.2,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 33,
+    "oper": "Add",
+    "desc": "for Clear Coat",
+    "qty": 0,
+    "price": 0,
+    "hours": 0,
+    "paintHours": 0.2,
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 35,
+    "oper": "Subl",
+    "desc": "Calibrate blind spot radar",
+    "qty": 1,
+    "price": 375,
+    "hours": 0,
+    "paintHours": 0,
+    "note": "Invoice required for price change.",
+    "manual": false,
+    "partSource": []
+   },
+   {
+    "line": 37,
+    "oper": "",
+    "desc": "Corrosion Protection",
+    "qty": 1,
+    "price": 10,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 38,
+    "oper": "",
+    "desc": "Cover Car",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 39,
+    "oper": "",
+    "desc": "Hazardous Waste",
+    "qty": 1,
+    "price": 5,
+    "hours": 0,
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 40,
+    "oper": "Rpr",
+    "desc": "clean for delivery",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.5,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 41,
+    "oper": "Subl",
+    "desc": "Pre-repair Diagnostic Scan",
+    "qty": 1,
+    "price": 187.5,
+    "hours": 0,
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 42,
+    "oper": "Rpr",
+    "desc": "Post-repair Diagnostic Scan",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.5,
+    "laborCat": "mechanical",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 43,
+    "oper": "Refn",
+    "desc": "Prime and Block",
+    "qty": 0,
+    "price": 0,
+    "hours": 0,
+    "paintHours": 1,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 44,
+    "oper": "",
+    "desc": "Cover Car-primer",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 45,
+    "oper": "",
+    "desc": "Cavity Wax Plus-3M 08852",
+    "qty": 1,
+    "price": 15.4,
+    "hours": 0.2,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 46,
+    "oper": "Rpr",
+    "desc": "Set back, secure Protect wiring &",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.5,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 47,
+    "oper": "",
+    "desc": "Flex Additive",
+    "qty": 1,
+    "price": 6,
+    "hours": 0,
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 48,
+    "oper": "",
+    "desc": "Mask Jambs",
+    "qty": 1,
+    "price": 5,
+    "hours": 0.3,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 49,
+    "oper": "Rpr",
+    "desc": "road test for safety",
+    "qty": 0,
+    "price": 0,
+    "hours": 0.5,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   },
+   {
+    "line": 50,
+    "oper": "Rpr",
+    "desc": "Denib and Polish",
+    "qty": 0,
+    "price": 0,
+    "hours": 1,
+    "laborCat": "body",
+    "paintHours": 0,
+    "manual": true,
+    "partSource": []
+   }
+  ],
+  "platform": "ccc"
+ },
+ "pairs": [
+  {
+   "kind": "reduced",
+   "shopLines": [
+    34
+   ],
+   "carrierLine": 29
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    30
+   ],
+   "carrierLine": 26
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    8
+   ],
+   "carrierLine": 11
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    9
+   ],
+   "carrierLine": 12
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    10
+   ],
+   "carrierLine": 13
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    46
+   ],
+   "carrierLine": 42
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    43
+   ]
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    45
+   ],
+   "carrierLine": 35
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    42
+   ],
+   "carrierLine": 41
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    22
+   ],
+   "carrierLine": 43
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    7
+   ],
+   "carrierLine": 10
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    49
+   ],
+   "carrierLine": 38
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    33
+   ],
+   "carrierLine": 33
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    40
+   ]
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    54
+   ],
+   "carrierLine": 50
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    44
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    36
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    51
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    50
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    53
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    21
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    20
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    38
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    31
+   ]
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    24
+   ]
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    37
+   ],
+   "carrierLine": 47
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    27
+   ],
+   "carrierLine": 46
+  },
+  {
+   "kind": "reduced",
+   "shopLines": [
+    55
+   ],
+   "carrierLine": 40
+  },
+  {
+   "kind": "missing",
+   "shopLines": [
+    57
+   ]
+  }
+ ]
+}

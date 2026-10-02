@@ -1454,7 +1454,9 @@ function extractNumericTokens(value: string) {
 }
 
 function detectLaborValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  // The captured figure must be a value cell, never the head of a part number
+  // ("Front pillar structural bulb 1063943-00-A" read 1,063,943 labor hours).
+  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:scan|calibration|r&i|r\s*&\s*i|repair|replace|refinish|labor|test|aim|initialize|program|mask|sand|polish)\b/i.test(text)) {
     return null;
@@ -1463,7 +1465,7 @@ function detectLaborValue(text: string, tokens: Array<{ value: number; index: nu
 }
 
 function detectPaintValue(text: string, tokens: Array<{ value: number; index: number }>) {
-  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d{1,3}(?:\.\d+)?)(?![\d.])(?!-[\dA-Z])/i);
   if (explicit) return Number(explicit[1]);
   if (!/\b(?:paint|refinish|blend|clear coat|mask|jamb|color|sand|polish)\b/i.test(text)) return null;
   return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;

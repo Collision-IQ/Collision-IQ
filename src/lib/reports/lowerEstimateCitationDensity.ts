@@ -27,10 +27,10 @@ import { findCollidingWords, rectsIntersect, type PlacementRect, type PlacementW
 import { parseEstimateRows, parseTotalsFromWords, type CellBox, type EstimateRow, type Word } from "./deltaEngine/rowCluster";
 import type { PdfWord } from "./citationDensityRowAnchors";
 import { labelCat } from "./appraisalSummary/estimateFromDeltaRows";
-import { LABOR_FAMILY, unreconciledShopRead } from "./appraisalSummary/gapLedger";
+import { LABOR_FAMILY, carrierPartlyUnread, unreconciledShopRead } from "./appraisalSummary/gapLedger";
 import { shopLineReadSentence } from "./appraisalSummary/integrityChecks";
 import type { LowerEntry, LowerFinding, LowerFindingSet, StampField } from "./appraisalSummary/lowerEstimateFindings";
-import type { PlainSummaryModel } from "./plainLanguageSummary";
+import { unreadCarrierNote, type PlainSummaryModel } from "./plainLanguageSummary";
 
 const STAMP_SIZE = 6.5;
 const BADGE_SIZE = 6.5;
@@ -379,6 +379,7 @@ function appendIndex(
     }.`
   );
   if (L.laborRate !== 0) write(`Labor rate still open: ${money(L.laborRate)}.`);
+  if (carrierPartlyUnread(L)) write(unreadCarrierNote(model));
   write(
     `Paint materials: ${money(L.paintMaterials)}.${L.otherMaterials !== 0 ? ` Other materials: ${money(L.otherMaterials)}.` : ""} Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`
   );

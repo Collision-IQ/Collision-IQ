@@ -170,4 +170,21 @@ describe("VIN last-eight masking is shape-based in labeled contexts", () => {
     expect(maskVinForExport("01228348600000080")).toBe("01228348600000080");
     expect(maskVinForExport("ABCDEFGHJKLMNPRST")).toBe("ABCDEFGHJKLMNPRST");
   });
+
+  // An allowlist that kept the word after "plate" when it looked like an
+  // estimate noun ("Skid plate SE", "License plate pad") also kept the plate
+  // written after that noun. Plate redaction fails closed: none of these may
+  // leave the plate in a download.
+  it("never keeps a plate written after a part noun", () => {
+    for (const [input, plate] of [
+      ["License plate kit ABC1234", "ABC1234"],
+      ["replace license plate frame 7ABC123", "7ABC123"],
+      ["License plate bracket ABC1234", "ABC1234"],
+      ["License plate light MKZ4426", "MKZ4426"],
+      ["License Plate:GOBUCKS", "GOBUCKS"],
+      ["Plate MYCAR", "MYCAR"],
+    ]) {
+      expect(redactDownloadContent(input)).not.toContain(plate);
+    }
+  });
 });
