@@ -10,6 +10,7 @@
  * no summary ships.
  */
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "./estimateDeltaMatcher";
+import { detectEstimatePlatform } from "./estimatePlatform";
 import type { ForensicReconciliation } from "./forensicEstimateAnalysis";
 import type { PlainSummaryInput } from "./plainLanguageSummary";
 import { estimateFromDeltaRows, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
@@ -38,9 +39,9 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
   if (!input.rows || input.rows.higher.length === 0 || input.rows.lower.length === 0) {
     return { ok: false, reason: "the line items of both estimates were not read, so the ledger cannot be built from their lines" };
   }
-  const higher = totalsFromReconciliation(input.reconciliation, "higher");
+  const higher = totalsFromReconciliation(input.reconciliation, "higher", detectEstimatePlatform(input.higherText));
   if (!higher.ok) return { ok: false, reason: higher.reason };
-  const lower = totalsFromReconciliation(input.reconciliation, "lower");
+  const lower = totalsFromReconciliation(input.reconciliation, "lower", detectEstimatePlatform(input.lowerText));
   if (!lower.ok) return { ok: false, reason: lower.reason };
   if (higher.totals.grandTotal <= lower.totals.grandTotal) {
     return { ok: false, reason: "the annotated estimate is not the higher of the two, so there is no shop-side gap to explain" };

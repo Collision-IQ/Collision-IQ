@@ -44,7 +44,10 @@ export class NonLaborParseError extends Error {}
 export interface LineReconciliation {
   /** Σ line prices, bucketed as above. */
   lineTotal: number;
-  /** Printed Parts + Misc (hours-priced supplies are not in it; no line carries them). */
+  /**
+   * Printed Parts + Misc, less the printed dollars no line carries (a parts
+   * markup). Hours-priced supplies are not in it either; no line carries them.
+   */
   printed: number;
   /** printed − lineTotal. Positive: printed dollars no line read accounts for. */
   residual: number;
@@ -52,8 +55,13 @@ export interface LineReconciliation {
   closes: boolean;
 }
 
+/** Σ `totals.unlinedNonLabor`: printed non-labor dollars no line carries. */
+export function unlinedNonLaborCost(estimate: Estimate): number {
+  return round2((estimate.totals.unlinedNonLabor ?? []).reduce((sum, item) => sum + item.cost, 0));
+}
+
 function reconcile(estimate: Estimate, lineTotal: number): LineReconciliation {
-  const printed = round2(estimate.totals.parts + estimate.totals.misc);
+  const printed = round2(estimate.totals.parts + estimate.totals.misc - unlinedNonLaborCost(estimate));
   return { lineTotal, printed, residual: round2(printed - lineTotal), closes: Math.abs(lineTotal - printed) <= 0.05 };
 }
 

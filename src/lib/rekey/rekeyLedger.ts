@@ -41,6 +41,7 @@ import VOCABULARY from "./data/rekeyVocabulary.json";
 import {
   UNMAPPED,
   groupSortIndex,
+  isProfileRoutedCost,
   normalizeVocabularyText,
   resolveLaborType,
   resolveOperation,
@@ -62,7 +63,6 @@ import type {
 
 const NOTE_CODES = new Set((VOCABULARY.noteCodes as string[]).map((code) => code.trim()));
 const MANUAL_ENTRY_CODES = new Set((VOCABULARY.manualEntryCodes as string[]).map((code) => code.trim()));
-const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string[]).map(normalizeVocabularyText);
 const AGGREGATE_REFINISH_LABELS = (VOCABULARY.aggregateRefinishLabels as string[]).map(normalizeVocabularyText);
 const CLEAR_COAT_EXCLUSIONS = (VOCABULARY.clearCoatExclusions as string[]).map(normalizeVocabularyText);
 /** Printed names of the CCC sublet / miscellaneous totals category. */
@@ -1257,7 +1257,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
       // rather than on a line.
       operationTarget: translateOperation(operation.ccc, target, {
         carriesCharge:
-          (costOnly || pricedWithoutPart) && matchesLabel(keyedDescription, PROFILE_ROUTED_COST_LABELS),
+          (costOnly || pricedWithoutPart) && isProfileRoutedCost(keyedDescription),
       }),
       operationMapped: operation.mapped,
       laborOpCode: operation.laborOpCode,
@@ -1419,7 +1419,7 @@ export function buildRekeySheet(params: BuildRekeySheetParams): RekeySheet {
 
     // Paint materials are a PROFILE setting, not a keyed line — keying them as
     // a line double-counts against CCC's own materials calculation.
-    if ((costOnly || pricedWithoutPart) && matchesLabel(keyedDescription, PROFILE_ROUTED_COST_LABELS)) {
+    if ((costOnly || pricedWithoutPart) && isProfileRoutedCost(keyedDescription)) {
       ledgerRow.keyable = false;
       ledgerRow.misc = null;
       ledgerRow.price = row.price;

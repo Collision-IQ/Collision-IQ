@@ -18,7 +18,8 @@
  * exclusion is not cited.
  */
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "../estimateDeltaMatcher";
-import { detectEstimatePlatform } from "../estimatePlatform";
+import { detectEstimatePlatform, type EstimatePlatform } from "../estimatePlatform";
+import { isProfileRoutedCost } from "@/lib/rekey/rekeyVocabulary";
 import type { ForensicReconciliation } from "../forensicEstimateAnalysis";
 import type { MatcherPair } from "./argueItems";
 import type { AltPartsUsage, Estimate, EstimateLine, EstimateTotals, LaborCat, LaborTotal } from "./types";
@@ -49,8 +50,31 @@ export type TotalsRead =
   | { ok: true; totals: EstimateTotals; userCategory: LaborCat; userCategories: LaborCat[] }
   | { ok: false; reason: string };
 
-/** One side's totals from the reconciliation the Forensic report printed. */
-export function totalsFromReconciliation(reconciliation: ForensicReconciliation, side: "higher" | "lower"): TotalsRead {
+/**
+ * One side's totals from the reconciliation the Forensic report printed.
+ *
+ * `platform` is the platform that printed this side (detectEstimatePlatform on
+ * its text). A Mitchell print books two figures differently from CCC, and the
+ * rekey sheet's reconciliation (rekey/rekeyLedger.ts) is what closes both to
+ * the cent on F-RK2 and RO 21011:
+ *
+ *   - each labor category prints hours × rate PLUS a "Sublet / Add'l" amount,
+ *     the dollars of the untaxed sublet rows and untyped priced rows that bill
+ *     it (three scans, $569.50, inside F-RK2's $584.50 Mechanical Labor). Those
+ *     dollars are on lines, so they are booked here as non-labor money and the
+ *     labor cost is hours × rate; left in labor, $579.50 of F-RK2's line
+ *     prices had no printed non-labor figure to reproduce, and the ledger
+ *     counted them as a rate gap;
+ *   - "Parts Adjustments" is a markup the platform computes on its taxed
+ *     sublet parts (25% of $1,095.45 on F-RK2). It is non-labor money that no
+ *     line carries, so it stays in `misc` and is named in `unlinedNonLabor`.
+ */
+export function totalsFromReconciliation(
+  reconciliation: ForensicReconciliation,
+  side: "higher" | "lower",
+  platform: EstimatePlatform | null = null
+): TotalsRead {
+  const mitchell = platform === "mitchell";
   const check = side === "higher" ? reconciliation.higherCheck : reconciliation.lowerCheck;
   const subtotal = side === "higher" ? reconciliation.higherSubtotal : reconciliation.lowerSubtotal;
   const tax = side === "higher" ? reconciliation.higherTax : reconciliation.lowerTax;
@@ -88,10 +112,18 @@ export function totalsFromReconciliation(reconciliation: ForensicReconciliation,
       // it; only materials and supplies print an hours basis without being
       // labor. Matching labels alone booked RO 22299's "Bonded Or Welded
       // Panel Replace 24.5 hrs @ $135" as parts money.
-      if (own !== null) totals.labor.push({ cat: labelCat(row.category), label: row.category, hours, rate, cost });
+      if (own !== null) {
+        // Within half a cent of hours × rate is the print's own rounding, not an amount.
+        const subletAddl = mitchell && Math.abs(cost - hours * rate) > 0.006 ? round2(cost - hours * rate) : 0;
+        totals.labor.push({ cat: labelCat(row.category), label: row.category, hours, rate, cost: round2(cost - subletAddl) });
+        if (subletAddl !== 0) totals.misc = round2(totals.misc + subletAddl);
+      }
     } else {
       // Miscellaneous, sublet, and any flat-priced category with no hours basis.
       totals.misc = round2(totals.misc + cost);
+      if (mitchell && cost !== 0 && /^parts\s+adjustments?$/i.test(row.category.trim())) {
+        totals.unlinedNonLabor = [...(totals.unlinedNonLabor ?? []), { label: row.category, cost }];
+      }
     }
   }
   const userCategories = totals.labor.filter((l: LaborTotal) => !STANDARD_LABOR.test(l.label.trim()));
@@ -221,6 +253,21 @@ export function estimateFromDeltaRows(params: {
     highest = row.lineNumber;
     return true;
   });
+  // A Mitchell print lists its computed paint materials as a line as well
+  // ("Additional Cost Paint/Materials $912.00" on F-RK2) and books the same
+  // dollars as the totals block's Paint Materials. Read with its price, the
+  // line counted them twice and stood as a $912.00 carrier line "not on our
+  // sheet". The rekey sheet keys no such line (a profile setting); here the
+  // line keeps its number but carries no price, and only when those lines
+  // carry exactly the printed paint materials figure.
+  const materialsLines =
+    detectEstimatePlatform(params.text) === "mitchell"
+      ? rows.filter((row) => row.price !== null && !row.partNumber && !(row.partSource ?? []).length && isProfileRoutedCost(row.description))
+      : [];
+  const materialsDollars = round2(materialsLines.reduce((sum, row) => sum + (row.price ?? 0), 0));
+  const unpriced = new Set(
+    materialsLines.length && materialsDollars === round2(params.totals.paintSupplies.cost) ? materialsLines : []
+  );
   const lines: EstimateLine[] = rows.map((row, index) => {
     let desc = row.description.trim();
     let supplement = row.supplementTag ?? undefined;
@@ -265,7 +312,7 @@ export function estimateFromDeltaRows(params: {
       desc,
       partNumber,
       qty: row.qty ?? undefined,
-      price: row.price ?? undefined,
+      price: unpriced.has(row) ? undefined : row.price ?? undefined,
       hours,
       laborCat,
       paintHours: row.paint ?? undefined,

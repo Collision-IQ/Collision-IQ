@@ -10,14 +10,14 @@
  *
  * Every line on both sheets is assigned to exactly one unit — an equivalence
  * group, a matcher pair, a same-part / same-component pair, or a one-sided
- * line — and each unit is valued at OUR rates on both sides. Paint materials
- * and any open labor-rate gap are their own units. The view is returned only
- * when the units plus tax reproduce the printed gap within $0.01; otherwise it
- * is null and nothing is printed.
+ * line — and each unit is valued at OUR rates on both sides. Paint materials,
+ * printed dollars no line carries and any open labor-rate gap are their own
+ * units. The view is returned only when the units plus tax reproduce the
+ * printed gap within $0.01; otherwise it is null and nothing is printed.
  */
 import { shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
 import { normalizePartNumber, qualifierStem } from "./integrityChecks";
-import { classifyNonLabor } from "./nonLaborBuckets";
+import { classifyNonLabor, unlinedNonLaborCost } from "./nonLaborBuckets";
 import type { MatcherPair } from "./argueItems";
 import type { GroupDelta } from "./operationEquivalence";
 import { round2, type Estimate, type EstimateLine } from "./types";
@@ -175,6 +175,12 @@ export function assignUnits(params: {
   for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(c.desc, [], [c]);
   if (ledger.paintMaterials !== 0) units.push({ label: "Paint materials", shopLines: [], carrierLines: [], diff: ledger.paintMaterials });
   if (ledger.otherMaterials !== 0) units.push({ label: "Other materials", shopLines: [], carrierLines: [], diff: ledger.otherMaterials });
+  // A printed figure no line carries (Mitchell's Parts Adjustments) is its own unit.
+  const unlined = round2(unlinedNonLaborCost(shop) - unlinedNonLaborCost(carrier));
+  if (unlined !== 0) {
+    const labels = [...new Set([shop, carrier].flatMap((e) => (e.totals.unlinedNonLabor ?? []).map((item) => item.label)))];
+    units.push({ label: labels.join(" / "), shopLines: [], carrierLines: [], diff: unlined });
+  }
   if (ledger.laborRate !== 0) units.push({ label: "Labor rate", shopLines: [], carrierLines: [], diff: ledger.laborRate });
   return { units, shopToCarrier };
 }

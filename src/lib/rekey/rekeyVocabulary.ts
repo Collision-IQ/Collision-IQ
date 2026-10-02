@@ -79,6 +79,7 @@ const SECTION_GROUPS = VOCABULARY.sectionGroups as SectionGroupEntry[];
 const KNOWN_CCC_GROUPS = VOCABULARY.knownCccGroups as string[];
 const GROUP_ORDER = VOCABULARY.groupOrder as string[];
 const DIAGNOSTICS_KEYWORDS = VOCABULARY.diagnosticsKeywords as string[];
+const PROFILE_ROUTED_COST_LABELS = (VOCABULARY.profileRoutedCostLabels as string[]).map(normalizeVocabularyText);
 
 /** Uppercase, punctuation collapsed to single spaces, whitespace collapsed. */
 export function normalizeVocabularyText(value: string | null | undefined): string {
@@ -494,6 +495,19 @@ export function isDiagnosticsOperation(description: string | null | undefined): 
   if (!normalized) return false;
   const padded = ` ${normalized} `;
   return DIAGNOSTICS_KEYWORDS.some((keyword) => padded.includes(` ${normalizeVocabularyText(keyword)} `));
+}
+
+/**
+ * A charge the platform computes from a profile rate (paint materials:
+ * refinish units x the materials rate) rather than a keyed line. A Mitchell
+ * print lists it as a line too ("Paint/Materials", Additional Cost), and its
+ * dollars are the totals block's materials figure, not a line's.
+ */
+export function isProfileRoutedCost(description: string | null | undefined): boolean {
+  const normalized = normalizeVocabularyText(description);
+  if (!normalized) return false;
+  const padded = ` ${normalized} `;
+  return PROFILE_ROUTED_COST_LABELS.some((label) => label && (normalized === label || padded.includes(` ${label} `)));
 }
 
 /** CCC group print order; unmapped and unlisted groups sort last, stably. */

@@ -56,6 +56,13 @@ export interface EstimateTotals {
    * reproduce). Absent when the document prints none.
    */
   otherMaterials?: Array<{ label: string; hours: number; rate: number; cost: number }>;
+  /**
+   * Printed non-labor dollars, already counted in `parts` + `misc`, that no
+   * estimate line carries: Mitchell's "Parts Adjustments", a markup the
+   * platform computes on its taxed sublet parts. The line read is held to
+   * `parts` + `misc` less these. Absent when the document prints none.
+   */
+  unlinedNonLabor?: Array<{ label: string; cost: number }>;
   subtotal: number;
   tax: number;
   /** Grand Total / Total Cost of Repairs — never the net-of-deductible figure. */
