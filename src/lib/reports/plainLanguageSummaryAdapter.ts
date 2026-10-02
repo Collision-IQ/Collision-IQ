@@ -12,7 +12,8 @@
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "./estimateDeltaMatcher";
 import type { ForensicReconciliation } from "./forensicEstimateAnalysis";
 import type { PlainSummaryInput } from "./plainLanguageSummary";
-import { estimateFromDeltaRows, lineHoursRead, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
+import { estimateFromDeltaRows, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
+import { lineHoursRead, unreadCarrierHours } from "./appraisalSummary/gapLedger";
 
 export type PlainSummaryAdapterInput = {
   reconciliation: ForensicReconciliation;
@@ -79,14 +80,19 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
     text: input.lowerText,
   });
   // Every hour the report quotes is a line's, so lines that do not reproduce
-  // their own printed hours ship no report (the typed lane's RC-3 rule).
+  // their own printed hours ship no report (the typed lane's RC-3 rule). One
+  // exception: their CCC sheet reading SHORT in both columns is rows the read
+  // missed, which the ledger discloses as unread hours and for which the
+  // report argues no item (GapLedger.unreadCarrierHours). Our sheet, and a
+  // column over its print on either, still refuse: a misread hour is quoted.
   const unreadHours = [
     { estimate: shop, which: "our" },
     { estimate: carrier, which: "their" },
   ].flatMap(({ estimate, which }) => {
     const read = lineHoursRead(estimate);
     const hr = (n: number) => n.toFixed(1);
-    return read.closes
+    const disclosed = estimate === carrier && unreadCarrierHours(carrier) > 0;
+    return read.closes || disclosed
       ? []
       : [
           `${which} estimate's lines carry ${hr(read.labor.lines)} labor and ${hr(read.paint.lines)} paint hours as read, but it prints ${hr(read.labor.printed)} and ${hr(read.paint.printed)}`,
