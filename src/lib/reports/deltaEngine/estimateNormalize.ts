@@ -239,6 +239,57 @@ export function repairTokens(value: string): string {
   return out;
 }
 
+/*
+ * OCR DROPS DECIMAL POINTS, NEVER DIGITS, IN CCC'S FIXED-FORMAT CELLS.
+ *
+ * CCC prints every money cell with two decimals and every hours cell with
+ * one. Tesseract reading a small table glyph can lose the point and keep the
+ * digits: an image-only USAA SOR (RO 22279) read "1 5.00 T" as "1 500 T",
+ * "0.5 M" as "05 M", and "Paint Labor 5.2 hrs @ $65.00 /hr 338.00" as "52hrs".
+ * These helpers only put the point back into digits that were read; whether a
+ * restored value is USED is decided by the caller against a printed figure
+ * that proves it (the row's own rate × cost, or the document's SUBTOTALS).
+ */
+
+/** "500" → "5.00", "18750" → "187.50", "1,05950" → "1,059.50"; null when the token is not a pointless money cell. */
+export function restoreMoneyPoint(token: string): string | null {
+  const match = token.match(/^(-?)(\d{1,3}(?:,\d{3})*)(\d{2})$/);
+  if (!match) return null;
+  // CCC never prints a leading-zero dollar figure ("0500" is not $5.00).
+  if (/^0\d/.test(match[2])) return null;
+  return `${match[1]}${match[2]}.${match[3]}`;
+}
+
+/** "05" → "0.5", "52" → "5.2", "163" → "16.3", "-05" → "-0.5"; a single digit never qualifies. */
+export function restoreHoursPoint(token: string): string | null {
+  const match = token.match(/^(-?)(\d{1,2})(\d)$/);
+  if (!match) return null;
+  if (/^0\d/.test(match[2])) return null;
+  return `${match[1]}${match[2]}.${match[3]}`;
+}
+
+/**
+ * The hours a totals row printed, when OCR dropped its decimal point: only
+ * when the token as read does NOT multiply out to the printed cost and the
+ * restored value DOES (to a cent of print rounding). Anything else — a token
+ * that carries a point, a read that already reconciles, a value neither
+ * reading proves — returns null and the read stands. This never derives
+ * hours from cost ÷ rate; it restores a point into digits that were read.
+ */
+export function restoreDroppedHoursDecimal(
+  hoursToken: string,
+  rate: number | null,
+  cost: number | null
+): number | null {
+  if (rate === null || cost === null || !(rate > 0)) return null;
+  const token = hoursToken.trim();
+  const restored = restoreHoursPoint(token);
+  if (restored === null) return null;
+  const centsOff = (hours: number) => Math.abs(Math.round(hours * rate * 100) - Math.round(cost * 100));
+  if (centsOff(Number(token)) <= 1) return null;
+  return centsOff(Number(restored)) <= 1 ? Number(restored) : null;
+}
+
 /** Normalized side of a two-sided operation — NEVER a raw vocabulary token. */
 export type SideEnum = "left" | "right" | "";
 /** Normalized position axis (a side group can be 2-way OR 4-way: LT/RT Front + LT/RT Rear). */

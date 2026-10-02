@@ -284,6 +284,7 @@ export function estimateFromDeltaRows(params: {
     lines,
     altPartsUsage: altPartsUsageFromText(params.text),
     deductible: deductibleFromText(params.text),
+    platform: detectEstimatePlatform(params.text),
   };
 }
 

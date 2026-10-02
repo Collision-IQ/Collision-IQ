@@ -21,6 +21,7 @@ import {
   isContactInformationRow,
   repairTokens,
   learnConfusableRepairs,
+  restoreDroppedHoursDecimal,
   withDocumentRepairs,
   type CanonKey,
 } from "./estimateNormalize";
@@ -721,6 +722,7 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
     for (const ws of rows.slice(heading + 1)) {
       const categoryWords: string[] = [];
       let hours: number | null = null;
+      let hoursToken: string | null = null;
       let hoursBox: CellBox | null = null;
       let rate: number | null = null;
       let rateBox: CellBox | null = null;
@@ -733,6 +735,7 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
         const hrsMatch = /^([\d.,]+)hrs$/i.exec(text);
         if (hrsMatch) {
           hours = parseFloat(hrsMatch[1].replace(/,/g, ""));
+          hoursToken = hrsMatch[1];
           hoursBox = box;
           continue;
         }
@@ -767,6 +770,11 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
         }
         if (/[A-Za-z]/.test(text)) categoryWords.push(text);
       }
+      // A glued "52hrs" whose point was dropped (printed 5.2): restored only
+      // when this row's own rate × amount proves it, exactly as the text
+      // reader does — otherwise merging the word categories over the text
+      // read would put the wrong hours back.
+      if (hoursToken !== null && hours !== null) hours = restoreDroppedHoursDecimal(hoursToken, rate, amount) ?? hours;
       const category = categoryWords.join(" ").trim();
       if (!category) continue;
       const squashed = category.replace(/\s/g, "").toUpperCase();

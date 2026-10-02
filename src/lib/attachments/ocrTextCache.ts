@@ -1,4 +1,5 @@
 import { getPdfOcrMaxPages } from "@/lib/attachments/ocrPdfFallback";
+import { OCR_TEXT_HEADER, OCR_TEXT_MARKER } from "@/lib/attachments/ocrTextMarker";
 
 // Cache for tesseract OCR output of scanned/image-only PDFs. A full OCR pass
 // takes 45-80s per document; re-uploading the same file (byte-identical, keyed
@@ -13,12 +14,10 @@ import { getPdfOcrMaxPages } from "@/lib/attachments/ocrPdfFallback";
 /**
  * Stable prefix every OCR-recovered attachment text starts with. The cache
  * lookup matches on this prefix, so it must never change without a migration
- * plan for existing rows (annotatedCitationDensityEstimate also sniffs it).
+ * plan for existing rows (annotatedCitationDensityEstimate and the CCC row
+ * reader also sniff it). Defined in the dependency-free ocrTextMarker module.
  */
-export const OCR_TEXT_MARKER = "[[OCR text recovered";
-
-export const OCR_TEXT_HEADER =
-  "[[OCR text recovered from a scanned/image-only PDF. Machine-read; verify figures against the source.]]";
+export { OCR_TEXT_HEADER, OCR_TEXT_MARKER };
 
 const TRUNCATION_NOTE_REGEX =
   /\[\[OCR page limit reached: only the first (\d+) of (\d+) pages/;
