@@ -554,8 +554,8 @@ describe("D5 — one counterpart per run", () => {
     for (const candidates of [[ia, theirs], [theirs, ia]]) {
       expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: theirs, unidentified: [] });
     }
-    // The insurer's own estimate named "Staff appraiser" is backed by its licensed
-    // writer, so a later brand-named file (our final) never outranks it.
+    // The insurer's own estimate named "Staff appraiser" is as plain as SOR, so a
+    // later brand-named file (our final) never outranks it.
     const staff = { ...sor, fileName: "Staff appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: MONICA ROE, License Number: 271128\n${sorText}` };
     const ourBranded = { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const };
     for (const candidates of [[staff, ourBranded], [ourBranded, staff]]) {
@@ -563,14 +563,29 @@ describe("D5 — one counterpart per run", () => {
       expect(selection.counterpart).toBe(staff);
       expect(selection.unidentified.length).toBe(2);
     }
-    // A licensed independent appraiser printed after the SOR is never theirs.
-    const licensedIa = { ...shopFinal, fileName: "Independent Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: JOHN DOE, License Number: 5\n${shopFinal.text}` };
-    expect(selectComparisonCounterpart([licensedIa, { ...sor, estimateRole: "carrier" as const }], { sourceParty: "shop" }).unidentified.length).toBe(2);
-    // Printed after the SOR, it makes the run unsettled instead of being called theirs.
+    // Another party's appraiser, licensed or not, printed before or after, is set
+    // aside: a license line does not say whose appraiser wrote it.
+    const theirsSor = { ...sor, estimateRole: "carrier" as const };
+    const theirsBrand = { ...sor, fileName: "USAA 22279.pdf", estimateRole: "carrier" as const };
+    for (const name of ["Independent Appraiser 22279.pdf", "Insured's Appraiser 22279.pdf", "Policyholder appraiser estimate.pdf", "Customer appraiser 22279.pdf", "Owner's appraiser.pdf"]) {
+      const other = { ...shopFinal, fileName: name, estimateRole: "carrier" as const, text: `Written By: JOHN DOE, License Number: 5\nItems omitted from the USAA estimate\n${shopFinal.text}` };
+      for (const insurer of [theirsSor, theirsBrand]) {
+        for (const candidates of [[other, insurer], [insurer, other]]) {
+          expect(selectComparisonCounterpart(candidates, { sourceParty: "shop" })).toMatchObject({ counterpart: insurer, unidentified: [] });
+        }
+      }
+    }
+    // A bare "appraiser" is a weak mark: against a later brand-named file the run is unsettled.
+    const bare = { ...sor, fileName: "Appraiser 22279.pdf", estimateRole: "carrier" as const, text: `Written By: MONICA ROE, License Number: 271128\n${sorText}` };
+    const laterBrand = { ...shopFinal, fileName: "USAA 22279 Final.pdf", estimateRole: "carrier" as const };
+    expect(selectComparisonCounterpart([bare, laterBrand], { sourceParty: "shop" }).unidentified.length).toBe(2);
+    // Printed after the SOR, it is still set aside, never called theirs.
     const later = { ...ia, text: `Written By: JOHN DOE, 1\n${shopFinal.text}` };
     const sorNamed = { ...sor, estimateRole: "carrier" as const };
-    expect(selectComparisonCounterpart([later, sorNamed], { sourceParty: "shop" })).toMatchObject({ counterpart: sorNamed });
-    expect(selectComparisonCounterpart([later, sorNamed], { sourceParty: "shop" }).unidentified.length).toBe(2);
+    expect(selectComparisonCounterpart([later, sorNamed], { sourceParty: "shop" })).toMatchObject({ counterpart: sorNamed, unidentified: [] });
+    // Only another party's appraisers on the case: nothing is the insurer's.
+    const second = { ...ia, fileName: "Insured's Appraiser 22279.pdf" };
+    expect(selectComparisonCounterpart([later, second], { sourceParty: "shop" }).unidentified.length).toBe(2);
   });
 
   it("names an Estimate of Record as such, never 'supplement 0'", () => {
