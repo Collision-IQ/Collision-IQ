@@ -887,6 +887,78 @@ function countPageChromeRepeats(lines: PdfTextLine[]): Map<PdfTextLine, number> 
   return repeats;
 }
 
+/**
+ * The line-number column, measured per document from the print itself. A
+ * description that wraps can start its second line with a digit ("3 Ft" under
+ * "Trim Masking Tape-3M 06347-Per", "6.5mm", "8.0x5-0.9"), and read as text
+ * alone that digit is a line number. Geometrically it is not: printed line
+ * numbers sit in the first column at the left margin, while the wrap starts in
+ * the description column.
+ *
+ * Samples are lines whose first word is a bare 1-4 digit token followed by
+ * more text. The column is the densest run of their left edges, where starts
+ * closer than one text height belong together: line numbers are right-aligned,
+ * so numbers of different widths start a digit or two apart, and the next
+ * column starts many ems to the right. Its extent is the run's right edge.
+ *
+ * Returns null, leaving the text-only reading in place, when the lines carry
+ * no measured words (stored-text synthetic lines), when fewer than three
+ * starts form the run, or when the run does not hold most of the starts.
+ */
+function measureLineNumberColumn(lines: PdfTextLine[]): { right: number; em: number } | null {
+  const starts = lines
+    .filter((line) => line.words.length > 1 && /^\d{1,4}$/.test(line.words[0].text.trim()))
+    .map((line) => line.words[0])
+    .sort((a, b) => a.x - b.x);
+  if (!starts.length) return null;
+  const heights = starts.map((word) => word.height).sort((a, b) => a - b);
+  const em = heights[Math.floor(heights.length / 2)];
+  let column: PdfWord[] = [];
+  let run: PdfWord[] = [];
+  for (const word of starts) {
+    if (run.length && word.x - run[run.length - 1].x > em) run = [];
+    run.push(word);
+    if (run.length > column.length) column = run;
+  }
+  if (column.length < 3 || column.length * 2 <= starts.length) return null;
+  return { right: Math.max(...column.map((word) => word.x + word.width)), em };
+}
+
+/**
+ * True when a measured line starts more than one em right of the line-number
+ * column: whatever digits it opens with, it began in a later column and is
+ * not a row's line number.
+ */
+function startsPastLineNumberColumn(line: PdfTextLine, column: { right: number; em: number } | null): boolean {
+  if (!column || !line.words.length) return false;
+  return line.words[0].x > column.right + column.em;
+}
+
+/**
+ * Where a digit-led wrap's text belongs in the row it continues: at the end of
+ * the row's description cell, ahead of its value columns, which is the order
+ * the text layer prints ("…06347-Per 3 Ft 1 7.08 T"). Appended after the
+ * values instead, the wrap's digits read as columns: "…06347-Per 1 7.04 T
+ * 3 Ft" parses 3.0 labor hours. Measured from the row's own words: the cell
+ * opens at the column where the wrap starts and closes at the first gap wider
+ * than one em, the whitespace before the part-number, quantity or price
+ * column. Returns the character offset in `rowText` where the cell ends, or
+ * null when the row has no word at that column (the wrap is then appended).
+ */
+function measureDescriptionCellEnd(row: PdfTextLine, rowText: string, cellLeft: number, em: number): number | null {
+  const words = row.words;
+  let last = words.findIndex((word) => Math.abs(word.x - cellLeft) <= em / 2);
+  if (last < 0) return null;
+  while (last + 1 < words.length && words[last + 1].x - (words[last].x + words[last].width) <= em) last += 1;
+  const cell = words
+    .slice(0, last + 1)
+    .map((word) => word.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return rowText.startsWith(cell) ? cell.length : null;
+}
+
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
   const anchors: EstimateRowAnchor[] = [];
   let section = "";
@@ -895,10 +967,21 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
    * belongs to the note, never to the row description. */
   let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
+  const lineNumberColumn = measureLineNumberColumn(lines);
+  /** The printed line each operation anchor was opened from. */
+  const anchorLines = new Map<EstimateRowAnchor, PdfTextLine>();
+  /** Where the next digit-led wrap goes in an anchor's rowText, so a second
+   * one lands after the first instead of ahead of it. */
+  const wrapInsertOffsets = new Map<EstimateRowAnchor, number>();
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
     if (isGenericOrMalformedAnchorText(line.text)) continue;
-    const lineNumber = extractLineNumber(line.text);
+    // A leading number counts as a line number only when the line starts in
+    // the measured line-number column. A digit-led wrap that starts in the
+    // description column carries no line number and continues the row above.
+    const printedNumber = extractLineNumber(line.text);
+    const wrappedPastLineNumberColumn = printedNumber !== null && startsPastLineNumberColumn(line, lineNumberColumn);
+    const lineNumber = wrappedPastLineNumberColumn ? null : printedNumber;
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
     // The running section may only advance on a header that sits INSIDE the
@@ -930,7 +1013,13 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // Nor does text outside the region continue a row: the last row above the
     // SUBTOTALS rule must not absorb a totals block the print does not label
     // in words the totals test knows (an OCR'd "ESTIMATETOTALS").
-    if (inRegion && !lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+    if (
+      inRegion &&
+      !lineNumber &&
+      previousEstimateRow &&
+      line.pageNumber === previousEstimateRow.pageNumber &&
+      shouldAttachContinuationLine(line, type, { digitLedWrap: wrappedPastLineNumberColumn })
+    ) {
       // A NOTE wraps. Its second line carries no "Note:" prefix of its own
       // ("Note: PARTS: … LABOR:" / "Time includes R&R grommets and gasket."),
       // so testing that line in isolation reads it as row description and the
@@ -938,10 +1027,19 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       // "LT Tail lamp assy Time includes R&R grommets and gasket." Anything
       // continuing a line that was itself note payload is note payload.
       const asNote: boolean = lastWasNoteLine || type === "line_note" || isNoteContinuation(line.text);
+      const parentLine = anchorLines.get(previousEstimateRow);
+      const insertAt =
+        wrappedPastLineNumberColumn && !asNote && lineNumberColumn && parentLine
+          ? wrapInsertOffsets.get(previousEstimateRow) ??
+            measureDescriptionCellEnd(parentLine, previousEstimateRow.rowText, line.words[0].x, lineNumberColumn.em) ??
+            undefined
+          : undefined;
       attachContinuationLine(previousEstimateRow, line, {
         asNote,
         forceType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : undefined,
+        insertAt,
       });
+      if (insertAt !== undefined) wrapInsertOffsets.set(previousEstimateRow, insertAt + 1 + line.text.length);
       lastWasNoteLine = asNote;
       continue;
     }
@@ -994,7 +1092,10 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       anchor.normalizedSupplierText = line.normalizedText;
     }
     anchors.push(anchor);
-    previousEstimateRow = type === "estimate_line" || type === "line_note" || type === "embedded_link_row" ? anchor : previousEstimateRow;
+    if (type === "estimate_line" || type === "line_note" || type === "embedded_link_row") {
+      previousEstimateRow = anchor;
+      anchorLines.set(anchor, line);
+    }
   }
 
   return anchors;
@@ -1072,14 +1173,20 @@ export function buildMeasuredEngineRowAnchor(params: {
   };
 }
 
-function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchorType | null) {
+function shouldAttachContinuationLine(
+  line: PdfTextLine,
+  type: EstimateRowAnchorType | null,
+  options: { digitLedWrap?: boolean } = {}
+) {
   if (type === "section_row" || type === "totals_row" || type === "supplier_row" || type === "guide_row") return false;
   if (type === "line_note" || type === "embedded_link_row") return true;
   if (detectSection(line.text)) return false;
   if (isGenericOrMalformedAnchorText(line.text)) return false;
   const normalized = normalizeMatchText(line.text);
   if (!normalized) return false;
-  if (/^\d{1,4}\b/.test(normalized)) return false;
+  // A leading number opens a new row, unless the geometry measured the line
+  // as a wrap that starts past the line-number column.
+  if (!options.digitLedWrap && /^\d{1,4}\b/.test(normalized)) return false;
   // End-of-table boundary: the last estimate row must never absorb the totals
   // header or the page's trailing prose ("Category Basis Rate Cost $ This
   // estimate is based on our initial visual inspection…") — a badge anchored
@@ -1095,13 +1202,16 @@ function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchor
 function attachContinuationLine(
   anchor: EstimateRowAnchor,
   line: PdfTextLine,
-  options: { asNote: boolean; forceType?: EstimateRowAnchorType }
+  options: { asNote: boolean; forceType?: EstimateRowAnchorType; insertAt?: number }
 ) {
   if (options.asNote) {
     anchor.noteText = `${anchor.noteText ? `${anchor.noteText} ` : ""}${line.text}`;
     anchor.normalizedNoteText = normalizeMatchText(anchor.noteText);
   } else {
-    anchor.rowText = `${anchor.rowText} ${line.text}`.replace(/\s+/g, " ").trim();
+    // Wrapped text joins the end of the row unless a measured insertion point
+    // places it inside the description cell (see measureDescriptionCellEnd).
+    const at = options.insertAt ?? anchor.rowText.length;
+    anchor.rowText = `${anchor.rowText.slice(0, at)} ${line.text} ${anchor.rowText.slice(at)}`.replace(/\s+/g, " ").trim();
     anchor.normalizedRowText = normalizeMatchText(anchor.rowText);
     const parsed = parseEstimateRowFields(anchor.rowText, anchor.lineNumber);
     anchor.operation = parsed.operation;
