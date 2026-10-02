@@ -84,6 +84,66 @@ export function sameEstimator(a: string, b: string): boolean {
 }
 
 /**
+ * A printed identifier as compared, OCR's O/I/L read as 0/1. It must carry a
+ * digit as printed (a label word read as the value, "Federal", never counts),
+ * and a run of one character is a placeholder, not an identifier.
+ */
+function printedIdentifier(value: string | undefined, shape: RegExp): string | null {
+  if (!value || !/\d/.test(value)) return null;
+  const folded = value.toLowerCase().replace(/o/g, "0").replace(/[il]/g, "1").replace(/-/g, "");
+  return shape.test(folded) && !/^(.)\1*$/.test(folded) ? folded : null;
+}
+
+/**
+ * The CCC workfile a print belongs to ("Workfile ID: 613bea70"); null when
+ * none is printed. One workfile is one party's: a shop's supplements stay in
+ * its workfile, and the insurer writes in its own. A text layer can print
+ * the header's labels together and their values after them ("Workfile ID:\n
+ * Federal ID:\nb19d93b9\n27-0822500"), where the next token is "Federal".
+ */
+export function readPrintedWorkfileId(text: string): string | null {
+  const source = text ?? "";
+  const value =
+    source.match(/Workfile\s*ID:?\s*Federal\s*ID:?\s*([0-9A-Za-z]{6,12})(?![0-9A-Za-z])/i)?.[1] ??
+    source.match(/Workfile\s*ID:?[ \t]*([0-9A-Za-z]{6,12})(?![0-9A-Za-z])/i)?.[1] ??
+    source.match(/Workfile\s*ID:?[ \t]*\r?\n[ \t]*([0-9A-Za-z]{6,12})[ \t]*(?:\r?\n|$)/i)?.[1];
+  return printedIdentifier(value, /^[0-9a-z]{6,12}$/);
+}
+
+/**
+ * The writer's Federal ID, read only from the header that prints its
+ * Workfile ID (on the same or one of the next two lines, or after it in the
+ * labels-then-values layout): a repair facility named elsewhere on an
+ * insurer's print is not the print's writer.
+ */
+export function readPrintedFederalId(text: string): string | null {
+  const source = text ?? "";
+  const glued = source.match(/Workfile\s*ID:?\s*Federal\s*ID:?\s*[0-9A-Za-z]{6,12}\s+(\d{2}-?\d{7})(?!\d)/i)?.[1];
+  const header = source.match(/Workfile\s*ID:?[^\n]*(?:\r?\n[^\n]*){0,2}/i)?.[0] ?? "";
+  return printedIdentifier(glued ?? header.match(/Federal\s*ID:?[ \t]*(\d{2}-?\d{7})(?!\d)/i)?.[1], /^\d{9}$/);
+}
+
+export type PrintedPartyMatch = "estimator" | "Workfile ID" | "Federal ID";
+
+/**
+ * What makes `other` the same party's estimate as `ours`, whatever its file
+ * name says: the same printed estimator, the same CCC workfile, or the same
+ * writer's Federal ID. Null when nothing printed ties them. A licensed
+ * appraiser printed on `other` who is not shown to be our estimator voids
+ * the workfile and Federal ID: an insurer's Estimate of Record printed from
+ * our own system (an assignment) carries our header, but it is the insurer's.
+ */
+export function samePrintedParty(ours: string, other: string): PrintedPartyMatch | null {
+  if (sameEstimator(ours, other)) return "estimator";
+  if (printsAppraiserLicense(other)) return null;
+  const workfile = readPrintedWorkfileId(ours);
+  if (workfile !== null && workfile === readPrintedWorkfileId(other)) return "Workfile ID";
+  const federal = readPrintedFederalId(ours);
+  if (federal !== null && federal === readPrintedFederalId(other)) return "Federal ID";
+  return null;
+}
+
+/**
  * A file name as words: camel case and every separator split, so tokens
  * match whole ("GeicoSupplement1" -> "geico supplement1", "SOR-1_22279" ->
  * "sor 1 22279"; "Windsor" is not "SOR", "Spartan" is not "RTA").
@@ -106,11 +166,54 @@ const INSURER_WORD = /\b(?:sor\d*|carriers?|insur(?:ance|er|ers)|adjusters?)\b/;
  */
 const APPRAISER_WORD = /\bappraisers?\b/;
 const INSURER_APPRAISER = /\b(?:staff|company|desk|field)\s+appraisers?\b/;
-/** The qualifier right before "appraiser" ("insured's appraiser" reads "insured s appraiser"). */
-const OTHER_APPRAISER = /\b(?:independent|insureds?|policy ?holders?|owners?|claimants?|customers?|umpires?|ia|our|my)(?: s)? appraisers?\b/;
+/**
+ * Another party's by name, whatever else the name says: the insured's,
+ * owner's or claimant's own appraiser ("insured's appraiser" reads "insured s
+ * appraiser"), ours, an umpire, an appraisal award, a public adjuster. A
+ * shop files every claim document under the insurer's name, so neither the
+ * brand nor a word about the insurer ("vs carrier") makes one the insurer's.
+ */
+const OTHER_PARTY =
+  /\b(?:(?:insureds?|policy ?holders?|owners?|claimants?|customers?|our|my)(?: s)? appraisers?|appraisers? for (?:the )?(?:insureds?|policy ?holders?|owners?|claimants?)|umpires?|award|public adjusters?)\b/;
+/** An independent appraiser ("IA") is hired by either side: another party's only when nothing in the name marks it the insurer's. */
+const INDEPENDENT_APPRAISER = /\b(?:independent|ia)(?: s)? appraisers?\b/;
 /** An insurer's brand: a shop names its own files this way too, so it is weaker evidence. */
 const INSURER_BRAND = /\b(?:geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)\b/;
 const SHOP_WORD = /\b(?:shop|repair facility|rta|appraisal)\b/;
+/**
+ * The insurer named as the addressee or subject of the file, not its author:
+ * "sent to insurance", "request to carrier", "post SOR", "vs SOR",
+ * "SOR response" name a shop's file about the insurer's estimate.
+ */
+const INSURER_TERM = "(?:sor\\d*|carriers?|insur(?:ance|er|ers)|adjusters?|geico|state ?farm|progressive|allstate|usaa|nationwide|liberty ?mutual|farmers|travelers)";
+const INSURER_REFERENCE = new RegExp(
+  `\\b(?:to|for|vs|versus|v|re|post|after|against|per)(?: the)? ${INSURER_TERM}(?: \\d+)?\\b|\\b${INSURER_TERM}(?: \\d+)? (?:response|rebuttal|reply)\\b`,
+  "g"
+);
+/** The name's words with every mere reference to the insurer taken out. */
+const authorshipWords = (words: string) => ` ${words.replace(INSURER_REFERENCE, " ").replace(/\s+/g, " ").trim()} `;
+const marksInsurer = (named: string) => INSURER_WORD.test(named) || INSURER_APPRAISER.test(named) || INSURER_BRAND.test(named);
+
+/**
+ * Whose appraiser a file's name says it is, when not the insurer's own:
+ * "other" for an insured's, owner's or claimant's appraiser, an umpire, an
+ * appraisal award or a public adjuster; "independent" for an independent
+ * appraiser the name does not mark as the insurer's (either side hires one).
+ */
+function appraiserNamed(fileName: string): "other" | "independent" | null {
+  const words = nameWords(fileName);
+  if (OTHER_PARTY.test(words)) return "other";
+  return INDEPENDENT_APPRAISER.test(words) && !marksInsurer(authorshipWords(words)) ? "independent" : null;
+}
+
+/**
+ * True when a file's name marks it as an appraiser's estimate that is not
+ * shown to be the insurer's (an insured's, owner's or independent
+ * appraiser, an umpire, an appraisal award, a public adjuster).
+ */
+export function namesAnotherPartysEstimate(fileName: string): boolean {
+  return appraiserNamed(fileName) !== null;
+}
 
 export type CounterpartCandidate = {
   fileName: string;
@@ -217,31 +320,37 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
 
   // What each estimate's own print and name say about whose it is. The
   // caller's label is not evidence here: the route labels an unmarked file
-  // by a last-resort guess. Ours: the same printed estimator, or a name
+  // by a last-resort guess. Ours: what it prints ties it to the annotated
+  // estimate (the same estimator, CCC workfile or Federal ID), or a name
   // marking it as the source party's. Theirs, most plainly first: a word
   // naming the document as theirs, their brand in the name, their authorship
   // phrase in the text (a shop note — "BLEND NOT ON USAA ESTIMATE" — reads
-  // the same, so it is the weakest).
+  // the same, so it is the weakest). A name that only addresses the insurer
+  // ("Supplement sent to insurance", "post SOR") marks nothing.
   const shopSource = options.sourceParty === "shop";
   const evidence = new Map(
     base.map((candidate) => {
       const words = nameWords(candidate.fileName);
+      const named = authorshipWords(words);
       const authored = isCarrierAuthoredEstimateDocument({ filename: "", text: candidate.text });
-      const byEstimator = Boolean(options.sourceText) && sameEstimator(options.sourceText!, candidate.text);
-      const ours = byEstimator || (shopSource ? SHOP_WORD.test(words) : INSURER_WORD.test(words) || INSURER_BRAND.test(words));
+      const byPrint = options.sourceText ? samePrintedParty(options.sourceText, candidate.text) : null;
+      const ours = byPrint !== null || (shopSource ? SHOP_WORD.test(named) : INSURER_WORD.test(named) || INSURER_BRAND.test(named));
       const tier = shopSource
-        ? INSURER_WORD.test(words) || INSURER_APPRAISER.test(words)
+        ? INSURER_WORD.test(named) || INSURER_APPRAISER.test(named)
           ? 3
-          : INSURER_BRAND.test(words)
+          : INSURER_BRAND.test(named)
             ? 2
-            : authored || APPRAISER_WORD.test(words)
+            : authored || APPRAISER_WORD.test(named)
               ? 1
               : 0
-        : SHOP_WORD.test(words) ? 3 : !authored ? 1 : 0;
-      // Another party's appraiser by name, and nothing in the name marking it
-      // the insurer's ("Insurance appraiser estimate - customer copy" is theirs).
-      const thirdParty = shopSource && OTHER_APPRAISER.test(words) && !INSURER_WORD.test(words) && !INSURER_APPRAISER.test(words) && !INSURER_BRAND.test(words);
-      return [candidate, { ours, byEstimator, tier, thirdParty }] as const;
+        : SHOP_WORD.test(named) ? 3 : !authored ? 1 : 0;
+      // Marked by nothing but a bare "appraiser" in its name: in an
+      // appraisal, every party has one.
+      const bareAppraiser = shopSource && tier === 1 && !authored;
+      // Another party's appraiser by name. What it prints outranks its name:
+      // an estimate printing our own workfile is ours, whatever it is called.
+      const thirdParty = shopSource && byPrint === null ? appraiserNamed(candidate.fileName) : null;
+      return [candidate, { ours, byPrint, tier, bareAppraiser, thirdParty }] as const;
     })
   );
   const ev = (candidate: T) => evidence.get(candidate)!;
@@ -249,18 +358,24 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   // ours nor theirs: set aside before anything is weighed.
   const thirdParties = base.filter((candidate) => ev(candidate).thirdParty);
   for (const candidate of thirdParties) {
-    excluded.push({ candidate, reason: "its name marks it as an appraiser other than the insurer's" });
+    excluded.push({
+      candidate,
+      reason:
+        ev(candidate).thirdParty === "other"
+          ? "its name marks it as an appraiser other than the insurer's"
+          : "its name marks it as an independent appraiser's, and nothing in it shows that appraiser is the insurer's",
+    });
   }
   const weighed = base.filter((candidate) => !ev(candidate).thirdParty);
   const clean = weighed.filter((candidate) => !ev(candidate).ours && ev(candidate).tier > 0);
-  // A name mark of ours against a mark of theirs is a conflict; the same
-  // printed estimator is proof, never a conflict.
-  const conflicted = weighed.filter((candidate) => ev(candidate).ours && !ev(candidate).byEstimator && ev(candidate).tier > 0);
+  // A name mark of ours against a mark of theirs is a conflict; a print
+  // tying it to the annotated estimate is proof, never a conflict.
+  const conflicted = weighed.filter((candidate) => ev(candidate).ours && ev(candidate).byPrint === null && ev(candidate).tier > 0);
   const unknown = weighed.filter((candidate) => !ev(candidate).ours && ev(candidate).tier === 0);
   const theirs = shopSource ? "the insurer's" : "a shop estimate";
   const oursReason = (candidate: T) =>
-    ev(candidate).byEstimator
-      ? "it prints the same estimator as the annotated estimate, so it is the same party's"
+    ev(candidate).byPrint
+      ? `it prints the same ${ev(candidate).byPrint} as the annotated estimate, so it is the same party's`
       : shopSource
         ? "its name marks it as a shop estimate, like the annotated one"
         : "its name marks it as the insurer's, like the annotated one";
@@ -271,19 +386,19 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   let unidentified: T[] = [];
   if (clean.length) {
     const topTier = Math.max(...clean.map((candidate) => ev(candidate).tier));
-    // The most plainly marked, plus any estimate printing the same licensed
-    // appraiser as one of them: the insurer's versions named differently
-    // ("Insurance estimate.pdf", then "USAA_22279.pdf") are still one
-    // appraiser's. A shop estimator prints no license, so two shop versions
-    // never join this way.
+    // The most plainly marked, plus any estimate one of them is tied to by
+    // print: the same licensed appraiser, or the same CCC workfile. The
+    // insurer's versions named differently ("Insurance estimate.pdf", then
+    // "USAA_22279.pdf") are still one appraiser's. A shop estimator prints
+    // no license, so two shop versions never join by name.
     const writer = new Map(clean.map((candidate) => [candidate, readPrintedEstimator(candidate.text)]));
-    const topWriters = new Set(
-      clean
-        .filter((candidate) => ev(candidate).tier === topTier && printsAppraiserLicense(candidate.text))
-        .map((candidate) => writer.get(candidate))
-        .filter(Boolean)
+    const workfile = new Map(clean.map((candidate) => [candidate, readPrintedWorkfileId(candidate.text)]));
+    const marked = clean.filter((candidate) => ev(candidate).tier === topTier);
+    const topWriters = new Set(marked.filter((candidate) => printsAppraiserLicense(candidate.text)).map((candidate) => writer.get(candidate)).filter(Boolean));
+    const topWorkfiles = new Set(marked.map((candidate) => workfile.get(candidate)).filter(Boolean));
+    const top = clean.filter(
+      (candidate) => ev(candidate).tier === topTier || topWriters.has(writer.get(candidate) ?? "") || topWorkfiles.has(workfile.get(candidate) ?? "")
     );
-    const top = clean.filter((candidate) => ev(candidate).tier === topTier || topWriters.has(writer.get(candidate) ?? ""));
     const overall = orderByPrintedEvidence(clean);
     const latest = clean[overall.best];
     // The most plainly marked one must also be the latest the prints show.
@@ -294,7 +409,27 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     const latestIsTop = overall.rank === null || top.includes(latest);
     const weakDisagree =
       topTier < 3 && (conflicted.length > 0 || unknown.length > 0 || clean.some((candidate) => !top.includes(candidate)));
-    if (!latestIsTop || weakDisagree) unidentified = [...clean, ...conflicted, ...(topTier < 3 ? unknown : [])];
+    // Equal weak marks settle nothing either: a shop's later version named
+    // "USAA 22279 Final.pdf" sits beside the insurer's "USAA 22279.pdf", and
+    // the later print would win. Several are one party's only when what they
+    // print ties them (the same licensed appraiser, or the same workfile).
+    const tied = (a: T, b: T) =>
+      (writer.get(a) != null && writer.get(a) === writer.get(b) && (printsAppraiserLicense(a.text) || printsAppraiserLicense(b.text))) ||
+      (workfile.get(a) != null && workfile.get(a) === workfile.get(b));
+    const weakTie = topTier < 3 && top.some((candidate) => candidate !== top[0] && !tied(candidate, top[0]));
+    // A bare "appraiser" beside another party's appraiser shows nothing
+    // about whose appraiser it is. And an independent appraiser set aside
+    // may have been the insurer's own: a weakly marked estimate left beside
+    // it is the insurer's only when its print shows it is not ours (it
+    // prints a workfile, and not ours).
+    const sourceWorkfile = readPrintedWorkfileId(options.sourceText ?? "");
+    const printedNotOurs = (candidate: T) => sourceWorkfile !== null && workfile.get(candidate) != null && workfile.get(candidate) !== sourceWorkfile;
+    const besideThirdParty =
+      (thirdParties.length > 0 && top.every((candidate) => ev(candidate).bareAppraiser)) ||
+      (topTier < 3 && thirdParties.some((candidate) => ev(candidate).thirdParty === "independent") && !top.every(printedNotOurs));
+    if (!latestIsTop || weakDisagree || weakTie || besideThirdParty) {
+      unidentified = [...clean, ...conflicted, ...(topTier < 3 ? unknown : []), ...(besideThirdParty ? thirdParties : [])];
+    }
     // Unsettled or not, the forensic run is measured against the most plainly
     // marked: a later file marked only by a brand or a phrase may be ours.
     pool = top;

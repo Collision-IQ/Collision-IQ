@@ -107,7 +107,7 @@ import {
   isCarrierAuthoredEstimateDocument,
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
-import { describeExcludedComparisons, sameEstimator, selectComparisonCounterpart } from "./comparisonCounterpart";
+import { describeExcludedComparisons, namesAnotherPartysEstimate, samePrintedParty, selectComparisonCounterpart } from "./comparisonCounterpart";
 import {
   buildPmCapFlag,
   detectRepairFacilityState,
@@ -3160,23 +3160,33 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     // The caller's label decides whose the comparison is. Text is never
     // promoted over it: a shop's note ("BLEND NOT ON USAA ESTIMATE") and an
     // independent appraiser's "prepared by" line both read as insurer
-    // authorship. Two refusals sit on top of the label: an estimate printing
-    // the same estimator as ours is ours (the route guesses "carrier" for an
-    // unmarked name), and when several estimates were on the case and
-    // nothing printed settles which is the insurer's, a report naming one
-    // "the insurer's" would be a guess.
+    // authorship. Three refusals sit on top of the label: an estimate whose
+    // print ties it to ours (the same estimator, CCC workfile or Federal ID)
+    // is ours (the route guesses "carrier" for an unmarked name); when
+    // several estimates were on the case and nothing printed settles which
+    // is the insurer's, a report naming one "the insurer's" would be a guess;
+    // and an estimate named as an independent or another party's appraiser
+    // or an appraisal award is not shown to be the insurer's, also when it
+    // is the only comparison.
     const comparisonText = params.comparisonEstimateTexts?.[0];
     const comparisonRole = comparisonText?.estimateRole;
-    const comparisonIsOurs = sameEstimator(params.sourceText ?? "", comparisonText?.text ?? "");
+    const comparisonIsOurs = samePrintedParty(params.sourceText ?? "", comparisonText?.text ?? "");
+    const comparisonIsAnotherParty = namesAnotherPartysEstimate(comparisonText?.fileName ?? "");
     const renameAdvice =
       'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {
       warnings.push(
-        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same estimator ("Written By") as our estimate, so it reads as our own estimate, not the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} prints the same ${
+          comparisonIsOurs === "estimator" ? 'estimator ("Written By")' : comparisonIsOurs
+        } as our estimate, so it reads as our own estimate, not the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
       warnings.push(
         `Appraisal Dispute Report not produced: nothing printed on ${counterpartPartyUnidentified.join(", ")} settles which one is the insurer's estimate, so the report would be guessing. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+      );
+    } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsAnotherParty) {
+      warnings.push(
+        `Appraisal Dispute Report not produced: ${comparisonText?.fileName ?? "the comparison estimate"} is named as an independent or another party's appraiser, an umpire, an appraisal award or a public adjuster, so nothing shows it is the insurer's estimate. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
