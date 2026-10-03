@@ -114,6 +114,7 @@ import {
 } from "@/lib/reports/estimateTriageClassifier";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
 import { describeCounterpartCandidate, parseCounterpartChoice } from "@/lib/reports/counterpartChoice";
+import type { CaseAnalysisStart } from "@/lib/reports/caseForReports";
 import {
   FalVisionClientError,
   getFalVisionResult,
@@ -243,7 +244,17 @@ type ChatSessionControls = {
   focusComposer: () => void;
   resetSession: () => void;
   sendPrompt: (prompt: string) => Promise<void>;
+  /**
+   * Starts the full case analysis on the uploaded estimates, whatever the
+   * Researched Answer toggle says: the report cards build from the case it
+   * creates. "busy" while a turn or an upload is in flight; "no_uploads"
+   * with nothing to analyse.
+   */
+  runCaseAnalysis: () => CaseAnalysisStart;
 };
+
+/** The turn the report card sends when it needs the case analysis. */
+const CASE_ANALYSIS_FOR_REPORTS_PROMPT = "Run the full case analysis on these estimates so the reports can be built.";
 
 export type ReviewProgress = {
   uploaded: number;
@@ -1126,7 +1137,8 @@ export default function ChatWidget({
   const audioUrlRef = useRef<string | null>(null);
   const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const handleSendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => {});
+  const handleSendRef = useRef<(promptOverride?: string, options?: { forceCaseAnalysis?: boolean }) => Promise<void>>(async () => {});
+  const startCaseAnalysisRef = useRef<() => CaseAnalysisStart>(() => "unavailable");
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const reviewProgressTimerRefs = useRef<number[]>([]);
@@ -2712,16 +2724,30 @@ export default function ChatWidget({
   }, []);
 
   handleSendRef.current = handleSend;
+  startCaseAnalysisRef.current = startCaseAnalysisForReports;
 
   useEffect(() => {
     onSessionControlsReady?.({
       focusComposer: () => textareaRef.current?.focus(),
       resetSession: handleEndChat,
       sendPrompt: (prompt) => handleSendRef.current(prompt),
+      runCaseAnalysis: () => startCaseAnalysisRef.current(),
     });
   }, [onSessionControlsReady, handleEndChat]);
 
-  async function handleSend(promptOverride?: string) {
+  // The report card's request for the case its reports are built from. It
+  // starts only a turn that will run the case pipeline: never over a turn or
+  // an upload in flight, and never without estimates to analyse.
+  function startCaseAnalysisForReports(): CaseAnalysisStart {
+    if (disabled) return "unavailable";
+    if (loading || isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) return "busy";
+    const eligible = attachments.filter((attachment) => !attachment.usedInAnalysis && !isVideoAttachment(attachment));
+    if (!eligible.length) return "no_uploads";
+    void handleSend(CASE_ANALYSIS_FOR_REPORTS_PROMPT, { forceCaseAnalysis: true });
+    return "started";
+  }
+
+  async function handleSend(promptOverride?: string, options: { forceCaseAnalysis?: boolean } = {}) {
     if (disabled) return;
     const promptText = (promptOverride ?? input).trim();
 
@@ -2836,11 +2862,12 @@ export default function ChatWidget({
     );
     const trimmedInput = promptText;
     // Chat-first gating: the full case pipeline runs only when the Researched
-    // Answer toggle is on (paid plans) or when merging evidence into an
-    // already-open case. Quick mode uploads get a fast conversational review.
+    // Answer toggle is on (paid plans), when merging evidence into an
+    // already-open case, or when a report card needs the case to build from.
+    // Quick mode uploads get a fast conversational review.
     const runFullAnalysisThisTurn =
       fullAnalysisEligibleAttachments.length > 0 &&
-      (Boolean(analysisReportIdRef.current) || researchModeEffective);
+      (Boolean(analysisReportIdRef.current) || researchModeEffective || options.forceCaseAnalysis === true);
     // Asking for a full analysis while on Quick gets a pointer to the toggle
     // instead of a silent depth upgrade (and an upgrade note on free plans).
     if (
