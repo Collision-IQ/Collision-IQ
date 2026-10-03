@@ -2771,6 +2771,13 @@ export function matchEstimateLineItems(params: {
       if (candidates.length !== 1) continue;
       const lowerIndex = candidates[0];
       const lowerRow = lowerRows[lowerIndex];
+      // An occurrence that alone equals the one line IS that line's twin, not
+      // a share of a combined line: the 1:1 passes pair it (same section
+      // first) and every other occurrence is a quantity shortfall or a line
+      // the comparison omits (RO 22140 audit FIX 2 — cavity wax ×3 against
+      // ×1; Test 3 item 4 — front clear coat against the rear-door twin). A
+      // group whose SUM equals the line is still that line.
+      if (!rowsSumTo(members, lowerRow) && members.some((member) => rowsSumTo([member], lowerRow))) continue;
       used.add(lowerIndex);
       recordLowerConsumption(lowerIndex, "combined");
       for (const index of indexes) {
