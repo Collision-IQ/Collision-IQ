@@ -64,6 +64,8 @@ type RequestBody = {
   includeSummaryPage?: unknown;
   includeUnanchoredAppendix?: unknown;
   redactSensitive?: unknown;
+  /** The comparison the user named as the insurer's estimate, answering counterpartChoice. */
+  comparisonDocumentId?: unknown;
 };
 
 const VALID_TARGET_ESTIMATES = new Set(["carrier", "shop", "selected", "both", "auto"]);
@@ -114,6 +116,7 @@ export async function POST(request: Request) {
     const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
     const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
+    const comparisonDocumentId = coerceString(body.comparisonDocumentId);
 
     const report = caseId
       ? await getAnalysisReport(caseId, { ownerUserId: user.id })
@@ -404,6 +407,29 @@ export async function POST(request: Request) {
           );
         }
       }
+      // The user's answer to "which upload is the insurer's estimate?" must
+      // name one of this case's comparison estimates; anything else is
+      // refused, never silently ignored or guessed around. Annotating both
+      // estimates, the answer is the other run's own estimate: it applies to
+      // the run it is a comparison for.
+      const answersThisRun = Boolean(
+        comparisonDocumentId && sourceDocuments.some((document) => document.id === comparisonDocumentId && isDistinctComparison(document))
+      );
+      if (comparisonDocumentId && !answersThisRun && resolvedSelections.length === 1) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `comparisonDocumentId ${comparisonDocumentId} is not a comparison estimate on this case.`,
+            userMessage:
+              "The estimate chosen as the insurer's is not one of this case's other estimates (it may be the estimate being annotated, a copy of it, or no longer on the case). Choose the insurer's estimate again.",
+            reportType: "citation-density",
+            routeName: "citation-density",
+            comparisonDocumentId,
+            selectedSourceDocumentId: selection.selectedSourceDocumentId,
+          },
+          { status: 400 }
+        );
+      }
       const comparisonEstimateTexts = sourceDocuments
         .filter(isDistinctComparison)
         .map((document) => ({
@@ -479,6 +505,7 @@ export async function POST(request: Request) {
         vehicleMake,
         jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
+        confirmedCounterpartDocumentId: answersThisRun ? comparisonDocumentId : null,
         // The forensic report's header block. The decoded vehicle identity is
         // authoritative here — it survives a header the estimate prints across
         // two lines — and the annotator falls back to reading the document
@@ -545,6 +572,7 @@ export async function POST(request: Request) {
           ? Buffer.from(result.plainSummaryBytes).toString("base64")
           : undefined,
         plainSummaryPageCount: result.plainSummaryPageCount,
+        counterpartChoice: result.counterpartChoice,
         annotatedFindingCount: citationCopy?.badgeCount ?? result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
@@ -589,6 +617,10 @@ export async function POST(request: Request) {
       plainSummaryUrl: primaryOutput?.plainSummaryUrl,
       plainSummaryPdfBase64: primaryOutput?.plainSummaryPdfBase64,
       plainSummaryPageCount: primaryOutput?.plainSummaryPageCount,
+      // Present when the dispute report asks which upload is the insurer's
+      // estimate (required) or lets the user change it; answer with
+      // comparisonDocumentId on the next request.
+      counterpartChoice: primaryOutput?.counterpartChoice,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,

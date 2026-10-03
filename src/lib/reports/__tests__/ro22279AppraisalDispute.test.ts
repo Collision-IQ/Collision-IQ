@@ -55,6 +55,7 @@ import { buildEstimateRowAnchorsFromLines, buildPdfTextLines, type PdfTextLine, 
 import { adaptForensicToPlainSummary } from "../plainLanguageSummaryAdapter";
 import {
   describeExcludedComparisons,
+  describePrintedEstimate,
   namesAnotherPartysEstimate,
   printedPartyConflict,
   readPrintedEstimator,
@@ -1592,6 +1593,122 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
     const result = await build([{ fileName: "Shop prelim.pdf", sourceDocumentId: "prelim", estimateRole: "shop", text: shopVersionText }]);
     expect(result.plainSummaryExportId).toBeUndefined();
     expect(result.warnings.join("\n")).toMatch(/Appraisal Dispute Report not produced: .*Shop prelim\.pdf was not identified as the insurer's estimate: it is labelled a shop estimate/);
+  });
+});
+
+describe("D9 — when nothing printed settles whose estimate is whose, the run asks, and takes the answer", () => {
+  async function subjectPdf() {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([612, 792]);
+    ["Preliminary Estimate", "Claim #: 00-0000000-01", "Net Cost of Repairs $28,840.26", "155 Repl RT Side rail 5760153070 727.53 12.5"].forEach((text, index) =>
+      page.drawText(text, { x: 42, y: 752 - index * 16, size: 9, font })
+    );
+    return pdf.save();
+  }
+  const carrierText = ["Supplement of Record S2", "Claim #: 00-0000000-01", "Total Cost of Repairs $15,441.55", "31 Repl RT Side rail 57601-53070 727.53 2.5"].join("\n");
+  const shopVersionText = ["Preliminary Estimate", "Claim #: 00-0000000-01", "Net Cost of Repairs $20,100.00", "31 Repl RT Side rail 57601-53070 727.53 2.5"].join("\n");
+  const ourHeader = "Workfile ID:\nFederal ID:\na1b2c3d4\n12-3456789";
+  const subjectText = `${ourHeader}\nWritten By: JANE ROE, 739698\nPreliminary Estimate\nClaim #: 00-0000000-01\nNet Cost of Repairs $28,840.26`;
+  const build = async (
+    comparisonEstimateTexts: Parameters<typeof buildAnnotatedCitationDensityEstimatePdf>[0]["comparisonEstimateTexts"],
+    confirmedCounterpartDocumentId?: string
+  ) =>
+    buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes: await subjectPdf(),
+      sourcePdfName: "Shop Final Estimate.pdf",
+      sourceDocumentId: "shop-final",
+      sourceText: subjectText,
+      comparisonEstimateTexts,
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, estimateRole: "shop" },
+      confirmedCounterpartDocumentId,
+    });
+  const unmarked = [
+    { fileName: "22279 final.pdf", sourceDocumentId: "final", estimateRole: "carrier" as const, text: shopVersionText },
+    { fileName: "22279 b.pdf", sourceDocumentId: "b", estimateRole: "carrier" as const, text: carrierText },
+  ];
+  const notProducedForParty = /Appraisal Dispute Report not produced: (nothing printed on|.* prints (the same|our estimate's)|.* is named as an independent|.* was not identified as the insurer's)/;
+
+  it("describes each candidate only by what it prints: total, version, print time", () => {
+    expect(describePrintedEstimate(sorText)).toEqual({ grandTotal: 4408.16, version: "Supplement 1", printedAt: "9/23/2026 09:49" });
+    expect(describePrintedEstimate("Preliminary Estimate")).toEqual({ grandTotal: null, version: null, printedAt: null });
+  });
+
+  it("asks which upload is the insurer's estimate instead of guessing, offering every comparison", async () => {
+    const result = await build(unmarked);
+    expect(result.plainSummaryExportId).toBeUndefined();
+    expect(result.counterpartChoice).toMatchObject({ required: true, confirmedByUser: false });
+    expect(result.counterpartChoice?.reason).toMatch(/nothing printed on 22279 (final|b)\.pdf, 22279 (final|b)\.pdf settles which one is the insurer's estimate/);
+    expect(result.counterpartChoice?.candidates.map((candidate) => candidate.sourceDocumentId)).toEqual(["final", "b"]);
+  });
+
+  it("takes the answer: the named estimate is compared as the insurer's, and the run says whose word that was", async () => {
+    for (const [id, name, other] of [["b", "22279 b.pdf", "22279 final.pdf"], ["final", "22279 final.pdf", "22279 b.pdf"]]) {
+      const result = await build(unmarked, id);
+      const warnings = result.warnings.join("\n");
+      expect(warnings).toContain(`Compared against ${name}, which you identified as the insurer's estimate. Not compared: ${other}.`);
+      expect(warnings).not.toMatch(notProducedForParty);
+      expect(result.counterpartChoice).toMatchObject({ required: false, confirmedByUser: true, comparedDocumentId: id });
+    }
+  });
+
+  it("the answer settles what a name or our header leaves open, never our own estimator", async () => {
+    // A lone comparison named for an independent appraiser, and one printing only our header (the insurer's printed from our system).
+    for (const comparison of [
+      { fileName: "Independent appraiser 22279.pdf", sourceDocumentId: "ia", estimateRole: "carrier" as const, text: `Written By: JOHN DOE, License Number: 5\n${carrierText}` },
+      { fileName: "USAA estimate 22279.pdf", sourceDocumentId: "ours-header", estimateRole: "carrier" as const, text: `${ourHeader}\n${carrierText}` },
+    ]) {
+      const asked = await build([comparison]);
+      expect(asked.warnings.join("\n")).toMatch(notProducedForParty);
+      expect(asked.counterpartChoice).toMatchObject({
+        required: true,
+        candidates: [{ sourceDocumentId: comparison.sourceDocumentId, printsOur: comparison.sourceDocumentId === "ours-header" ? "Workfile ID" : null }],
+      });
+      const answered = await build([comparison], comparison.sourceDocumentId);
+      expect(answered.warnings.join("\n")).not.toMatch(notProducedForParty);
+      expect(answered.counterpartChoice).toMatchObject({ required: false, confirmedByUser: true });
+    }
+    // Our own estimator printed on it: ours, whoever names it the insurer's, and never offered.
+    const ours = { fileName: "USAA final 22279.pdf", sourceDocumentId: "ours", estimateRole: "carrier" as const, text: `Written By: JANE ROE, 739698\n${shopVersionText}` };
+    const refused = await build([ours], "ours");
+    expect(refused.plainSummaryExportId).toBeUndefined();
+    expect(refused.warnings.join("\n")).toContain('prints the same estimator ("Written By") as our estimate, so it reads as our own estimate, not the insurer\'s, although it was identified as the insurer\'s.');
+    expect(refused.counterpartChoice?.candidates ?? []).toEqual([]);
+    expect((await build([ours])).counterpartChoice).toBeUndefined();
+    // Beside another comparison, naming ours asks again and offers only the other.
+    const again = await build([ours, unmarked[1]], "ours");
+    expect(again.plainSummaryExportId).toBeUndefined();
+    expect(again.counterpartChoice).toMatchObject({ required: true, confirmedByUser: true, candidates: [{ sourceDocumentId: "b" }] });
+    expect(again.counterpartChoice?.candidates).toHaveLength(1);
+  }, 60_000);
+
+  it("an answer keeps the identity gate's advisory for the estimate it names", async () => {
+    const withVin = (text: string, vin: string) => text.replace("Claim #: 00-0000000-01", `Claim #: 00-0000000-01\nVIN: ${vin}`);
+    const comparisons = [
+      { ...unmarked[0], text: withVin(unmarked[0].text, "1HGCM82633A004352") },
+      { ...unmarked[1], text: withVin(unmarked[1].text, "5YJSA1E65NF488007") },
+    ];
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes: await subjectPdf(),
+      sourcePdfName: "Shop Final Estimate.pdf",
+      sourceDocumentId: "shop-final",
+      sourceText: withVin(subjectText, "1HGCM82633A004352"),
+      comparisonEstimateTexts: comparisons,
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, estimateRole: "shop" },
+      confirmedCounterpartDocumentId: "b",
+    });
+    expect(result.warnings.join("\n")).toContain("Claim numbers match but VINs differ (1HGCM82633A004352 vs 5YJSA1E65NF488007)");
+  });
+
+  it("an answer naming no comparison on the run is not used, and the run says so", async () => {
+    const result = await build(unmarked, "not-on-this-case");
+    expect(result.warnings.join("\n")).toContain("The estimate named as the insurer's (not-on-this-case) is not one of this run's comparison estimates, so it was not used.");
+    expect(result.warnings.join("\n")).toMatch(/settles which one is the insurer's estimate/);
+    expect(result.counterpartChoice).toMatchObject({ required: true, confirmedByUser: false });
   });
 });
 
