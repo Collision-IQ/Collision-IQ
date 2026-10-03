@@ -18,7 +18,14 @@ import { lineHoursRead, unreadCarrierHours } from "./appraisalSummary/gapLedger"
 export type PlainSummaryAdapterInput = {
   reconciliation: ForensicReconciliation;
   /** The rows both sides were read into and the matcher's deltas. */
-  rows: { higher: EstimateDeltaRow[]; lower: EstimateDeltaRow[]; deltas: EstimateLineItemDelta[] } | undefined;
+  rows:
+    | {
+        higher: EstimateDeltaRow[];
+        lower: EstimateDeltaRow[];
+        deltas: EstimateLineItemDelta[];
+        equalPairs?: Array<{ higherLine: number | null; lowerLine: number | null }>;
+      }
+    | undefined;
   higherDocumentName: string;
   lowerDocumentName: string;
   /** Each document's text layer, for notes, manual flags and the parts-usage page. */
@@ -114,7 +121,7 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
       identity,
       shop: redact(shop),
       carrier: redact(carrier),
-      pairs: pairsFromDeltas(input.rows.deltas),
+      pairs: pairsFromDeltas(input.rows.deltas, input.rows.equalPairs),
     },
   };
 }

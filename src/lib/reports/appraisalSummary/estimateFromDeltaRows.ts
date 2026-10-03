@@ -198,6 +198,32 @@ export function vehicleLineFromText(text: string): string {
   return "";
 }
 
+/** Letter categories the totals block names: an "E" line bills under "Electrical Labor". */
+const LETTER_LABEL: Record<string, RegExp> = { E: /electric/i, D: /diag/i, G: /glass/i, M: /mech/i, F: /frame/i, S: /struct/i };
+
+/**
+ * Which printed shop-defined category each CCC digit ("1"-"4") names. The
+ * digit is the shop's category NUMBER and the totals block prints only the
+ * categories used, so "the Nth printed" fails when one is skipped: RO 21548
+ * used 1 and 3, and digit 3 is the SECOND printed category, Calibration/Reset.
+ * A digit takes the one printed category whose hours equal its lines' hours;
+ * digits still open take the categories still open, numeric order against
+ * print order, when the counts agree. Anything else stays unresolved.
+ */
+export function userCategoriesByDigit(digitHours: Map<string, number>, userTotals: LaborTotal[]): Map<string, LaborTotal> {
+  const byDigit = new Map<string, LaborTotal>();
+  const open = [...userTotals];
+  for (const [digit, hours] of digitHours) {
+    const same = open.filter((total) => Math.abs(total.hours - hours) < 0.05);
+    if (same.length !== 1) continue;
+    byDigit.set(digit, same[0]);
+    open.splice(open.indexOf(same[0]), 1);
+  }
+  const rest = [...digitHours.keys()].filter((digit) => !byDigit.has(digit)).sort();
+  if (rest.length && rest.length === open.length) rest.forEach((digit, index) => byDigit.set(digit, open[index]));
+  return byDigit;
+}
+
 export function estimateFromDeltaRows(params: {
   role: "shop" | "carrier";
   fileName: string;
@@ -221,6 +247,31 @@ export function estimateFromDeltaRows(params: {
     highest = row.lineNumber;
     return true;
   });
+  // Each row's user-category digit: the one the row read carries, else the
+  // one its printed text ends in (exactly this row's hours, the digit, then
+  // its paint hours if it prints any: "RT Door shell (ALU)1.012.1" = 1.0 hr,
+  // category 1, 2.1 paint).
+  const digitOf = (row: EstimateDeltaRow): string | undefined => {
+    const hours = row.labor ?? undefined;
+    if (!hours) return undefined;
+    const typed = (row.laborType ?? "").trim();
+    if (/^[1-4]$/.test(typed)) return typed;
+    if (typed) return undefined;
+    const annotation = row.lineNumber !== null ? annotations.get(row.lineNumber) : undefined;
+    if (!annotation) return undefined;
+    const escape = (n: number) => n.toFixed(1).replace(".", "\\.");
+    const tail = row.paint ? escape(row.paint) : "";
+    return annotation.rowText.replace(/\s+/g, "").match(new RegExp(`${escape(hours)}([1-4])${tail}$`))?.[1];
+  };
+  const digitHours = new Map<string, number>();
+  for (const row of rows) {
+    const digit = digitOf(row);
+    if (digit) digitHours.set(digit, round2((digitHours.get(digit) ?? 0) + (row.labor ?? 0)));
+  }
+  const byDigit = userCategoriesByDigit(
+    digitHours,
+    params.totals.labor.filter((total) => !STANDARD_LABOR.test(total.label.trim()))
+  );
   const lines: EstimateLine[] = rows.map((row, index) => {
     let desc = row.description.trim();
     let supplement = row.supplementTag ?? undefined;
@@ -245,19 +296,19 @@ export function estimateFromDeltaRows(params: {
     const annotation = row.lineNumber !== null ? annotations.get(row.lineNumber) : undefined;
     const hours = row.labor ?? undefined;
     const letter = (row.laborType ?? "").trim().toUpperCase();
+    const digit = digitOf(row);
     let laborCat: LaborCat | undefined = hours ? LETTER_CAT[letter] ?? "body" : undefined;
-    // A user-category digit is accepted only when the printed row ends in
-    // exactly this row's hours, the digit, and then this row's paint hours if
-    // it prints any ("RT Door shell (ALU)1.012.1" = 1.0 hr, category 1, 2.1 paint).
-    if (hours && !letter && annotation) {
-      const escape = (n: number) => n.toFixed(1).replace(".", "\\.");
-      const tail = row.paint ? escape(row.paint) : "";
-      const digit = annotation.rowText.replace(/\s+/g, "").match(new RegExp(`${escape(hours)}([1-4])${tail}$`));
-      if (digit) {
-        laborCat = (params.userCategories?.length ?? 0) > 1
-          ? params.userCategories![Number(digit[1]) - 1] ?? params.userCategory
+    let laborLabel: string | undefined;
+    if (hours && digit) {
+      const named = byDigit.get(digit);
+      laborCat = named
+        ? named.cat
+        : (params.userCategories?.length ?? 0) > 1
+          ? params.userCategories![Number(digit) - 1] ?? params.userCategory
           : params.userCategory;
-      }
+      laborLabel = named?.label;
+    } else if (hours && LETTER_LABEL[letter]) {
+      laborLabel = params.totals.labor.find((total) => LETTER_LABEL[letter].test(total.label))?.label;
     }
     return {
       line: lineNumber,
@@ -268,6 +319,7 @@ export function estimateFromDeltaRows(params: {
       price: row.price ?? undefined,
       hours,
       laborCat,
+      ...(laborLabel ? { laborLabel } : {}),
       paintHours: row.paint ?? undefined,
       note: annotation?.note,
       manual: annotation?.manual ?? false,
@@ -287,20 +339,47 @@ export function estimateFromDeltaRows(params: {
   };
 }
 
-/** The matcher's differences as line-number pairs (merged rows name every line: "(both sides, L119/L120)"). */
-export function pairsFromDeltas(deltas: EstimateLineItemDelta[]): MatcherPair[] {
+/**
+ * The matcher's pairs by line number: its differences, then the pairs it made
+ * at equal values ("matched"), which locate a line without arguing it. A side
+ * group merged into one delta ("(both sides, L41/L42)") is returned as the
+ * pairs it was made of, each side with its own counterpart; merged rows that
+ * carry no members name every line in the description.
+ */
+export function pairsFromDeltas(
+  deltas: EstimateLineItemDelta[],
+  equalPairs: Array<{ higherLine: number | null; lowerLine: number | null }> = []
+): MatcherPair[] {
   const pairs: MatcherPair[] = [];
+  const kindOf = (delta: EstimateLineItemDelta, carrierLine: number | undefined): MatcherPair["kind"] =>
+    delta.kind === "missing_operation" || carrierLine === undefined ? "missing" : "reduced";
   for (const delta of deltas) {
+    if (delta.mergedMembers?.length) {
+      for (const member of delta.mergedMembers) {
+        if (member.higherLine === null) continue;
+        const carrierLine = member.lowerLine ?? undefined;
+        pairs.push({ kind: kindOf(delta, carrierLine), shopLines: [member.higherLine], carrierLine });
+      }
+      continue;
+    }
     const head = delta.higherRow.lineNumber;
     if (head === null) continue;
     const merged = [...delta.higherRow.description.matchAll(/\bL(\d{1,3})\b/g)].map((m) => Number(m[1]));
-    const shopLines = [...new Set([head, ...merged])];
+    const shopLines = [...new Set([head, ...merged, ...(delta.coveredHigherLines ?? [])])];
     const carrierLine = delta.lowerRow?.lineNumber ?? undefined;
     pairs.push({
-      kind: delta.kind === "missing_operation" || carrierLine === undefined ? "missing" : "reduced",
+      kind: kindOf(delta, carrierLine),
       shopLines,
       carrierLine,
+      ...(delta.coveredHigherLines?.length ? { coveredByCarrierNote: true } : {}),
     });
+  }
+  const taken = new Set(pairs.flatMap((pair) => pair.shopLines));
+  const takenCarrier = new Set(pairs.map((pair) => pair.carrierLine).filter((line) => line !== undefined));
+  for (const pair of equalPairs) {
+    if (pair.higherLine === null || pair.lowerLine === null) continue;
+    if (taken.has(pair.higherLine) || takenCarrier.has(pair.lowerLine)) continue;
+    pairs.push({ kind: "matched", shopLines: [pair.higherLine], carrierLine: pair.lowerLine });
   }
   return pairs;
 }
