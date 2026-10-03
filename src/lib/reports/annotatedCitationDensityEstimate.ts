@@ -275,6 +275,181 @@ function engineRowsToDeltaRows(
 }
 
 /**
+ * The typed rows' hours against the document's own printed SUBTOTALS rule
+ * (RC-3, the column-identity check). "unprinted": the document prints no hours
+ * on a SUBTOTALS rule, so nothing vouches for the read either way. `body` is
+ * the rows the rule totals.
+ */
+function typedRowsAgainstSubtotals(
+  rows: DeltaEngineRow[],
+  pages: Map<number, DeltaEngineWord[]>
+): { verdict: "closes" | "open" | "unprinted"; body: DeltaEngineRow[] } {
+  const printed = parseDeltaEngineSubtotals(pages);
+  if (!printed || (printed.labor === null && printed.paint === null)) return { verdict: "unprinted", body: rows };
+  // A SUBTOTALS rule closes the ESTIMATE BODY. What follows it on a
+  // supplement is the SUPPLEMENT SUMMARY — a changelog of Deleted and
+  // Added items, history rather than inventory — and its deleted lines
+  // carry NEGATIVE hours. Summing those against a subtotal that never
+  // included them invents a shortfall: RO 22116's SOR-2 prints 44.7
+  // labor hours, its body rows sum to exactly 44.7, and its changelog
+  // pages contribute -2.7, so the extract looked broken when it was
+  // perfect and every line-item delta was suppressed.
+  const body = printed.page ? rows.filter((row) => row.page <= printed.page) : rows;
+  const laborSum = body.reduce((total, row) => total + (row.labor ?? 0), 0);
+  const paintSum = body.reduce((total, row) => total + (row.paint ?? 0), 0);
+  const closes = hoursReconcile(laborSum, printed.labor) && hoursReconcile(paintSum, printed.paint);
+  return { verdict: closes ? "closes" : "open", body };
+}
+
+/**
+ * Does this text describe the typed row? One of the row's words of four or
+ * more letters must appear in it. A leading integer in prose (a "4 Wheel
+ * Drive…" options paragraph, a street number, a year) can claim a line number
+ * the typed engine parsed elsewhere; this keeps the two apart.
+ */
+function textDescribesEngineRow(text: string, row: DeltaEngineRow): boolean {
+  const significant = row.rawDesc
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4);
+  if (!significant.length) return true; // nothing to validate against
+  const padded = ` ${text} `;
+  return significant.some((token) => padded.includes(token));
+}
+
+/**
+ * Anchor typed rows by printed line number. Every line-number candidate is
+ * validated against the ENGINE row's own text (textDescribesEngineRow). When
+ * no text-consistent anchor exists but the engine row carries a measured bbox,
+ * an anchor is built from that measurement — the engine's geometry IS the
+ * primary measurement per the Delta Annotation Rule — and registered where the
+ * finding emitter and the renderer resolve anchors from.
+ */
+function resolveEngineRowAnchors(params: {
+  context: AnnotatedEstimateFindingGeneratorContext;
+  primaryAnchors: EstimateRowAnchor[];
+  anchorById: Map<string, EstimateRowAnchor>;
+  engineRows: DeltaEngineRow[];
+}): Map<string, EstimateRowAnchor> {
+  const { context, primaryAnchors, anchorById } = params;
+  const engineRowByLine = new Map<string, DeltaEngineRow>();
+  for (const row of params.engineRows) {
+    if (!engineRowByLine.has(String(row.line))) engineRowByLine.set(String(row.line), row);
+  }
+  const anchorByLineNumber = new Map<string, EstimateRowAnchor>();
+  for (const anchor of primaryAnchors) {
+    if (!anchor.lineNumber) continue;
+    const engineRow = engineRowByLine.get(anchor.lineNumber);
+    if (engineRow && !textDescribesEngineRow(anchor.normalizedRowText ?? anchor.rowText.toLowerCase(), engineRow)) continue;
+    if (!anchorByLineNumber.has(anchor.lineNumber)) {
+      anchorByLineNumber.set(anchor.lineNumber, anchor);
+    }
+  }
+  for (const [line, row] of engineRowByLine) {
+    if (anchorByLineNumber.has(line) || !row.box) continue;
+    const pageLine = context.visualLines.find((visual) => visual.pageNumber === row.page);
+    const pageTemplate = pageLine ?? context.visualLines[0];
+    if (!pageTemplate) continue;
+    const measuredAnchor = buildMeasuredEngineRowAnchor({
+      sourceDocumentId: context.sourceDocumentId,
+      sourceDocumentRole: context.sourceDocumentRole,
+      pageNumber: row.page,
+      pageWidth: pageTemplate.pageWidth,
+      pageHeight: pageTemplate.pageHeight,
+      lineNumber: row.line,
+      rowText: `${row.line} ${row.rawDesc}`.replace(/\s+/g, " ").trim(),
+      section: row.sectionLabel,
+      box: row.box,
+    });
+    anchorByLineNumber.set(line, measuredAnchor);
+    anchorById.set(measuredAnchor.anchorId, measuredAnchor);
+    primaryAnchors.push(measuredAnchor);
+    // The renderer resolves finding anchors from the generator context's
+    // anchor array — the measured anchor must live there to place.
+    context.anchors.push(measuredAnchor);
+  }
+  return anchorByLineNumber;
+}
+
+/**
+ * The cells of a row that text cannot place, taken from the typed row of the
+ * same printed line: quantity, labor, paint and the labor class. A blank
+ * measured cell stays blank (null), as the text lane prints it. The typed lane
+ * does not read "Incl.", so a text marker survives a blank measured cell and
+ * yields to a measured value.
+ */
+function takeMeasuredCells(row: EstimateDeltaRow, measured: DeltaEngineRow): void {
+  row.qty = measured.qty;
+  row.labor = measured.labor;
+  row.paint = measured.paint;
+  if (measured.labor !== null) row.laborIncluded = false;
+  if (measured.paint !== null) row.paintIncluded = false;
+  row.laborType = measured.labor !== null ? measured.laborClass || row.laborType || null : null;
+}
+
+/**
+ * MEASURED COLUMN IDENTITY FOR THE TEXT LANE (the annotated side).
+ *
+ * A comparison with no usable word layer, or a Mitchell comparison, leaves
+ * this estimate's rows to the text lane: a text re-read of the words the typed
+ * lane measures, with their positions dropped. Text places a price by its
+ * shape (two decimals) but not a bare number: a lone hour value reads as labor
+ * whatever column printed it ("Add for Clear Coat 1.2", "Refn …", "Blnd …",
+ * "Tint color 1 0.5"), and a labor-class digit beside the hours reads as a
+ * quantity while the hours are lost ("Pre repair scan 1.0 3"). Wrapped tails
+ * the text rules cannot move ahead of the value columns ("(Unibody)",
+ * "** Secured****") lose the whole line. Measured on two CCC shop estimates,
+ * the text lane carried 33.1 labor / 7.3 paint hours against 28.0 / 17.9
+ * printed, and 61.2 / 10.9 against 56.9 / 19.2; the typed rows of the same
+ * prints close to the tenth.
+ *
+ * So when the typed rows CLOSE this estimate's printed SUBTOTALS (the RC-3
+ * rule, positively met — a print with no SUBTOTALS hours vouches for nothing
+ * and the text read stands), each text row takes its quantity, labor, paint
+ * and labor class from the typed row of the same printed line, and keeps what
+ * text reads by shape: operation, description, part number, price, section,
+ * anchor. A printed line the text lane did not read at all is added from its
+ * typed row, anchored as the typed lane anchors it.
+ */
+function withMeasuredSubjectCells(params: {
+  context: AnnotatedEstimateFindingGeneratorContext;
+  primaryAnchors: EstimateRowAnchor[];
+  anchorById: Map<string, EstimateRowAnchor>;
+  textRows: EstimateDeltaRow[];
+  engineRows: DeltaEngineRow[];
+  wordPages: Map<number, DeltaEngineWord[]>;
+}): EstimateDeltaRow[] {
+  if (params.engineRows.length < 10) return params.textRows;
+  const { verdict, body } = typedRowsAgainstSubtotals(params.engineRows, params.wordPages);
+  if (verdict !== "closes") return params.textRows;
+  const measuredByLine = new Map<number, DeltaEngineRow>();
+  for (const row of body) if (!measuredByLine.has(row.line)) measuredByLine.set(row.line, row);
+  const textLines = new Set<number>();
+  for (const row of params.textRows) {
+    if (row.lineNumber === null) continue;
+    textLines.add(row.lineNumber);
+    const measured = measuredByLine.get(row.lineNumber);
+    if (measured && textDescribesEngineRow(row.rawText.toLowerCase(), measured)) takeMeasuredCells(row, measured);
+  }
+  const lost = [...measuredByLine.values()].filter((row) => !textLines.has(row.line));
+  if (!lost.length) return params.textRows;
+  const anchorByLineNumber = resolveEngineRowAnchors({ ...params, engineRows: lost });
+  const rows = [...params.textRows];
+  for (const row of engineRowsToDeltaRows(lost, anchorByLineNumber)) {
+    const measured = row.lineNumber === null ? undefined : measuredByLine.get(row.lineNumber);
+    if (!measured) continue;
+    // engineRowsToDeltaRows zero-fills blank cells for the typed lane, whose
+    // two sides are both zero-filled; beside text rows a blank cell is null.
+    row.price = measured.price;
+    takeMeasuredCells(row, measured);
+    const next = rows.findIndex((other) => other.lineNumber !== null && other.lineNumber > measured.line);
+    rows.splice(next === -1 ? rows.length : next, 0, row);
+  }
+  return rows;
+}
+
+/**
  * Attach research-resolved authorities to delta findings by
  * FINDING TYPE × DECODED MAKE × JURISDICTION (D-4) — never by document name.
  * A scan/diagnostic finding gets the retrieved scan position statement, a
@@ -4855,16 +5030,20 @@ function matchStructuredLineItemDeltas(
   // parser. The sentence is the reader-facing note carried to the legend
   // and the forensic report's limitations.
   let lineItemsWithheld: string | null = null;
-  let typedLaneUsed = false;
   // The typed engine parses the CCC column grid. A Mitchell comparison prints
   // welded columns and no SUBTOTALS row, so its word layer yields fragments
   // the reconciliation guard cannot reject (nothing to reconcile against) —
   // and those fragments would replace the rows the Mitchell reader just
   // recovered. The platform reader's rows stand for a Mitchell comparison.
+  // The subject's typed rows, when the word layer was parsed: the typed lane
+  // below, and the text lane's measured column identity after it.
+  let subjectEngineRows: DeltaEngineRow[] | null = null;
+  /** The higher rows came from the typed lane, not the text lane. */
+  let higherRowsTyped = false;
   if (comparisonWordSet && comparisonPlatform !== "mitchell") {
     const subjectDiag = emptyRowParseDiagnostics();
     const competingDiag = emptyRowParseDiagnostics();
-    const subjectEngineRows = parseDeltaEngineRows(subjectWordPages, subjectDiag);
+    subjectEngineRows = parseDeltaEngineRows(subjectWordPages, subjectDiag);
     const competingEngineRows = parseDeltaEngineRows(
       pdfWordsToEnginePages(comparisonWordSet.words),
       competingDiag
@@ -4874,22 +5053,8 @@ function matchStructuredLineItemDeltas(
       // reconcile against that document's own SUBTOTALS row. A mismatch means
       // the extract lost column identity — fail the extract; emit nothing
       // rather than findings built on mistyped cells.
-      const subtotalsOk = (rows: DeltaEngineRow[], pages: Map<number, DeltaEngineWord[]>) => {
-        const printed = parseDeltaEngineSubtotals(pages);
-        if (!printed || (printed.labor === null && printed.paint === null)) return true; // nothing to reconcile against
-        // A SUBTOTALS rule closes the ESTIMATE BODY. What follows it on a
-        // supplement is the SUPPLEMENT SUMMARY — a changelog of Deleted and
-        // Added items, history rather than inventory — and its deleted lines
-        // carry NEGATIVE hours. Summing those against a subtotal that never
-        // included them invents a shortfall: RO 22116's SOR-2 prints 44.7
-        // labor hours, its body rows sum to exactly 44.7, and its changelog
-        // pages contribute -2.7, so the extract looked broken when it was
-        // perfect and every line-item delta was suppressed.
-        const body = printed.page ? rows.filter((row) => row.page <= printed.page) : rows;
-        const laborSum = body.reduce((total, row) => total + (row.labor ?? 0), 0);
-        const paintSum = body.reduce((total, row) => total + (row.paint ?? 0), 0);
-        return hoursReconcile(laborSum, printed.labor) && hoursReconcile(paintSum, printed.paint);
-      };
+      const subtotalsOk = (rows: DeltaEngineRow[], pages: Map<number, DeltaEngineWord[]>) =>
+        typedRowsAgainstSubtotals(rows, pages).verdict !== "open";
       const subjectReconciles = subtotalsOk(subjectEngineRows, subjectWordPages);
       const competingReconciles = subtotalsOk(
         competingEngineRows,
@@ -4912,64 +5077,12 @@ function matchStructuredLineItemDeltas(
         context.extractionWarnings?.push(lineItemsWithheld);
       }
       if (!lineItemsWithheld) {
-      // Anchor resolution for the engine path validates every line-number
-      // candidate against the ENGINE row's own text: a leading integer in
-      // prose (a "4 Wheel Drive…" options paragraph, a street number, a year)
-      // can claim a line number the typed engine parsed elsewhere. When no
-      // text-consistent anchor exists but the engine row carries a measured
-      // bbox, an anchor is built from that measurement — the engine's
-      // geometry IS the primary measurement per the Delta Annotation Rule.
-      const engineRowByLine = new Map<string, DeltaEngineRow>();
-      for (const row of subjectEngineRows) {
-        if (!engineRowByLine.has(String(row.line))) engineRowByLine.set(String(row.line), row);
-      }
-      const anchorMatchesEngineRow = (anchor: EstimateRowAnchor, row: DeltaEngineRow): boolean => {
-        const significant = row.rawDesc
-          .toLowerCase()
-          .replace(/[^a-z\s]/g, " ")
-          .split(/\s+/)
-          .filter((token) => token.length >= 4);
-        if (!significant.length) return true; // nothing to validate against
-        const anchorText = ` ${anchor.normalizedRowText ?? anchor.rowText.toLowerCase()} `;
-        return significant.some((token) => anchorText.includes(token));
-      };
-      const anchorByLineNumber = new Map<string, EstimateRowAnchor>();
-      for (const anchor of primaryAnchors) {
-        if (!anchor.lineNumber) continue;
-        const engineRow = engineRowByLine.get(anchor.lineNumber);
-        if (engineRow && !anchorMatchesEngineRow(anchor, engineRow)) continue;
-        if (!anchorByLineNumber.has(anchor.lineNumber)) {
-          anchorByLineNumber.set(anchor.lineNumber, anchor);
-        }
-      }
-      for (const [line, row] of engineRowByLine) {
-        if (anchorByLineNumber.has(line) || !row.box) continue;
-        const pageLine = context.visualLines.find((visual) => visual.pageNumber === row.page);
-        const pageTemplate = pageLine ?? context.visualLines[0];
-        if (!pageTemplate) continue;
-        const measuredAnchor = buildMeasuredEngineRowAnchor({
-          sourceDocumentId: context.sourceDocumentId,
-          sourceDocumentRole: context.sourceDocumentRole,
-          pageNumber: row.page,
-          pageWidth: pageTemplate.pageWidth,
-          pageHeight: pageTemplate.pageHeight,
-          lineNumber: row.line,
-          rowText: `${row.line} ${row.rawDesc}`.replace(/\s+/g, " ").trim(),
-          section: row.sectionLabel,
-          box: row.box,
-        });
-        anchorByLineNumber.set(line, measuredAnchor);
-        anchorById.set(measuredAnchor.anchorId, measuredAnchor);
-        primaryAnchors.push(measuredAnchor);
-        // The renderer resolves finding anchors from the generator context's
-        // anchor array — the measured anchor must live there to place.
-        context.anchors.push(measuredAnchor);
-      }
+      const anchorByLineNumber = resolveEngineRowAnchors({ context, primaryAnchors, anchorById, engineRows: subjectEngineRows });
       const engineHigher = engineRowsToDeltaRows(subjectEngineRows, anchorByLineNumber);
       const engineLower = engineRowsToDeltaRows(competingEngineRows, null);
       if (engineHigher.length >= 10 && engineLower.length >= 10) {
         dedupedHigherRows = engineHigher;
-        typedLaneUsed = true;
+        higherRowsTyped = true;
         lowerRows = engineLower;
         // ONE detector pass (O-2): the SAME pairAndCompare result the
         // annotation layer consumes becomes the findings source, adapted to
@@ -5032,39 +5145,19 @@ function matchStructuredLineItemDeltas(
     }
   }
 
-  // OUR SHEET'S COLUMNS WHEN THE TYPED LANE COULD NOT RUN. The typed lane
-  // needs a word layer on both sides; an image-only SOR (RO 22279) or a
-  // Mitchell comparison leaves our rows to the text lane, which reads a
-  // row's lone hours as labor, so refinish-only rows ("Add for Clear Coat
-  // 0.9", "Tint color 0.5", "Prep unprimed bumper 0.7") land in the labor
-  // column: RO 22279's shop final read 21.1 labor / 4.3 paint hours against
-  // 17.6 / 7.8 printed, and the dispute report refused. Our own print's
-  // typed cells carry each value's column by position. When they reconcile
-  // to its printed SUBTOTALS, a text row whose hours they match in total
-  // takes their column split; its values never change.
-  if (!typedLaneUsed) {
-    const ownRows = parseDeltaEngineRows(subjectWordPages, emptyRowParseDiagnostics());
-    const printed = parseDeltaEngineSubtotals(subjectWordPages);
-    const body = printed?.page ? ownRows.filter((row) => row.page <= printed.page!) : ownRows;
-    const total = (key: "labor" | "paint") => body.reduce((sum, row) => sum + (row[key] ?? 0), 0);
-    if (
-      printed &&
-      printed.labor !== null &&
-      printed.paint !== null &&
-      body.length >= 10 &&
-      hoursReconcile(total("labor"), printed.labor) &&
-      hoursReconcile(total("paint"), printed.paint)
-    ) {
-      const typedByLine = new Map<string, DeltaEngineRow>();
-      for (const row of body) if (!typedByLine.has(String(row.line))) typedByLine.set(String(row.line), row);
-      dedupedHigherRows = dedupedHigherRows.map((row) => {
-        const typed = row.lineNumber === null ? undefined : typedByLine.get(String(row.lineNumber));
-        if (!typed) return row;
-        const [labor, paint] = [typed.labor ?? null, typed.paint ?? null];
-        const sameTotal = Math.abs((row.labor ?? 0) + (row.paint ?? 0) - ((labor ?? 0) + (paint ?? 0))) <= 0.05;
-        return sameTotal && (labor !== row.labor || paint !== row.paint) ? { ...row, labor, paint } : row;
-      });
-    }
+  // The text lane stands for this estimate: its rows take their column
+  // identity from the measured word layer when that read closes the print
+  // (see withMeasuredSubjectCells). A withheld comparison carries no rows.
+  if (!higherRowsTyped && !lineItemsWithheld) {
+    subjectEngineRows ??= parseDeltaEngineRows(subjectWordPages, emptyRowParseDiagnostics());
+    dedupedHigherRows = withMeasuredSubjectCells({
+      context,
+      primaryAnchors,
+      anchorById,
+      textRows: dedupedHigherRows,
+      engineRows: subjectEngineRows,
+      wordPages: subjectWordPages,
+    });
   }
 
   if (lowerRows.length === 0 || dedupedHigherRows.length === 0) return null;
