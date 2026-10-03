@@ -4855,6 +4855,7 @@ function matchStructuredLineItemDeltas(
   // parser. The sentence is the reader-facing note carried to the legend
   // and the forensic report's limitations.
   let lineItemsWithheld: string | null = null;
+  let typedLaneUsed = false;
   // The typed engine parses the CCC column grid. A Mitchell comparison prints
   // welded columns and no SUBTOTALS row, so its word layer yields fragments
   // the reconciliation guard cannot reject (nothing to reconcile against) —
@@ -4968,6 +4969,7 @@ function matchStructuredLineItemDeltas(
       const engineLower = engineRowsToDeltaRows(competingEngineRows, null);
       if (engineHigher.length >= 10 && engineLower.length >= 10) {
         dedupedHigherRows = engineHigher;
+        typedLaneUsed = true;
         lowerRows = engineLower;
         // ONE detector pass (O-2): the SAME pairAndCompare result the
         // annotation layer consumes becomes the findings source, adapted to
@@ -5027,6 +5029,41 @@ function matchStructuredLineItemDeltas(
         }
       }
       }
+    }
+  }
+
+  // OUR SHEET'S COLUMNS WHEN THE TYPED LANE COULD NOT RUN. The typed lane
+  // needs a word layer on both sides; an image-only SOR (RO 22279) or a
+  // Mitchell comparison leaves our rows to the text lane, which reads a
+  // row's lone hours as labor, so refinish-only rows ("Add for Clear Coat
+  // 0.9", "Tint color 0.5", "Prep unprimed bumper 0.7") land in the labor
+  // column: RO 22279's shop final read 21.1 labor / 4.3 paint hours against
+  // 17.6 / 7.8 printed, and the dispute report refused. Our own print's
+  // typed cells carry each value's column by position. When they reconcile
+  // to its printed SUBTOTALS, a text row whose hours they match in total
+  // takes their column split; its values never change.
+  if (!typedLaneUsed) {
+    const ownRows = parseDeltaEngineRows(subjectWordPages, emptyRowParseDiagnostics());
+    const printed = parseDeltaEngineSubtotals(subjectWordPages);
+    const body = printed?.page ? ownRows.filter((row) => row.page <= printed.page!) : ownRows;
+    const total = (key: "labor" | "paint") => body.reduce((sum, row) => sum + (row[key] ?? 0), 0);
+    if (
+      printed &&
+      printed.labor !== null &&
+      printed.paint !== null &&
+      body.length >= 10 &&
+      hoursReconcile(total("labor"), printed.labor) &&
+      hoursReconcile(total("paint"), printed.paint)
+    ) {
+      const typedByLine = new Map<string, DeltaEngineRow>();
+      for (const row of body) if (!typedByLine.has(String(row.line))) typedByLine.set(String(row.line), row);
+      dedupedHigherRows = dedupedHigherRows.map((row) => {
+        const typed = row.lineNumber === null ? undefined : typedByLine.get(String(row.lineNumber));
+        if (!typed) return row;
+        const [labor, paint] = [typed.labor ?? null, typed.paint ?? null];
+        const sameTotal = Math.abs((row.labor ?? 0) + (row.paint ?? 0) - ((labor ?? 0) + (paint ?? 0))) <= 0.05;
+        return sameTotal && (labor !== row.labor || paint !== row.paint) ? { ...row, labor, paint } : row;
+      });
     }
   }
 
