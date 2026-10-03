@@ -273,8 +273,9 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.ok(downloadFnIndex !== -1 && downloadIndex !== -1);
   assert.match(
     source.slice(downloadIndex, source.indexOf('if (reportType === "oem_citation_density")', downloadIndex)),
-    // b7e0e05 passes the user's answer to "which upload is the insurer's".
-    /await generateAnnotatedCitationDensityEstimate\((?:options\.comparisonDocumentId)?\)/
+    // b7e0e05 passes the user's answer to "which upload is the insurer's";
+    // the case the report builds from follows it (run first when there is none).
+    /await generateAnnotatedCitationDensityEstimate\((?:options\.comparisonDocumentId(?:, caseForReports\.caseId)?)?\)/
   );
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);

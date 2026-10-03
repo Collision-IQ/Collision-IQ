@@ -52,6 +52,7 @@ vi.mock("@/lib/reports/oemAuthorityRetrieval", () => ({
 }));
 
 import { POST } from "@/app/api/reports/citation-density/annotated-estimate/route";
+import { buildOemAuthorityTrace } from "@/lib/reports/oemAuthorityRetrieval";
 
 async function pdfOf(lines: string[]) {
   const pdf = await PDFDocument.create();
@@ -141,6 +142,20 @@ describe("the route asks which upload is the insurer's estimate, and takes the a
     const thrown = await post({ ...annotateOurs, comparisonDocumentId: "b" });
     expect(thrown.status).toBe(200);
     expect((await thrown.json()).warnings).toContain("Your choice of the insurer's estimate applies to this run but could not be saved with the case.");
+  }, 60_000);
+
+  it("a retrieval lane that never answers never stalls the report: it goes on without it", async () => {
+    process.env.CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS = "50";
+    vi.mocked(buildOemAuthorityTrace).mockImplementationOnce(() => new Promise(() => {}));
+    try {
+      const response = await post({ ...annotateOurs, comparisonDocumentId: "b" });
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(typeof body.pdfBase64).toBe("string");
+      expect(typeof body.findingsReportPdfBase64).toBe("string");
+    } finally {
+      delete process.env.CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS;
+    }
   }, 60_000);
 
   it("sends each PDF once: at the top level, never repeated in outputs[0] (Vercel refuses responses over 4.5 MB)", async () => {

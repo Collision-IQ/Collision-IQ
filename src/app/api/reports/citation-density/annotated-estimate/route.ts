@@ -486,22 +486,33 @@ export async function POST(request: Request) {
             return [];
           }
         });
-      // Retrieval is a network lane and must never be able to fail the report:
-      // an unavailable Drive/Serper lane degrades to the RIR snapshot alone,
-      // exactly as before this wiring existed.
+      // Retrieval is a network lane and must never be able to fail the report,
+      // or stall it: an unavailable or slow Drive/Serper lane degrades to the
+      // RIR snapshot alone, exactly as before this wiring existed. Its calls
+      // carry no timeout of their own, so the wait for them is bounded here.
       let authorityTrace = null;
+      const retrievalStarted = Date.now();
       try {
-        authorityTrace = await buildOemAuthorityTrace({
-          selection,
-          sourceDocument,
-          sourceDocuments,
-          comparisonEstimateTexts,
-        });
+        authorityTrace = await withTimeout(
+          buildOemAuthorityTrace({
+            selection,
+            sourceDocument,
+            sourceDocuments,
+            comparisonEstimateTexts,
+          }),
+          authorityRetrievalTimeoutMs(),
+          "authority retrieval"
+        );
       } catch (error) {
         console.warn("[citation-density] authority retrieval failed; continuing with snapshot authorities only", {
           reason: error instanceof Error ? error.message : "unknown",
+          ms: Date.now() - retrievalStarted,
         });
       }
+      console.info("[citation-density.annotated-estimate] authority retrieval", {
+        ms: Date.now() - retrievalStarted,
+        retrieved: authorityTrace !== null,
+      });
       const retrievedAuthorities = mapAuthorityTraceToResolvedAuthorities(authorityTrace).filter((source) => {
         const key = source.sourceTitle.toLowerCase();
         if (seenAuthorityTitles.has(key)) return false;
@@ -510,6 +521,7 @@ export async function POST(request: Request) {
       });
       const resolvedAuthorities = [...snapshotAuthorities, ...retrievedAuthorities];
 
+      const buildStarted = Date.now();
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -571,6 +583,7 @@ export async function POST(request: Request) {
       const plainSummaryUrl = plainSummaryArtifactId
         ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
         : undefined;
+      console.info("[citation-density.annotated-estimate] report build", { ms: Date.now() - buildStarted });
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
       // An answer the run took is saved with the case, so a later run (another
       // session, a reloaded case) uses it without asking. A failed save never
@@ -989,4 +1002,22 @@ function getFindingReportType(finding: CitationDensityFinding): string | undefin
 function hasWrongFindingIdentity(routeName: "citation-density", finding: CitationDensityFinding) {
   const reportType = getFindingReportType(finding);
   return reportType === "oem-citation-density" || /^oem-citation-density-/i.test(finding.id);
+}
+
+/**
+ * How long the report waits for the authority retrieval lane before going on
+ * without it. CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS overrides the default.
+ */
+function authorityRetrievalTimeoutMs() {
+  const configured = Number(process.env.CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 25_000;
+}
+
+/** Settles with the promise, or rejects once `ms` pass; the timer never outlives it. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
