@@ -95,7 +95,13 @@ Module._load = function interceptLoad(request, parent, isMain) {
     };
   }
   if (request === "@/lib/ai/renderDamageOverlay") {
-    return { renderDamageOverlay: async (...args) => mockRenderImpl(...args) };
+    // Only the canvas render is mocked; gradientHeatZones is the real pure
+    // helper runDamageAnnotation uses to decide heat-map overlay availability.
+    const real = require(path.join(cwd, "src/lib/ai/renderDamageOverlay.ts"));
+    return {
+      renderDamageOverlay: async (...args) => mockRenderImpl(...args),
+      gradientHeatZones: real.gradientHeatZones,
+    };
   }
   if (request === "@/lib/ai/damageImageNormalization") {
     return { normalizeDamageImage: async (source) => ({ buffer: Buffer.isBuffer(source) ? source : Buffer.from("source"), dataUrl: "data:image/png;base64,c291cmNl", sourceHash: "a".repeat(64), naturalWidth: 100, naturalHeight: 80, originalOrientation: 1, normalizedOrientation: 1 }) };
@@ -109,6 +115,7 @@ Module._load = function interceptLoad(request, parent, isMain) {
 
 console.info = () => {};
 console.warn = () => {};
+const origError = console.error;
 console.error = () => {};
 const { POST } = require(path.join(__dirname, "route.ts"));
 
@@ -137,7 +144,7 @@ async function test(name, fn) {
     passed++;
   } catch (err) {
     console.log = origLog;
-    console.error(`  ✗ ${name}\n    ${err.message}`);
+    origError(`  ✗ ${name}\n    ${err.message}`);
     failures.push({ name, err });
     console.log = () => {};
     failed++;
@@ -204,7 +211,7 @@ console.log = () => {};
   console.log = origLog;
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
   if (failed > 0) {
-    for (const { name, err } of failures) console.error(`\nFAILED: ${name}\n${err.stack || err.message}`);
+    for (const { name, err } of failures) origError(`\nFAILED: ${name}\n${err.stack || err.message}`);
     process.exit(1);
   }
 })();
