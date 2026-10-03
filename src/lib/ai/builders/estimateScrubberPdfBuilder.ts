@@ -202,13 +202,7 @@ export function buildAnnotatedEstimateReviewPdf(
       },
       {
         title: "8. Source Boundary",
-        bullets: buildSourceBoundaryBullets(
-          model.citationDensityFindings.some((finding) =>
-            /\bccc\s+secure\s+share|secure\s+share|workfile\s+(?:id|data)\b/i.test(
-              `${finding.currentSupportSummary ?? ""} ${finding.missingProofSummary ?? ""}`
-            )
-          )
-        ),
+        bullets: buildSourceBoundaryBullets(hasCccSecureShareSignal(params, model.citationDensityFindings)),
       },
     ],
     redCount,
@@ -2061,6 +2055,25 @@ function buildWeakDoNotLeadBullets(findings: CitationDensityFinding[]): string[]
         `${finding.operationLabel}: ${finding.currentSupportSummary}. Limitation: ${finding.limitations.join(" ")}`
       )
     : ["No weak or distracting lead items were isolated from the current estimate review."];
+}
+
+/**
+ * The Secure Share / workfile-artifact signal that licenses the CCC
+ * structured-data sentence. A finding's summaries never carry the artifact's
+ * name, so the file set's own evidence records (title and source, never the
+ * free-text snippet) are read as well; a Secure Share workfile on file was
+ * otherwise suppressed. Bare "CCC" still does not qualify: an estimate
+ * AUTHORED in CCC ONE is not a retrieved Secure Share workfile.
+ */
+function hasCccSecureShareSignal(
+  params: ExportBuilderInput,
+  findings: CitationDensityFinding[]
+): boolean {
+  const pattern = /\bccc\s+secure\s+share|secure\s+share|workfile\s+(?:id|data)\b/i;
+  return [
+    ...findings.map((finding) => `${finding.currentSupportSummary ?? ""} ${finding.missingProofSummary ?? ""}`),
+    ...(params.report?.evidence ?? []).map((record) => `${record.title ?? ""} ${record.source ?? ""}`),
+  ].some((value) => pattern.test(value));
 }
 
 function buildSourceBoundaryBullets(hasCccWorkfileData: boolean): string[] {

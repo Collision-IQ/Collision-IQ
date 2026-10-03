@@ -41,6 +41,7 @@ const {
 const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
 const { buildCollisionSnapshotPdfFromSnapshot } = require("./builders/collisionSnapshotPdfBuilder.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
+const { __testables: { redactCarrierReportDocument } } = require("./builders/exportPdf.ts");
 const { buildCustomerReportPdf } = require("./builders/customerReportPdfBuilder.ts");
 const { renderCustomerReportHtml } = require("./renderCustomerReportHtml.ts");
 const { buildDisputeIntelligencePdf } = require("./builders/disputeIntelligencePdfBuilder.ts");
@@ -84,6 +85,19 @@ SOR-1 21975 carrier total repairs $4,597.17 net $4,097.17. Body labor 13.2 @ $60
 Carrier uses A/M CAPA LKQ substitutions. Line 23 LKQ grille note: LKQ grille is not correct style.
 Carrier references pre-repair scan, in-process scan, seat belt dynamic function test, post-repair scan, final road test, and REVVAdas Egnyte link. The Egnyte support link is referenced but not produced.
 `;
+
+// Insurer redaction lives at the EXPORT boundary, not in the builders:
+// 397ef17 made redactExportModelForDownload a pass-through, and 36b26d5
+// ("export redaction policy — identity, last 8 of the VIN, insurance")
+// reinstated carrier redaction in redactDownloadContent, which every
+// downloaded PDF passes through (redactCarrierReportDocument in exportPdf.ts).
+// The builder carries the extracted carrier; the shipped document must not.
+function assertInsurerRedactedOnExport(document, expectedCarrier) {
+  assert.equal(document.summary.find((item) => item.label === "Insurer")?.value, expectedCarrier);
+  const shipped = redactCarrierReportDocument(document);
+  assert.equal(shipped.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assert.doesNotMatch(JSON.stringify(shipped), new RegExp(expectedCarrier, "i"));
+}
 
 function run(name, fn) {
   try {
@@ -789,9 +803,11 @@ run("customer report PDF strips internal audit language and parser fragments", (
   });
 
   const text = flattenCarrierDocument(document);
-  // Approved customer-facing section order.
+  // Approved customer-facing section order. Retitled conversationally on
+  // purpose in 9edc437 ("fix(customer-report): ... read like the reference");
+  // the order and the seven-section contract are unchanged.
   assert.equal(document.sections.map((section) => section.title.replace(/\.$/, "")).join("|"),
-    "Plain-English Summary|What This Means for You|Key Findings|Why These Items Matter|Questions to Ask|Supporting Documentation|Technical Appendix"
+    "The short version|What this actually means for you|What still needs to be double-checked|Why this actually matters|What you can do next|Supporting documentation on file|Where things stand"
   );
   assert.equal(
     text.includes("Hidden mounting or structural damage is not verified from the reviewed file"),
@@ -843,7 +859,9 @@ run("collision snapshot strips internal IDs and malformed parsed line fragments"
   );
   assert.equal(
     snapshot.topDisputeItems[0].nextAction,
-    "Ask the insurer or repair shop to explain whether this item is included, and if not, why."
+    // "each open item" (not "this item") since 9edc437: the template lands in
+    // bullet lists where "this item" dangled.
+    "Ask the insurer or repair shop to explain whether each open item is included, and if not, why."
   );
   assertNoCustomerDebugText(text);
 });
@@ -1035,9 +1053,13 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
   assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", /^(?:5YJSA1E21JF264319)?$/);
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assertInsurerRedactedOnExport(carrier, "GEICO");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
-  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
+  // 623133e ("Fix report diagnostics and citation anchors") names the resolved
+  // total ("Shop estimate grand total", cased in eb2dd0e) instead of a generic
+  // "Estimate Total" whenever comparison totals resolve; the value is unchanged.
+  assert.equal(carrier.summary.find((item) => item.label === "Shop estimate grand total")?.value, "$19,428.53");
+  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, undefined);
   const carrierText = flattenCarrierDocument(carrier);
   assert.equal(
     /cavity wax/i.test(carrierText),
@@ -1059,7 +1081,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     carrier.summary.find((item) => item.label === "VIN")?.value.includes("Not clearly supported"),
     false
   );
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assertInsurerRedactedOnExport(carrier, "GEICO");
   assert.equal(carrier.summary.some((item) => item.value === "THOMAS"), false);
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
@@ -1130,7 +1152,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
   assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", new RegExp(`^(?:${renderModel.reportFields.vin})?$`));
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assertInsurerRedactedOnExport(carrier, "GEICO");
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
     renderModel.reportFields.vehicleLabel
@@ -1139,7 +1161,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value ? renderModel.reportFields.vin : ""
   );
-  assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assertInsurerRedactedOnExport(rebuttal, "GEICO");
 });
 
 run("dispute intelligence text template stays decision-ready outside compare mode", () => {
@@ -1263,9 +1285,18 @@ run("OEM-backed supplement opportunities flow into supplement lines and negotiat
     },
   ];
   report.sourceEstimateText = SHOP_21733_TEXT.replace(/Pre-paint test fit/gi, "Test fits");
+  // Since b8feea4 ("gate OEM retrieval on decoded make ... fail closed on
+  // unknown make") make-specific OEM support applies only when the vehicle's
+  // make resolves. makeReport() leaves report.vehicle undefined (the Tesla
+  // identity is only in the estimate text, which the supplement builder does
+  // not decode), so every make-specific document failed closed; and the BMW
+  // documents this fixture used are wrong-make for the 2018 Tesla Model S the
+  // estimate describes. The fixture now carries that identity and the
+  // vehicle's own make.
+  report.vehicle = { year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD", source: "attachment", confidence: 0.99 };
   report.supplementOpportunities = [
-    "OEM support in BMW Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.",
-    "OEM support in BMW Position Statement.pdf indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.",
+    "OEM support in Tesla Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.",
+    "OEM support in Tesla Position Statement.pdf indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.",
   ];
   report.missingProcedures = [];
   report.presentProcedures = ["Pre-repair scan", "Post-repair scan"];
@@ -1281,7 +1312,7 @@ run("OEM-backed supplement opportunities flow into supplement lines and negotiat
     supplementLines.some((item) => item.title === "Pre-Paint Test Fit"),
     true
   );
-  assert.equal(/BMW Front Bumper Procedure\.pdf/i.test(negotiation), true);
+  assert.equal(/Tesla Front Bumper Procedure\.pdf/i.test(negotiation), true);
   assert.equal(/fit-sensitive repair path/i.test(negotiation), true);
 });
 
@@ -1350,6 +1381,16 @@ run("customer report keeps 21975 estimate framing nuanced and grammatically clea
       bottomLine: "Repair completion status is not established from the reviewed file.",
     },
     vehicle: "Vehicle",
+    // 21975 is a Shop / SOR-1 estimate PAIR. Since e227878 ("enforce
+    // truthfulness rules in narrative builders — no comparison language ...
+    // without an estimate pair") the "estimate rows show specific
+    // differences" note prints only when a comparison is established, so the
+    // pair's totals (from SHOP_21975_COMPARISON_TEXT) are supplied.
+    comparisonTotals: {
+      shopEstimateGrandTotal: 7838.99,
+      carrierTotalCostOfRepairs: 4597.17,
+      carrierNetAfterDeductible: 4097.17,
+    },
     findingReasoning: [
       {
         issue: "LKQ grille style contradiction",
