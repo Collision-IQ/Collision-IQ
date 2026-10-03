@@ -311,6 +311,20 @@ run("estimate documentation and research leads never render as Verified support"
   assert.doesNotMatch(formatRepairIntelligenceSourceStatus("inferred"), /verified/i);
 });
 
+run("stripEstimateComparisonLanguage keeps subject-verb agreement when 'both estimates' becomes singular", () => {
+  assert.equal(
+    stripEstimateComparisonLanguage("Both estimates use new factory parts."),
+    "The estimate uses new factory parts."
+  );
+  assert.equal(
+    stripEstimateComparisonLanguage("Both estimates are missing a pre-repair scan, and the two estimates carry no calibration."),
+    "The estimate is missing a pre-repair scan, and the estimate carries no calibration."
+  );
+  assert.equal(stripEstimateComparisonLanguage("Both estimates match on labor rates."), "The estimate matches on labor rates.");
+  // A word that is not a known verb is left as written, never guessed at.
+  assert.equal(stripEstimateComparisonLanguage("Both estimates' totals differ."), "The estimate's totals differ.");
+});
+
 run("stripEstimateComparisonLanguage rewrites carrier framing to single-estimate framing", () => {
   assert.equal(
     stripEstimateComparisonLanguage("The [REDACTED_INSURER] estimate may be missing items."),

@@ -106,7 +106,7 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
         title: "What The User Reports",
         bullets: claimHandlingContext.userReports.length
           ? claimHandlingContext.userReports
-          : ["No specific user-reported appraisal-process conduct was isolated in the runtime context."],
+          : ["No specific user-reported appraisal-process conduct was found in the claim file."],
       },
       ...claimHandlingContext.explicitSections,
       {
@@ -272,7 +272,7 @@ function buildDoiReadinessReviewDocument(params: {
         title: "What The User Reports",
         bullets: claimHandlingContext.userReports.length
           ? claimHandlingContext.userReports
-          : ["No specific user-reported appraisal-process conduct was isolated in the runtime context."],
+          : ["No specific user-reported appraisal-process conduct was found in the claim file."],
       },
       ...claimHandlingContext.explicitSections,
       {

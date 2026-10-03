@@ -1062,6 +1062,33 @@ run("Estimate Delta labels visible subset as top items when count is larger", ()
   assert.doesNotMatch(addedSection.title, /^Added In Newer Estimate$/i);
 });
 
+run("Estimate Delta header counts match the deduplicated section bullets", () => {
+  // The section drops repeated labels; the header used to count raw rows, so
+  // three "Front bumper cover" rows read "Added 4" over a 2-bullet section.
+  const operations = ["Front bumper cover", "Front bumper cover", "Front bumper cover", "Hood panel"];
+  const rows = operations.map((operation, index) => ({
+    id: `dup-${index + 1}`,
+    category: "Operations",
+    operation,
+    lhsSource: "RO 21733 original estimate",
+    rhsSource: "RO 21733 newer estimate",
+    lhsValue: null,
+    rhsValue: `Added labor ${index + 1}`,
+    delta: "Added in newer estimate",
+    deltaType: "added",
+  }));
+  const document = buildEstimatorChangeRequestListPdf({
+    report: REPORT,
+    analysis: { ...ANALYSIS, estimateComparisons: { rows } },
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const addedSection = document.sections.find((section) => /added in newer estimate/i.test(section.title));
+  assert.ok(addedSection);
+  assert.deepEqual(addedSection.bullets, ["Front bumper cover", "Hood panel"]);
+  assert.equal(document.summary.find((item) => item.label === "Added")?.value, "2");
+});
+
 run("Annotated Estimate Review selects lower-cost carrier estimate and keeps comparison internal", () => {
   const comparisonAnalysis = {
     ...ANALYSIS,
@@ -1326,7 +1353,9 @@ run("DOI and Policy reviews disclose stale appraisal chat context without promot
   // was isolated.
   const doiUserReports = doiDocument.sections.find((section) => section.title === "What The User Reports");
   assert.ok(doiUserReports);
-  assert.ok((doiUserReports.bullets ?? []).every((bullet) => /^No specific user-reported appraisal-process conduct was isolated\b/.test(bullet)));
+  assert.ok((doiUserReports.bullets ?? []).every((bullet) => /^No specific user-reported appraisal-process conduct was found in the claim file\.$/.test(bullet)));
+  // "runtime context" is internal pipeline jargon; it never reaches a packet.
+  assert.doesNotMatch(JSON.stringify({ doiDocument, policyDocument }), /runtime context/i);
   const promotionScanText = JSON.stringify({ doiDocument, policyDocument })
     .split('"title":"What The User Reports"').join('"title":""')
     .split("Do not infer award timing, repair-continuation restrictions, or post-repair appraisal denial without current written support.").join("")

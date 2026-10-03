@@ -93,7 +93,7 @@ export function buildClaimHandlingDisputeContext(
         : null,
     ].filter(Boolean) as string[],
     documentSupport: [
-      signals.appraisal ? "Runtime context and claim discussion material identify appraisal as the dispute path to review." : null,
+      signals.appraisal ? "The claim file and earlier claim discussion identify appraisal as the dispute path to review." : null,
       signals.supplement ? "The file references supplement timing, reinspection, or continuing repair documentation as part of the dispute." : null,
       signals.hiddenDamage ? "Repair attachments support the possibility that hidden damage, teardown findings, or final repair scope may still evolve." : null,
       signals.writtenPosition ? "The context points to a need for written carrier or IA communications rather than oral process assumptions." : null,

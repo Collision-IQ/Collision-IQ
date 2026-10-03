@@ -2548,12 +2548,15 @@ function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
 function buildEstimateDeltaSummary(
   model: AnnotatedEstimateReviewModel
 ): CarrierReportDocument["summary"] {
-  const rows = model.comparisonRows.filter((row) => !isEstimateDeltaExcludedRow(row));
-  const mode = detectEstimateDeltaMode(rows);
-  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed", mode)).length;
-  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_first", mode)).length;
-  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_second", mode)).length;
-  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap", mode)).length;
+  // Count what each section lists (same mode, same duplicate-label removal),
+  // so a header count never disagrees with the bullets under it.
+  const mode = detectEstimateDeltaMode(model.comparisonRows);
+  const countOf = (bucket: EstimateDeltaBucket) =>
+    buildEstimateDeltaBullets(model.comparisonRows, bucket, mode).totalCount;
+  const changedCount = countOf("changed");
+  const addedCount = countOf("only_first");
+  const missingCount = countOf("only_second");
+  const gapCount = countOf("gap");
 
   return [
     { label: "Vehicle", value: model.vehicleIdentity },
