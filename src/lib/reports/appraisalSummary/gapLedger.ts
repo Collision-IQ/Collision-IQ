@@ -21,6 +21,7 @@
  * own subtotals; if they do not, LedgerNotClosedError is thrown and the report
  * is not produced (the same philosophy as the R24 release gate).
  */
+import { hoursReconcile } from "../deltaEngine/rowCluster";
 import { lineReconciliation, nonLaborBuckets, unreadLineDollars, type LineReconciliation } from "./nonLaborBuckets";
 import { round2, type Estimate, type LaborCat, type LaborTotal } from "./types";
 
@@ -96,20 +97,64 @@ export function unreadCarrierDollars(carrier: Estimate, opts: LedgerOptions = {}
   return unread > 0 ? unread : 0;
 }
 
+export interface LineHoursRead {
+  /** The labor column (every labor category but paint): Σ line hours, printed hours. */
+  labor: { lines: number; printed: number };
+  /** The paint column: Σ line paint hours, printed paint-labor hours. */
+  paint: { lines: number; printed: number };
+  closes: boolean;
+}
+
 /**
- * Carrier labor hours on lines that were not read: the printed labor hours
- * less the hours on the lines read. A dropped row that carries only labor
- * leaves no unread dollars, and the work on it then reads as "no
- * counterpart" or "theirs 0.0 hr". Measured on a CCC print, whose line hours
- * add up to its printed categories (RO 21995 and RO 22279, both sides, to
- * the tenth); 0 when fully read or not CCC.
+ * The rows' hours against the document's own printed labor categories, column
+ * by column, under the typed lane's column-identity rule (RC-3). That guard
+ * runs only when both sides were read as typed word-layer cells; rows from the
+ * text lane reach this report unchecked, and on the repository's CCC fixtures
+ * that lane's rows carry too much labor and too little paint (20766: 33.1 /
+ * 7.3 hr against 28.0 / 17.9 printed; typed rows of the same print close to
+ * the tenth). Every hour the report quotes comes from these rows, so a read
+ * that does not close ships no report, except a carrier shortfall the ledger
+ * discloses (unreadCarrierHours).
+ */
+export function lineHoursRead(estimate: Estimate): LineHoursRead {
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const sum = (values: number[]) => round1(values.reduce((total, value) => total + value, 0));
+  const labor = {
+    lines: sum(estimate.lines.map((l) => l.hours ?? 0)),
+    printed: sum(estimate.totals.labor.filter((t) => t.cat !== "paint").map((t) => t.hours)),
+  };
+  const paint = {
+    lines: sum(estimate.lines.map((l) => l.paintHours ?? 0)),
+    printed: sum(estimate.totals.labor.filter((t) => t.cat === "paint").map((t) => t.hours)),
+  };
+  return { labor, paint, closes: hoursReconcile(labor.lines, labor.printed) && hoursReconcile(paint.lines, paint.printed) };
+}
+
+/**
+ * Hours the lines did not reach: the printed labor + paint hours less the
+ * hours on the lines read, when neither column reads MORE than its print. A
+ * dropped row that carries hours only shortens the read, and the work on it
+ * then reads as "no counterpart" or "theirs 0.0 hr"; a column over its print
+ * (paint hours read into the labor column, the text lane's shape on the CCC
+ * fixtures) is a misread, not an omission, and returns null. 0 when the read
+ * is whole.
+ */
+export function unreadLineHours(read: LineHoursRead): number | null {
+  const over = (column: LineHoursRead["labor"]) => !hoursReconcile(column.lines, column.printed) && column.lines > column.printed;
+  if (over(read.labor) || over(read.paint)) return null;
+  const unread = Math.round((read.labor.printed + read.paint.printed - read.labor.lines - read.paint.lines) * 10) / 10;
+  return unread > 0.05 ? unread : 0;
+}
+
+/**
+ * Carrier labor hours on lines that were not read (unreadLineHours). Measured
+ * on a CCC print, whose line hours add up to its printed categories (RO 21995
+ * and RO 22279, both sides, to the tenth); 0 when fully read, misread (the
+ * adapter refuses that), or not CCC.
  */
 export function unreadCarrierHours(carrier: Estimate): number {
   if (carrier.platform !== "ccc") return 0;
-  const printed = carrier.totals.labor.reduce((sum, l) => sum + l.hours, 0);
-  const read = carrier.lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0);
-  const unread = Math.round((printed - read) * 10) / 10;
-  return unread > 0.05 ? unread : 0;
+  return unreadLineHours(lineHoursRead(carrier)) ?? 0;
 }
 
 /** Part of the carrier's sheet was not read: dollars, labor hours, or both. */

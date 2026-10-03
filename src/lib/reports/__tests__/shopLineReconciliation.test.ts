@@ -17,15 +17,15 @@
  * so both shapes are covered: priced rows with no hours (the report ships with
  * its absence claims withheld) and rows that carry hours (no report: every
  * hour it quotes would rest on an incomplete read, as the typed lane already
- * rules).
+ * rules). Their sheet reading short is disclosed instead (RO 22279's partial
+ * carrier read).
  */
 import { describe, expect, it } from "vitest";
 import type { EstimateDeltaRow } from "../estimateDeltaMatcher";
 import { tokenizeDescription } from "../estimateDeltaMatcher";
 import type { ForensicReconciliation, ReconciliationRow } from "../forensicEstimateAnalysis";
 import { hoursReconcile } from "../deltaEngine/rowCluster";
-import { lineHoursRead } from "../appraisalSummary/estimateFromDeltaRows";
-import { buildGapLedger } from "../appraisalSummary/gapLedger";
+import { buildGapLedger, lineHoursRead } from "../appraisalSummary/gapLedger";
 import { integrityChecks } from "../appraisalSummary/integrityChecks";
 import { buildLowerEstimateFindings } from "../appraisalSummary/lowerEstimateFindings";
 import { lineReconciliation, nonLaborBuckets, NonLaborParseError } from "../appraisalSummary/nonLaborBuckets";
@@ -158,14 +158,14 @@ const carrierRows: EstimateDeltaRow[] = [
 /** A part only the carrier wrote, $612.00, at the end of its sheet. */
 const carrierOnlyPart = row(32, "Repl", "Front tow hook bracket", { pn: "SYN20032", price: 612 });
 
-function adapt(params: { shop: EstimateDeltaRow[]; carrier?: EstimateDeltaRow[]; carrierExtra?: number }) {
+function adapt(params: { shop: EstimateDeltaRow[]; carrier?: EstimateDeltaRow[]; carrierExtra?: number; carrierText?: string }) {
   return adaptForensicToPlainSummary({
     reconciliation: reconciliation(params.carrierExtra),
     rows: { higher: params.shop, lower: params.carrier ?? carrierRows, deltas: [] },
     higherDocumentName: "Shop estimate.pdf",
     lowerDocumentName: "Carrier SOR.pdf",
     higherText: "",
-    lowerText: "",
+    lowerText: params.carrierText ?? "",
     vehicleLabel: "Synthetic test vehicle",
     generatedAt: "2026-10-02T12:00:00.000Z",
   });
@@ -328,13 +328,30 @@ describe("line hours: both sheets are held to their printed labor hours, column 
     );
   });
 
-  it("their sheet is held to the same rule, and both are named when both fail", () => {
-    expect(refusal({ shop: shopRows, carrier: without(carrierRows, 19) })).toMatch(
-      /^their estimate's lines carry 12\.0 labor and 5\.0 paint hours as read, but it prints 15\.0 and 6\.0/
+  // The disclosure is measured on a CCC print only (unreadCarrierHours).
+  const ccc = "CCC ONE Estimating";
+
+  it("their CCC sheet reading short ships with the hours disclosed and no item argued", () => {
+    const adapted = adapt({ shop: shopRows, carrier: without(carrierRows, 19), carrierText: ccc });
+    expect(adapted.ok).toBe(true);
+    if (!adapted.ok) return;
+    expect(adapted.input.carrier.platform).toBe("ccc");
+    const m = buildPlainSummaryModel(adapted.input);
+    expect(m.ledger.unreadCarrierHours).toBe(4);
+    expect(m.items).toEqual([]);
+  });
+
+  it("their sheet with a column over its print is a misread, and both are named when both fail", () => {
+    expect(refusal({ shop: shopRows, carrier: edit(carrierRows, 18, { labor: 6.5, paint: null }), carrierText: ccc })).toMatch(
+      /^their estimate's lines carry 17\.0 labor and 4\.0 paint hours as read, but it prints 15\.0 and 6\.0/
     );
-    expect(refusal({ shop: without(shopRows, 21), carrier: without(carrierRows, 19) })).toMatch(
-      /^our estimate's lines carry 16\.0 .*; their estimate's lines carry 12\.0 /
+    expect(refusal({ shop: without(shopRows, 21), carrier: edit(carrierRows, 18, { labor: 6.5, paint: null }) })).toMatch(
+      /^our estimate's lines carry 16\.0 .*; their estimate's lines carry 17\.0 /
     );
+    // A shortfall on theirs never masks a refusal on ours.
+    expect(refusal({ shop: without(shopRows, 21), carrier: without(carrierRows, 19), carrierText: ccc })).toMatch(/^our estimate's lines carry 16\.0 [^;]*$/);
+    // Off CCC no shortfall is measured, so their short read still refuses.
+    expect(refusal({ shop: shopRows, carrier: without(carrierRows, 19) })).toMatch(/^their estimate's lines carry 12\.0 labor and 5\.0 paint/);
   });
 
   it("allows the typed lane's 0.2 hr and no more", () => {
