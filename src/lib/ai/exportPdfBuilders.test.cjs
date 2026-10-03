@@ -414,8 +414,13 @@ run("Citation Density Gap Report shows citation gaps beside estimate anchors", (
   assert.match(text, /Proof Needed Before Leading With This/);
   assert.match(text, /Citation density/i);
   assert.match(text, /Estimate evidence supports the existence of a difference/i);
-  assert.match(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
-  assert.match(text, /The CCC estimate data supports the existence of this line-item difference\. OEM\/P-page\/DEG\/legal support has not yet been verified/i);
+  // Since 00d0230 ("partnership-review round 2 — ... report claim gating")
+  // the CCC structured-data confirmation prints only when a Secure Share /
+  // workfile artifact is in the file set. This fixture has none, so claiming
+  // CCC verification here would be unsupported. The positive case is pinned
+  // by the CCC Secure Share workfile fixture further down this file.
+  assert.doesNotMatch(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
+  assert.doesNotMatch(text, /The CCC estimate data supports the existence of this line-item difference/i);
   assert.doesNotMatch(text, /Estimate documentation the existence/i);
   assert.doesNotMatch(text, /CCC Secure Share documentation this estimate line/i);
   assert.doesNotMatch(text, /OEMdocumentation/i);
@@ -561,10 +566,24 @@ run("Citation Density Gap model exposes stable anchors and citation readiness fi
   assert.doesNotMatch(JSON.stringify(model), /evidence-chain-\d+|debug confidence|internal reasoning/i);
 });
 
+// The Toyota OEM link must be evaluated on a Toyota. Since 397ef17 ("Fix
+// RO21888 report defects ... research leads") Toyota is a known OEM family in
+// vehicle applicability, so a Toyota procedure on the shared GMC Acadia
+// fixture is (correctly) a wrong-make source and never reaches the finding.
+// No VIN: the shared fixture's VIN decodes to a GMC.
+const TOYOTA_VEHICLE = {
+  year: 2021,
+  make: "Toyota",
+  model: "RAV4",
+  source: "attachment",
+  confidence: 0.92,
+};
+
 run("Citation Density Gap Report classifies proof gaps and referenced Toyota links", () => {
   const model = buildAnnotatedEstimateReviewModel({
     report: {
       ...REPORT,
+      vehicle: TOYOTA_VEHICLE,
       issues: [
         {
           id: "issue-toyota-procedure",
@@ -623,6 +642,7 @@ run("Citation Density Gap Report classifies proof gaps and referenced Toyota lin
     },
     analysis: {
       ...ANALYSIS,
+      vehicle: TOYOTA_VEHICLE,
       rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
     },
     panel: null,
@@ -631,6 +651,7 @@ run("Citation Density Gap Report classifies proof gaps and referenced Toyota lin
   const document = buildAnnotatedEstimateReviewPdf({
     report: {
       ...REPORT,
+      vehicle: TOYOTA_VEHICLE,
       issues: [
         {
           id: "issue-toyota-procedure",
@@ -689,6 +710,7 @@ run("Citation Density Gap Report classifies proof gaps and referenced Toyota lin
     },
     analysis: {
       ...ANALYSIS,
+      vehicle: TOYOTA_VEHICLE,
       rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
     },
     panel: null,
@@ -987,16 +1009,36 @@ run("Policy Rights Review labels redacted policy metadata neutrally without impl
 });
 
 run("Estimate Delta labels visible subset as top items when count is larger", () => {
-  const addedRows = Array.from({ length: 25 }, (_, index) => ({
+  // Fixture corrected; this test never passed, not even at the commit that
+  // added it (626f651, "Tighten report source labeling and count
+  // consistency"):
+  // - "Original estimate" / "Newer estimate" share no family token, so
+  //   looksSameEstimateFamily() is false and the delta ran in NEUTRAL mode
+  //   (all 25 rows counted as "Missing", none as "Added"). A shared RO number
+  //   is the same-estimate-family signal the sequential mode requires.
+  // - The label normalizer drops a trailing number ("Added operation 7" ->
+  //   "Added operation"; also unit-like letters such as "M"/"T"), so the 25
+  //   rows deduped to ONE bullet. 25 distinct component labels are used.
+  // - Only-in-one-estimate bullets are the bare label by design
+  //   (formatEstimateDeltaBullet); only CHANGED rows carry "label: a -> b".
+  // - deltaType said "removed" for rows described as added.
+  const addedOperations = [
+    "Front bumper cover", "Rear bumper cover", "Left fender", "Right fender", "Hood panel",
+    "Grille", "Left headlamp", "Right headlamp", "Left tail lamp", "Right tail lamp",
+    "Windshield", "Roof panel", "Liftgate", "Left front door", "Right front door",
+    "Left rear door", "Right rear door", "Left quarter panel", "Right quarter panel", "Radiator support",
+    "Left mirror", "Right mirror", "Fender liner", "Rocker molding", "Cowl panel",
+  ];
+  const addedRows = addedOperations.map((operation, index) => ({
     id: `added-${index + 1}`,
     category: "Operations",
-    operation: `Added operation ${index + 1}`,
-    lhsSource: "Original estimate",
-    rhsSource: "Newer estimate",
+    operation,
+    lhsSource: "RO 21733 original estimate",
+    rhsSource: "RO 21733 newer estimate",
     lhsValue: null,
     rhsValue: `Added labor ${index + 1}`,
     delta: "Added in newer estimate",
-    deltaType: "removed",
+    deltaType: "added",
   }));
   const document = buildEstimatorChangeRequestListPdf({
     report: REPORT,
@@ -1016,7 +1058,7 @@ run("Estimate Delta labels visible subset as top items when count is larger", ()
   assert.ok(addedSection);
   assert.match(addedSection.title, /^Top added in newer estimate$/i);
   assert.equal(addedSection.bullets?.[0], "Showing 8 of 25 matching items.");
-  assert.equal((addedSection.bullets ?? []).filter((bullet) => /^Added operation \d+:/i.test(bullet)).length, 8);
+  assert.equal((addedSection.bullets ?? []).filter((bullet) => addedOperations.includes(bullet)).length, 8);
   assert.doesNotMatch(addedSection.title, /^Added In Newer Estimate$/i);
 });
 
@@ -1165,11 +1207,16 @@ run("DOI packet is blocked when complaint prerequisites are missing", () => {
   assert.equal(document.filename, "doi-readiness-review.pdf");
   assert.ok(document.summary.some((item) => item.label === "DOI Readiness State" && item.value === "NOT_READY_FOR_DOI"));
   assert.ok(document.summary.some((item) => item.label === "Verified Regulation Sources" && item.value === "0"));
+  // The builder's disclaimer has read "No legal violation is asserted ..."
+  // since 0bc2833. 709d6ce rewrote this expectation to "No verified legal
+  // violation ..." without changing the builder, and in the same commit the
+  // stale-appraisal-context test below forbids /verified legal violation/ in
+  // this very document; the two expectations cannot both hold.
   assert.ok(
     document.sections.some((section) =>
       section.title === "DOI Readiness Status" &&
       section.bullets.some((bullet) =>
-        bullet.includes("No verified legal violation is asserted unless verified legal authority and documented claim-handling conduct are both present.")
+        bullet.includes("No legal violation is asserted unless verified legal authority and documented claim-handling conduct are both present.")
       )
     )
   );
@@ -1179,9 +1226,23 @@ run("DOI packet is blocked when complaint prerequisites are missing", () => {
   assert.doesNotMatch(JSON.stringify(document), /insurer violated law/i);
 });
 
+// Since 9a00bf2 ("Resolve jurisdiction from owner and shop ZIP evidence")
+// jurisdiction comes only from explicit, policy, owner/insured or shop
+// address evidence in the uploaded file. A state named in narrative or chat
+// ("Pennsylvania estimate dispute ...") no longer confirms it, so these DOI
+// fixtures carry the owner address an uploaded estimate prints.
+const PA_OWNER_ADDRESS_EVIDENCE = {
+  id: "estimate-owner-address",
+  title: "Estimate owner block",
+  snippet: "Owner: 100 Market Street, Philadelphia, PA 19106",
+  source: "shop estimate",
+  authority: "internal",
+};
+
 run("DOI readiness does not treat technical repair disputes as regulatory misconduct", () => {
   const technicalOnlyReport = {
     ...REPORT,
+    evidence: [...REPORT.evidence, PA_OWNER_ADDRESS_EVIDENCE],
     retrievalSummary: {
       driveDocsUsed: 0,
       webSourcesUsed: 1,
@@ -1248,11 +1309,29 @@ run("DOI and Policy reviews disclose stale appraisal chat context without promot
   assert.ok(policyContext);
   assert.ok(doiDisputeSummary);
   assert.ok(policyDisputeFocus);
-  assert.match(JSON.stringify(doiContext), /prior_chat_context may mention an appraisal-process dispute/i);
-  assert.match(JSON.stringify(policyContext), /prior_chat_context may mention an appraisal-process or claim-handling concern/i);
+  // 00d0230 ("partnership-review round 2 ... report claim gating") replaced
+  // the raw prior_chat_context / current_upload / active_case_context tokens
+  // with plain English in these packets; the disclosures themselves are kept.
+  assert.match(JSON.stringify(doiContext), /Earlier chat discussion may mention an appraisal-process dispute/i);
+  assert.match(JSON.stringify(policyContext), /Earlier chat discussion may mention an appraisal-process or claim-handling concern/i);
   assert.match(JSON.stringify(policyDisputeFocus), /Policy rights are insufficient because the current file does not include policy language/i);
-  assert.match(JSON.stringify(doiDocument), /Current upload evidence source: current_upload estimates only/i);
-  assert.doesNotMatch(JSON.stringify({ doiDocument, policyDocument }), /The user reports|appraisal may later be resisted|before the shop can continue|premature demand|repair-continuation restriction/i);
+  assert.match(JSON.stringify(doiDocument), /Current upload evidence source: estimates in the current upload only/i);
+  assert.doesNotMatch(JSON.stringify({ doiDocument, policyDocument }), /prior_chat_context|current_upload|active_case_context/);
+  // The promotion guard never passed as written (709d6ce): it matched the
+  // section HEADING "What The User Reports" and the builders' own negative
+  // instructions ("Do not infer / Do not state ... repair-continuation
+  // restrictions ..."), none of which promotes the stale chat context.
+  // Exactly those literals are removed; the guard regex is unchanged for
+  // everything else, and the heading's body must say nothing user-reported
+  // was isolated.
+  const doiUserReports = doiDocument.sections.find((section) => section.title === "What The User Reports");
+  assert.ok(doiUserReports);
+  assert.ok((doiUserReports.bullets ?? []).every((bullet) => /^No specific user-reported appraisal-process conduct was isolated\b/.test(bullet)));
+  const promotionScanText = JSON.stringify({ doiDocument, policyDocument })
+    .split('"title":"What The User Reports"').join('"title":""')
+    .split("Do not infer award timing, repair-continuation restrictions, or post-repair appraisal denial without current written support.").join("")
+    .split("Do not state award timing, repair-continuation restrictions, or post-repair appraisal denial unless those facts are established by the current upload or the active case record.").join("");
+  assert.doesNotMatch(promotionScanText, /The user reports|appraisal may later be resisted|before the shop can continue|premature demand|repair-continuation restriction/i);
   assert.doesNotMatch(
     JSON.stringify({ doiDocument, policyDocument }),
     /insurer violated law|verified legal violation|claim-\[REDACTED_CLAIM\]|policy-\[REDACTED_POLICY\]|\buploaded document\b|Same rationale as earlier|Current estimate analysis; citation still needed|Calibration Verification Open/i
@@ -1264,6 +1343,7 @@ run("DOI complaint packet renders only when readiness prerequisites are met", ()
     ...REPORT,
     evidence: [
       ...REPORT.evidence,
+      PA_OWNER_ADDRESS_EVIDENCE,
       {
         id: "carrier-email-1",
         title: "Carrier email",

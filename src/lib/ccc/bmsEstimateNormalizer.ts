@@ -533,15 +533,15 @@ function buildJurisdictionResolverEvidenceText(
   const blocks: string[] = [];
 
   if (evidence.ownerAddressIsRealBlock) {
-    blocks.push(
-      [
-        "Owner Address",
-        evidence.ownerAddressState ? `State: ${evidence.ownerAddressState}` : null,
-        evidence.ownerAddressZip ? `ZIP: ${evidence.ownerAddressZip}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n")
-    );
+    // The shared resolver only admits an owner block as a real party address
+    // when it sees an address label plus "ST 12345" on one run (bb9c675). The
+    // structured BMS block is already verified (ownerAddressIsRealBlock), so
+    // emit state and ZIP adjacently or the owner is silently skipped and the
+    // shop ZIP fallback wins.
+    const ownerStateZip = [evidence.ownerAddressState, evidence.ownerAddressZip]
+      .filter(Boolean)
+      .join(" ");
+    blocks.push(["Owner Address", ownerStateZip || null].filter(Boolean).join("\n"));
   }
 
   if (evidence.inspectionSiteState || evidence.inspectionSiteZip) {
@@ -677,7 +677,12 @@ function chooseCccJurisdictionResolution(
       stateCode: sharedResolution.stateCode,
       source: sharedResolution.source,
       confidence: sharedResolution.confidence,
-      basis: sharedResolution.basis.replace("uploaded estimate", "CCC Secure Share estimate data"),
+      // Relabel provenance for every shared basis phrasing ("uploaded estimate",
+      // "the estimate", "the estimate/claim header"; reworded in 9b6aa45).
+      basis: sharedResolution.basis.replace(
+        /\b(?:uploaded estimate|the estimate(?:\/claim header)?)/,
+        "CCC Secure Share estimate data"
+      ),
       limitations: sharedResolution.limitations,
     };
   }

@@ -214,6 +214,9 @@ describe("bmsEstimateNormalizer", () => {
       source: "owner_zip",
       confidence: "high",
     });
+    expect(estimate.jurisdictionResolution?.basis).toContain(
+      "Owner/claimant ZIP from CCC Secure Share estimate data"
+    );
   });
 
   it("normalizes line items into estimate evidence only", () => {
@@ -402,8 +405,13 @@ describe("bmsEstimateNormalizer", () => {
       "inspection_site_zip_fallback",
       "shop_zip_fallback",
     ]).toContain(estimate.jurisdictionResolution?.source);
+    // Shared resolver checks the repair-shop ZIP before the inspection site
+    // (f029f41, order kept as fallbacks in 9b6aa45), so the shop ZIP wins when
+    // both are present; either way the basis must name the matching source.
     expect(estimate.jurisdictionResolution?.basis).toContain(
-      "Inspection Site ZIP from CCC Secure Share estimate data"
+      estimate.jurisdictionResolution?.source === "shop_zip_fallback"
+        ? "Repair-shop ZIP from CCC Secure Share estimate data"
+        : "Inspection Site ZIP from CCC Secure Share estimate data"
     );
     expect(estimate.jurisdictionResolution?.source).not.toBe("owner_zip");
     expect(JSON.stringify(estimate.jurisdictionResolution)).not.toContain("owner_zip");
