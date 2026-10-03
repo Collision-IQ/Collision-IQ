@@ -28,16 +28,53 @@ function parseDateMs(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** O/I/L read for 0/1 by OCR; folded on both sides so one workfile never compares as two. */
+function foldOcrDigits(value: string | null): string | null {
+  return value ? value.replace(/O/g, "0").replace(/[IL]/g, "1") : null;
+}
+
+const WORKFILE_LABEL = /\bworkfile[ \t]*(?:id|#|no\.?|number)?[ \t]*[:#]?/i;
+/** A line that is only a label ("Federal ID:"), the shape of a labels-then-values block. */
+const LABEL_ONLY_LINE = /^[ \t]*[A-Za-z][A-Za-z .#/'()-]{0,40}:[ \t]*$/;
+/** A workfile ID carries a digit, so a label word ("Federal") is never one. */
+const WORKFILE_VALUE = /^[ \t]*([A-Za-z0-9-]*\d[A-Za-z0-9-]*)(?=[ \t]|$)/;
+
+/**
+ * The workfile ID a print states, as printed; null when none. Reads the
+ * three layouts CCC text layers produce: inline ("Workfile ID: 613bea70"),
+ * value on the next line, and a block of labels followed by their values in
+ * the same order ("Workfile ID:\nFederal ID:\n613bea70\n12-3456789").
+ */
+export function readPrintedWorkfileId(text: string): string | null {
+  const lines = (text ?? "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const label = lines[i].match(WORKFILE_LABEL);
+    if (!label || label.index === undefined) continue;
+    const inline = lines[i].slice(label.index + label[0].length).match(WORKFILE_VALUE)?.[1];
+    if (inline) return inline;
+    if (!LABEL_ONLY_LINE.test(lines[i])) continue;
+    // Labels-then-values: count the label lines around this one; the value
+    // sits at the same offset in the run of lines that follows the block.
+    let start = i;
+    while (start > 0 && LABEL_ONLY_LINE.test(lines[start - 1])) start -= 1;
+    let end = i + 1;
+    while (end < lines.length && LABEL_ONLY_LINE.test(lines[end])) end += 1;
+    const value = lines[end + (i - start)]?.match(WORKFILE_VALUE)?.[1];
+    if (value) return value;
+  }
+  return null;
+}
+
 export function extractEstimateProvenance(text: string): EstimateProvenance {
   const source = text ?? "";
+  // [ \t], never \s, between a label and its value: \s crosses the newline in
+  // a labels-then-values layout and reads the next label word as the value.
   const roNumber = normalizeId(
-    source.match(/\b(?:repair\s*order|r\.?o\.?)\s*(?:#|no\.?|number|id)?\s*[:#]?\s*([A-Za-z0-9-]{3,})/i)?.[1]
+    source.match(/\b(?:repair[ \t]*order|r\.?o\.?)[ \t]*(?:#|no\.?|number|id)?[ \t]*[:#]?[ \t]*([A-Za-z0-9-]*\d[A-Za-z0-9-]*)/i)?.[1]
   );
-  const workfileId = normalizeId(
-    source.match(/\bworkfile\s*(?:id|#|no\.?|number)?\s*[:#]?\s*([A-Za-z0-9-]{3,})/i)?.[1]
-  );
+  const workfileId = foldOcrDigits(normalizeId(readPrintedWorkfileId(source)));
   const writtenBy = source
-    .match(/\bwritten\s+by\s*[:#]?\s*([A-Za-z][A-Za-z .,'-]{2,40})/i)?.[1]
+    .match(/\bwritten[ \t]+by[ \t]*[:#]?[ \t]*([A-Za-z][A-Za-z .,'-]{2,40})/i)?.[1]
     ?.replace(/\s+/g, " ")
     .trim()
     .toLowerCase() ?? null;
