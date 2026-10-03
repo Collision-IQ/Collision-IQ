@@ -195,8 +195,12 @@ export function readPrintedLetterhead(text: string): string | null {
   for (const raw of (text ?? "").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("[[") || /^=+\s*Page\b/i.test(line)) continue;
-    // OCR noise or a logo read as a few marks is skipped, within the first lines.
+    // OCR noise, a logo read as a few marks, or a header label (a print
+    // whose letterhead is an image starts "Workfile ID:", "Federal ID:") is
+    // skipped, within the first lines.
     if (++seen > 3) return null;
+    // A letterhead is a name: never a label, an amount or a number line.
+    if (/[:$]|\d{3,}/.test(line)) continue;
     const words = ocrLetters(line).toUpperCase().replace(/[^A-Z]+/g, " ").trim();
     const letters = words.replace(/ /g, "");
     if (letters.length < 6 || generic.test(words)) continue;
@@ -208,21 +212,33 @@ export function readPrintedLetterhead(text: string): string | null {
   return null;
 }
 /**
- * A letterhead naming an insurance company by kind ("... INSURANCE
- * COMPANY", "... CASUALTY", "... MUTUAL ..."). A brand word alone is not
- * enough: shops are named "Progressive Auto Body" and "Nationwide Collision".
+ * A letterhead naming an insurance company in a company's form ("... INSURANCE
+ * COMPANY", "... INSURANCE EXCHANGE", "... MUTUAL INSURANCE", "... AUTOMOBILE
+ * ASSOCIATION", or ending "... INSURANCE"). A brand word is not enough (shops
+ * are named "Progressive Auto Body"), nor is the word alone: appraisal firms
+ * are named "Insurance Appraisal Services" and "Independent Insurance
+ * Adjusters".
  */
 const namesInsuranceCompany = (letterhead: string | null) =>
-  letterhead !== null && /INSURANCE|CASUALTY|MUTUAL|INDEMNITY|ASSURANCE|UNDERWRITERS|AUTOMOBILEASSOCIATION/.test(letterhead);
+  letterhead !== null &&
+  /INSURANCE(?:COMPANY|CO|EXCHANGE|CORPORATION|CORP|GROUP)?$|INSURANCECOMPANY|INSURANCEEXCHANGE|(?:CASUALTY|INDEMNITY|ASSURANCE|MUTUAL|FIRE)(?:INSURANCE|COMPANY|AUTOMOBILE)|AUTOMOBILEASSOCIATION/.test(
+    letterhead
+  );
 
-export type PrintedPartyMatch = "estimator" | "Workfile ID" | "Federal ID";
+export type PrintedPartyMatch = "estimator" | "Workfile ID" | "Federal ID" | "letterhead";
 
-/** The workfile or Federal ID two prints share, when they share one. */
-function sharedHeaderId(ours: string, other: string): "Workfile ID" | "Federal ID" | null {
+/**
+ * The workfile, Federal ID or letterhead two prints share, when they share
+ * one. Our letterhead on a print means our system printed it (Mitchell
+ * prints no workfile and, unless set to, no Tax ID).
+ */
+function sharedHeaderId(ours: string, other: string): Exclude<PrintedPartyMatch, "estimator"> | null {
   const workfile = readPrintedWorkfileId(ours);
   if (workfile !== null && workfile === readPrintedWorkfileId(other)) return "Workfile ID";
   const federal = readPrintedFederalId(ours);
   if (federal !== null && federal === readPrintedFederalId(other)) return "Federal ID";
+  const letterhead = readPrintedLetterhead(ours);
+  if (letterhead !== null && letterhead === readPrintedLetterhead(other)) return "letterhead";
   return null;
 }
 
@@ -244,7 +260,7 @@ export function samePrintedParty(ours: string, other: string): PrintedPartyMatch
  * carries our header and their appraiser: the print alone does not say
  * which, so it is neither ours nor theirs.
  */
-export function printedPartyConflict(ours: string, other: string): "Workfile ID" | "Federal ID" | null {
+export function printedPartyConflict(ours: string, other: string): Exclude<PrintedPartyMatch, "estimator"> | null {
   if (sameEstimator(ours, other) || readPrintedEstimator(ours) === null || readPrintedEstimator(other) === null) return null;
   return sharedHeaderId(ours, other);
 }
@@ -485,7 +501,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   // marks nothing.
   const shopSource = options.sourceParty === "shop";
   const sourceText = options.sourceText ?? "";
-  const evidence = new Map<T, { ours: boolean; byPrint: PrintedPartyMatch | null; conflict: "Workfile ID" | "Federal ID" | null; tier: number; bareAppraiser: boolean; setAside: SetAside | null }>(
+  const evidence = new Map<T, { ours: boolean; byPrint: PrintedPartyMatch | null; conflict: Exclude<PrintedPartyMatch, "estimator"> | null; tier: number; bareAppraiser: boolean; setAside: SetAside | null }>(
     base.map((candidate) => {
       const words = nameWords(candidate.fileName);
       const named = authorshipWords(words);

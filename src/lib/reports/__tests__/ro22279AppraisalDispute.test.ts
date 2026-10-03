@@ -1097,6 +1097,38 @@ describe("R12 — a company letterhead is not a claim, and not ours is not their
     }
   });
 
+  it("a letterhead is a name: never a header label, and an appraisal firm is not an insurance company", () => {
+    // A CCC print whose letterhead is an image starts with its header labels.
+    expect(readPrintedLetterhead("Workfile ID:\nFederal ID:\n7c7c1e2a\n98-7654321\nClaim #: 0123456789012")).toBeNull();
+    expect(readPrintedLetterhead("Preliminary Estimate\nClaim #: 00-0000000-01\nNet Cost of Repairs $28,840.26")).toBeNull();
+    for (const firm of ["Insurance Appraisal Services", "Independent Insurance Adjusters Inc", "Progressive Auto Body"]) {
+      const owners = { fileName: "Independent appraiser 22279.pdf", text: [firm, "Workfile ID: 7c7c1e2a", "Written By: JOHN DOE, License Number: 5", ...totals].join("\n") };
+      expect(namesAnotherPartysEstimate(owners.fileName, owners.text, sourceText)).toBe(true);
+    }
+    for (const insurerCompany of ["USAA CASUALTY INSURANCE COMPANY", "Progressive Specialty Insurance Co", "Erie Insurance Exchange", "STATE FARM MUTUAL AUTOMOBILE INSURANCE COMPANY", "UNITED SERVICES AUTOMOBILE ASSOCIATION", "Erie Insurance"]) {
+      const onProfile = { fileName: "Independent appraiser 22279.pdf", text: [insurerCompany, "Workfile ID: 9f8e7d6c", "Written By: PAT SMITH, License Number: 8", ...totals].join("\n") };
+      expect(namesAnotherPartysEstimate(onProfile.fileName, onProfile.text, sourceText)).toBe(false);
+    }
+  });
+
+  it("our own Mitchell versions are ours by our letterhead, however they are named", () => {
+    const shop = readFileSync(path.join(FIXTURE_DIR, "../frk2-mitchell-text.txt"), "utf8");
+    const untaxed = shop.replace(/^Tax ID:.*\n/m, "");
+    expect(readPrintedFederalId(untaxed)).toBeNull();
+    for (const name of ["20785 Supplement 1.pdf", "GEICO 20785 Final.pdf"]) {
+      expect(samePrintedParty(shop, untaxed)).toBe("letterhead");
+      const pair = [
+        { fileName: "20785 Supplement 1.pdf", estimateRole: "carrier" as const, text: untaxed },
+        { fileName: name === "GEICO 20785 Final.pdf" ? name : "GEICO 20785 Final.pdf", estimateRole: "carrier" as const, text: `${untaxed}\nBLEND NOT ON GEICO ESTIMATE, ADDED` },
+      ];
+      for (const candidates of orders(pair[0], pair[1])) {
+        const selection = selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: shop });
+        // Both are ours: whichever is compared, the gate refuses it as ours.
+        expect(samePrintedParty(shop, selection.counterpart!.text)).toBe("letterhead");
+      }
+    }
+  });
+
   it("reads appraiser names by whose appraiser they name, not where the file went", () => {
     for (const name of [
       "Appraiser for insured vs USAA 22279.pdf",
