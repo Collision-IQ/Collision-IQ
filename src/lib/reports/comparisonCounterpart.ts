@@ -232,6 +232,14 @@ function sharedHeaderId(ours: string, other: string): Exclude<PrintedPartyMatch,
 }
 
 /**
+ * A shop's working draft: CCC prints an estimate it has not committed as
+ * "Preliminary Estimate" / "Preliminary Supplement N", and a committed one
+ * as "Estimate of Record" / "Supplement of Record N". An insurer sends its
+ * committed record, so a preliminary print under our header is our own.
+ */
+const printsPreliminary = (text: string) => /\bPreliminary\s+(?:Estimate|Supplement)\b/i.test(text ?? "") && readPrintedEstimateVersion(text) === null;
+
+/**
  * What makes `other` the same party's estimate as `ours`, whatever its file
  * name says: the same printed estimator, or our CCC workfile or Federal ID
  * with no other writer named. Null when nothing printed ties them, and when
@@ -244,13 +252,14 @@ export function samePrintedParty(ours: string, other: string): PrintedPartyMatch
 
 /**
  * Our workfile or Federal ID on a print that names a writer other than our
- * estimator. It may be our own version by a second estimator, or the
- * insurer's estimate printed from our own system after an assignment, which
- * carries our header and their appraiser: the print alone does not say
- * which, so it is neither ours nor theirs.
+ * estimator, on a committed print. It may be our own version by a second
+ * estimator, or the insurer's estimate printed from our own system after an
+ * assignment, which carries our header and their appraiser: the print alone
+ * does not say which, so it is neither ours nor theirs. A preliminary print
+ * is our own draft, whoever wrote it.
  */
 export function printedPartyConflict(ours: string, other: string): Exclude<PrintedPartyMatch, "estimator"> | null {
-  if (sameEstimator(ours, other) || readPrintedEstimator(ours) === null || readPrintedEstimator(other) === null) return null;
+  if (sameEstimator(ours, other) || readPrintedEstimator(ours) === null || readPrintedEstimator(other) === null || printsPreliminary(other)) return null;
   return sharedHeaderId(ours, other);
 }
 
@@ -695,7 +704,7 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     const uncertain = base.filter(
       (candidate) =>
         candidate !== counterpart &&
-        (uncertainAside(candidate) || (ev(candidate).byPrint !== null && ev(candidate).byPrint !== "estimator")) &&
+        (uncertainAside(candidate) || (ev(candidate).byPrint !== null && ev(candidate).byPrint !== "estimator" && !printsPreliminary(candidate.text))) &&
         laterThan(candidate, counterpart)
     );
     if (uncertain.length) unidentified = [...new Set([...unidentified, counterpart, ...uncertain])];

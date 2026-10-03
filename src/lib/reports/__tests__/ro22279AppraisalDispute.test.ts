@@ -753,14 +753,13 @@ describe("R10 — what an estimate prints outranks what its file is called", () 
   });
 
   it("our later version renamed after the insurer is never theirs, whoever is printed as its writer (#1)", () => {
-    // An OCR misread of ours is our estimator: ours, and the SOR is compared.
-    // None printed, or a second estimator, under our workfile: it may be the
-    // insurer's later version printed from our own system, so the run that
-    // compares the SOR is not settled (the SOR is the one compared, never ours).
+    // An OCR misread of ours is our estimator. None printed, or a second
+    // estimator, under our workfile on a preliminary print: our own draft (an
+    // insurer sends its committed record). Ours either way; the SOR is compared.
     for (const [writtenBy, reason, settled] of [
       ["Written By: JANE R0E, 739698", "it prints the same estimator as the annotated estimate, so it is the same party's", true],
-      ["", "it prints the same Workfile ID as the annotated estimate, so it is the same party's", false],
-      ["Written By: DANIEL KRAMER, 739699", "it prints the annotated estimate's Workfile ID but names a different writer", false],
+      ["", "it prints the same Workfile ID as the annotated estimate, so it is the same party's", true],
+      ["Written By: DANIEL KRAMER, 739699", "it prints the same Workfile ID as the annotated estimate, so it is the same party's", true],
     ] as const) {
       const renamed = ours("USAA 22279 Final.pdf", writtenBy);
       for (const sorName of ["USAA 22279 Supplement 1.pdf", "USAA 22279.pdf", "UsaaSupplement1.pdf"]) {
@@ -1067,9 +1066,9 @@ describe("R12 — a company letterhead is not a claim, and not ours is not their
       const shopSource = sourceText.replace("conestogacollision.com", shopName);
       const second = { fileName: "22279 supplement.pdf", estimateRole: "carrier" as const, text: [shopName, ourHeader, "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
       const unprinted = { fileName: "USAA 22279 Final estimate.pdf", estimateRole: "carrier" as const, text: [shopName, "Written By: DANIEL KRAMER, 739699", ...totals].join("\n") };
-      for (const candidates of orders(second, unprinted)) {
-        expect(selectComparisonCounterpart(candidates, { sourceParty: "shop", sourceText: shopSource }).unidentified.length).toBe(2);
-      }
+      // Both are our own preliminary prints: ours by our header and letterhead, never theirs.
+      expect(samePrintedParty(shopSource, second.text)).toBe("Workfile ID");
+      expect(samePrintedParty(shopSource, unprinted.text)).toBe("letterhead");
     }
   });
 
@@ -1474,8 +1473,12 @@ describe("D5 — the builder narrows to one counterpart and never skips the disp
         expect(unwritten.warnings.join("\n")).toContain(
           `Appraisal Dispute Report not produced: ${fileName} prints the same Workfile ID as our estimate, so it reads as our own estimate, not the insurer's.`
         );
-        // Another writer under our workfile: our second estimator, or the insurer's estimate printed from our system.
-        const other = await build([{ fileName, sourceDocumentId: "v", estimateRole: "carrier", text: `${ourHeader}\nWritten By: DANIEL KRAMER, 739699\n${shopVersionText}` }], ourSource);
+        // A second estimator under our workfile on a preliminary print: our own draft.
+        const second = await build([{ fileName, sourceDocumentId: "v", estimateRole: "carrier", text: `${ourHeader}\nWritten By: DANIEL KRAMER, 739699\n${shopVersionText}` }], ourSource);
+        expect(second.plainSummaryExportId).toBeUndefined();
+        expect(second.warnings.join("\n")).toContain(`Appraisal Dispute Report not produced: ${fileName} prints the same Workfile ID as our estimate`);
+        // Another writer under our workfile on a committed print: ours, or the insurer's printed from our system.
+        const other = await build([{ fileName, sourceDocumentId: "v", estimateRole: "carrier", text: `${ourHeader}\nWritten By: DANIEL KRAMER, 739699\n${carrierText}` }], ourSource);
         expect(other.plainSummaryExportId).toBeUndefined();
         expect(other.warnings.join("\n")).toContain(
           `Appraisal Dispute Report not produced: ${fileName} prints our estimate's Workfile ID but names a different writer, so nothing printed says whether it is our own estimate or the insurer's printed from our system.`
