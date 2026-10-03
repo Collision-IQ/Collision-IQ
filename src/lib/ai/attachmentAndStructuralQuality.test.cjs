@@ -208,8 +208,12 @@ run("proactive OEM-backed hardware guidance survives partial estimate hints", ()
         },
       ],
       missingProcedures: [],
+      // The fixture vehicle is a 2018 Tesla Model S. Since c181f4c ("Filter
+      // verified OEM support by vehicle make") a Ford-named procedure is a
+      // mismatched-make source and is correctly dropped, so the OEM support
+      // here must name the vehicle's own make.
       supplementOpportunities: [
-        "OEM support in Ford Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.",
+        "OEM support in Tesla Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.",
       ],
     })
   );
@@ -220,31 +224,46 @@ run("proactive OEM-backed hardware guidance survives partial estimate hints", ()
   );
 });
 
-runAsync("Egnyte linked documents are detected and incorporated into the analysis corpus", async () => {
-  let fetchedPath = null;
-  const attachments = await enrichAnalysisAttachments({
-    attachments: [
-      {
-        id: "a1",
-        filename: "estimate.txt",
-        type: "text/plain",
-        text: "Supporting document: https://acme.egnyte.com/dl/folder/vehicle-notes.txt",
+// 82206a2 ("feat: enhance case handling and evidence processing") moved linked-
+// document enrichment from Egnyte to Google Drive (gated on GOOGLE_DRIVE_ENABLED);
+// the extractEgnyte* exports remain only as aliases of the Drive helpers.
+runAsync("Drive linked documents are detected and incorporated into the analysis corpus", async () => {
+  const previousDriveEnabled = process.env.GOOGLE_DRIVE_ENABLED;
+  process.env.GOOGLE_DRIVE_ENABLED = "true";
+  try {
+    const fetchedIds = [];
+    const attachments = await enrichAnalysisAttachments({
+      attachments: [
+        {
+          id: "a1",
+          filename: "estimate.txt",
+          type: "text/plain",
+          text:
+            "Supporting document: https://drive.google.com/file/d/vehicleNotes123/view " +
+            "Legacy link: https://acme.egnyte.com/dl/folder/vehicle-notes.txt",
+        },
+      ],
+      deps: {
+        downloadLinkedFile: async (fileId) => {
+          fetchedIds.push(fileId);
+          return Buffer.from("Vehicle-specific Drive notes\nFront-right support replacement only.");
+        },
       },
-    ],
-    deps: {
-      downloadLinkedFile: async (pathValue) => {
-        fetchedPath = pathValue;
-        return Buffer.from("Vehicle-specific Egnyte notes\nFront-right support replacement only.");
-      },
-    },
-  });
+    });
 
-  assert.equal(fetchedPath, "/folder/vehicle-notes.txt");
-  assert.equal(attachments.some((attachment) => attachment.filename === "vehicle-notes.txt"), true);
-  assert.equal(
-    attachments.some((attachment) => /Egnyte linked document/i.test(attachment.text)),
-    true
-  );
+    assert.deepEqual(fetchedIds, ["vehicleNotes123"]);
+    assert.equal(attachments.length, 2);
+    assert.equal(
+      attachments.some((attachment) =>
+        /Drive-linked document source: vehicleNotes123/.test(attachment.text) &&
+        /Provenance: Drive-linked external document/.test(attachment.text)
+      ),
+      true
+    );
+  } finally {
+    if (previousDriveEnabled === undefined) delete process.env.GOOGLE_DRIVE_ENABLED;
+    else process.env.GOOGLE_DRIVE_ENABLED = previousDriveEnabled;
+  }
 });
 
 runAsync("image uploads contribute structured image observations", async () => {
@@ -268,7 +287,10 @@ runAsync("image uploads contribute structured image observations", async () => {
   assert.match(attachments[0].text, /Visible damage zones: front right/);
 });
 
-runAsync("PDF vision observations contribute when PDF file payload is available", async () => {
+// a39fabf ("Fix OpenClaw chat and Citation Density PDF extraction") removed the
+// PDF vision-summary path: PDFs keep their extracted text unchanged.
+runAsync("PDF attachments keep extracted text without a vision summary", async () => {
+  let pdfSummarizerCalled = false;
   const attachments = await enrichAnalysisAttachments({
     attachments: [
       {
@@ -281,27 +303,29 @@ runAsync("PDF vision observations contribute when PDF file payload is available"
       },
     ],
     deps: {
-      summarizePdfAttachment: async () =>
-        "Document type: estimate pdf\nKey visible estimate facts: total 19428.53\nVisible damage/photo observations: front-right damage photos present",
+      summarizePdfAttachment: async () => {
+        pdfSummarizerCalled = true;
+        return "Document type: estimate pdf\nKey visible estimate facts: total 19428.53";
+      },
     },
   });
 
-  assert.match(attachments[0].text, /Key visible estimate facts: total 19428\.53/);
-  assert.match(attachments[0].text, /front-right damage photos present/);
+  assert.equal(pdfSummarizerCalled, false);
+  assert.equal(attachments[0].text, "Sparse extracted text");
 });
 
-run("Egnyte URL helpers normalize expected paths", () => {
+run("linked-document URL helpers extract Drive file ids and ignore Egnyte links", () => {
   const urls = extractEgnyteUrls(
-    "See https://acme.egnyte.com/dl/Claims/Shop%2021733.pdf and https://acme.egnyte.com/#path=/Claims/Notes.txt"
+    "See https://drive.google.com/file/d/abc123/view and https://docs.google.com/document/d/doc456/edit " +
+      "and https://acme.egnyte.com/dl/Claims/Shop%2021733.pdf"
   );
 
-  assert.equal(urls.length, 2);
-  assert.equal(
-    extractEgnytePathFromUrl("https://acme.egnyte.com/dl/Claims/Shop%2021733.pdf"),
-    "/Claims/Shop 21733.pdf"
-  );
-  assert.equal(
-    extractEgnytePathFromUrl("https://acme.egnyte.com/#path=/Claims/Notes.txt"),
-    "/Claims/Notes.txt"
-  );
+  // Spread: the module runs in a vm context, so its arrays are cross-realm.
+  assert.deepEqual([...urls], [
+    "https://drive.google.com/file/d/abc123/view",
+    "https://docs.google.com/document/d/doc456/edit",
+  ]);
+  assert.equal(extractEgnytePathFromUrl("https://drive.google.com/file/d/abc123/view"), "abc123");
+  assert.equal(extractEgnytePathFromUrl("https://docs.google.com/document/d/doc456/edit"), "doc456");
+  assert.equal(extractEgnytePathFromUrl("https://acme.egnyte.com/dl/Claims/Shop%2021733.pdf"), null);
 });
