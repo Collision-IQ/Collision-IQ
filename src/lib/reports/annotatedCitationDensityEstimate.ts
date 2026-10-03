@@ -7155,7 +7155,7 @@ function mapOemAuthoritySourceToCitationAuthority(
     policy: "estimate_evidence",
     jurisdictional_law: "legal",
     internet_fallback: "online_fallback",
-    estimate_evidence: "estimate_evidence",
+    estimate_evidence: "estimate_evidence",  // internal, never reader-facing: wording scan
   };
   return {
     type: typeMap[source.sourceType],

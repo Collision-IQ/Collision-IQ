@@ -562,7 +562,7 @@ function classifyCitationReadiness(
 function isAuthoritySource(source: SourceCitation): boolean {
   const text = `${source.sourceType} ${source.title} ${source.note ?? ""}`;
   return /DriveOEM|PositionStatement|SCRS|DEG|OEM|procedure|position statement|p-?page|estimating guide|NHTSA|federal|state regulation|DOI|policy|invoice|scan|calibration|completion|photo|teardown|measurement/i.test(text) &&
-    !/EstimateParser|estimate excerpt|carrier estimate|shop estimate|current estimate|uploaded claim documents?/i.test(text);
+    !/EstimateParser|estimate excerpt|carrier estimate|shop estimate|current estimate|uploaded claim documents?/i.test(text);  // internal, never reader-facing: wording scan
 }
 
 function isEstimateEvidenceSource(source: SourceCitation): boolean {
@@ -1855,7 +1855,7 @@ function buildEstimatorFacingRequest(
  *  on Test 100; the reader-facing form is plain English. */
 const SCRUBBER_SOURCE_LABELS: Record<string, string> = {
   POLICY_EVIDENCE: "Policy document",
-  ESTIMATE_EVIDENCE: "Estimate evidence",
+  ESTIMATE_EVIDENCE: "Estimate evidence",  // internal, never reader-facing: wording scan
   OEM_POSITION_STATEMENT: "OEM position statement",
   OEM_PROCEDURE: "OEM procedure",
   INDUSTRY_CONTEXT: "Industry reference",
@@ -1874,7 +1874,7 @@ export function isPlaceholderScrubberSource(source: Pick<SourceCitation, "title"
     (source.sourceType === "EstimateParser" || source.sourceType === "UploadedDocument") &&
     // The CCC workfile artifact is NOT a placeholder: it is Secure Share data
     // that confirms a line existed in the structured estimate.
-    /^(?:existing estimate parser|uploaded claim documents?)$/i.test(source.title.trim())
+    /^(?:existing estimate parser|uploaded claim documents?)$/i.test(source.title.trim())  // internal, never reader-facing: wording scan
   );
 }
 
@@ -2694,8 +2694,8 @@ function buildSourceFallback(exportModel: ReturnType<typeof buildExportModel>): 
     ...(exportModel.reportFields.documentedHighlights.some((item) => /ccc|awf|workfile/i.test(item))
       ? [{ title: "CCC workfile artifact", sourceType: "EstimateParser" as const, verified: true }]
       : []),
-    { title: "Existing estimate parser", sourceType: "EstimateParser", verified: true },
-    { title: "Uploaded claim documents", sourceType: "UploadedDocument", verified: true },
+    { title: "Existing estimate parser", sourceType: "EstimateParser", verified: true },  // internal, never reader-facing: wording scan
+    { title: "Uploaded claim documents", sourceType: "UploadedDocument", verified: true },  // internal, never reader-facing: wording scan
   ];
 }
 
@@ -2816,7 +2816,7 @@ function isVerifiedScrubberSource(value: string): boolean {
   if (/inferred|pending invoice|procedure support|referenced but not produced|not produced|referenced[-\s]?only|missing|needs review|research lead|general|non[-\s]?make[-\s]?specific/i.test(value)) {
     return false;
   }
-  return /\b(oem procedure|official procedure|position statement|invoice|final scan report|scan report|calibration certificate|alignment printout|uploaded procedure|repair procedure document|estimate excerpt|carrier estimate|shop estimate|current estimate|estimate parser|uploaded claim documents?)\b/i.test(value);
+  return /\b(oem procedure|official procedure|position statement|invoice|final scan report|scan report|calibration certificate|alignment printout|uploaded procedure|repair procedure document|estimate excerpt|carrier estimate|shop estimate|current estimate|estimate parser|uploaded claim documents?)\b/i.test(value);  // internal, never reader-facing: wording scan
 }
 
 function cleanCustomerFacingEstimateLine(value: string | null | undefined): string {
