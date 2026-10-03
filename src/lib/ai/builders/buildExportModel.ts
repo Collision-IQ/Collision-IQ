@@ -659,10 +659,17 @@ export function deriveExportReportFields(params: {
     normalizeVehicleIdentity(params.analysis?.vehicle),
     normalizeVehicleIdentity(fallbackFacts.vehicle)
   );
-  const vehicleLabel =
-    buildVehicleDisplayLabel(vehicle) ?? sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
   const vin =
     normalizeVehicleIdentity(vehicle)?.vin ?? extractVinFromText(sourceText);
+  // A model-less identity ("2021 GMC" decoded from the VIN) is partial. With a
+  // VIN on file, leave the canonical label empty so resolveCanonicalVehicleLabel
+  // defers to the guarded identity builder's VIN-tail fallback instead of
+  // printing the partial label over it.
+  const deferPartialIdentityToVinTail =
+    Boolean(vin) && !cleanDisplayLabel(normalizeVehicleIdentity(vehicle)?.model);
+  const vehicleLabel = deferPartialIdentityToVinTail
+    ? undefined
+    : buildVehicleDisplayLabel(vehicle) ?? sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
   const presentStrengths = [
     ...new Set([
       ...estimateFacts.documentedHighlights,

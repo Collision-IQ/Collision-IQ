@@ -1179,9 +1179,12 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
     // Internal ids go; a checksum-valid VIN is case evidence and stays (the
-    // VIN summary field printed blank on every carrier report).
-    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, (token) =>
-      normalizeAcceptedVin(token) === token ? token : ""
+    // VIN summary field printed blank on every carrier report). So does the
+    // tail of the "VIN ending 123456" fallback label, which is VIN evidence too.
+    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, (token, offset: number, source: string) =>
+      normalizeAcceptedVin(token) === token || /\bVIN ending\s+$/i.test(source.slice(0, offset))
+        ? token
+        : ""
     )
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")

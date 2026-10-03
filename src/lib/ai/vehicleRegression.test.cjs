@@ -407,17 +407,21 @@ run("executive and opening prose drop appended numbered findings blocks", () => 
   const executiveBody = carrierDocument.sections.find(
     (section) => section.title === "Executive Repair Position"
   )?.body;
-  const openingBody = rebuttalDocument.sections.find(
-    (section) => section.title === "Opening Position"
+  // 88a365e replaced the rebuttal PDF's "Opening Position" section with an
+  // "Editable Email Body" whose opening paragraph (after the greeting) is the
+  // pressure-mode opening line built from the repair position.
+  const emailBody = rebuttalDocument.sections.find(
+    (section) => section.title === "Editable Email Body"
   )?.body;
+  const openingBody = emailBody?.split("\n\n")[1];
 
   assert.ok(executiveBody);
   assert.ok(openingBody);
   assert.equal(executiveBody.includes("1. Pre-repair scan"), false);
   assert.equal(executiveBody.includes("2. Post-repair calibration support remains missing."), false);
-  assert.equal(openingBody.includes("1. Pre-repair scan"), false);
-  assert.equal(openingBody.includes("2. Post-repair calibration support remains missing."), false);
-  assert.match(openingBody, /^After reviewing the current file, our position is that .+\.$/);
+  assert.equal(emailBody.includes("1. Pre-repair scan"), false);
+  assert.equal(emailBody.includes("2. Post-repair calibration support remains missing."), false);
+  assert.match(openingBody, /^After reviewing the current estimate for the 2021 GMC Acadia, our position is that .+\.$/);
 });
 
 run("rebuttal subject prefers full vehicle identity and falls back to VIN tail", () => {
@@ -452,9 +456,11 @@ run("rebuttal subject prefers full vehicle identity and falls back to VIN tail",
     assistantAnalysis: null,
   });
 
+  // The PDF subject is title-cased since 88a365e; the plain-text template
+  // (withVinOnly) keeps "estimate revision".
   assert.equal(
     withIdentity.sections.find((section) => section.title === "Recommended Subject")?.body,
-    "Request for estimate revision - 2021 GMC Acadia AT4 AWD"
+    "Request for Estimate Revision - 2021 GMC Acadia AT4 AWD"
   );
   assert.match(withVinOnly, /Subject: Request for estimate revision - VIN ending 123456/);
 });
