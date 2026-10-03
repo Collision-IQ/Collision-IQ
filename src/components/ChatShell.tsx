@@ -31,10 +31,9 @@ function HeaderAuth() {
   }, []);
 
   useEffect(() => {
-    if (isLoaded) {
-      setAuthFallbackReady(false);
-      return;
-    }
+    // The fallback renders only while Clerk is NOT loaded (below), so once it
+    // loads the flag is never read and needs no reset.
+    if (isLoaded) return;
 
     const timeout = window.setTimeout(() => {
       setAuthFallbackReady(true);

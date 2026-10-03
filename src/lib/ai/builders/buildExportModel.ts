@@ -659,17 +659,10 @@ export function deriveExportReportFields(params: {
     normalizeVehicleIdentity(params.analysis?.vehicle),
     normalizeVehicleIdentity(fallbackFacts.vehicle)
   );
+  const vehicleLabel =
+    buildVehicleDisplayLabel(vehicle) ?? sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
   const vin =
     normalizeVehicleIdentity(vehicle)?.vin ?? extractVinFromText(sourceText);
-  // A model-less identity ("2021 GMC" decoded from the VIN) is partial. With a
-  // VIN on file, leave the canonical label empty so resolveCanonicalVehicleLabel
-  // defers to the guarded identity builder's VIN-tail fallback instead of
-  // printing the partial label over it.
-  const deferPartialIdentityToVinTail =
-    Boolean(vin) && !cleanDisplayLabel(normalizeVehicleIdentity(vehicle)?.model);
-  const vehicleLabel = deferPartialIdentityToVinTail
-    ? undefined
-    : buildVehicleDisplayLabel(vehicle) ?? sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
   const presentStrengths = [
     ...new Set([
       ...estimateFacts.documentedHighlights,
@@ -2447,10 +2440,34 @@ function stripVehicleRoleNoise(value: string): string {
 export function resolveCanonicalVehicleLabel(
   exportModel: Pick<ExportModel, "vehicle" | "reportFields">
 ): string | undefined {
-  return preferCanonicalField(
+  return preferStrongVehicleLabel(
     exportModel.reportFields.vehicleLabel,
     buildPreferredVehicleIdentityLabel(exportModel.vehicle)
   );
+}
+
+/** The vehicle named in a rebuttal's subject line (PDF and email template). */
+export function resolveRebuttalSubjectVehicle(
+  exportModel: Pick<ExportModel, "vehicle" | "reportFields">
+): string {
+  return (
+    preferStrongVehicleLabel(
+      exportModel.reportFields.vehicleLabel,
+      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
+    ) ?? "Current repair file"
+  );
+}
+
+// A year-and-make label ("2021 GMC") is the partial identity the identity
+// helpers reject for the VIN tail; preferring the report field over them
+// skipped that rule, so a weak report label only fills in when they have none.
+function preferStrongVehicleLabel(
+  reportLabel: string | null | undefined,
+  identityLabel: string | null | undefined
+): string | undefined {
+  return looksLikeWeakVehicleIdentityLabel(reportLabel)
+    ? preferCanonicalField(identityLabel, reportLabel)
+    : preferCanonicalField(reportLabel, identityLabel);
 }
 
 export function resolveCanonicalVin(
