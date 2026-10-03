@@ -6,7 +6,9 @@ import {
 import {
   getAnalysisReport,
   getLatestActiveAnalysisReport,
+  saveCounterpartAnswer,
 } from "@/lib/analysisReportStore";
+import { resolveSavedCounterpartAnswer } from "@/lib/reports/counterpartChoice";
 import { getUploadedAttachments, type StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
@@ -430,6 +432,26 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+      // Without an answer on the request, the one saved with the case for this
+      // annotated estimate applies when it was given among exactly these
+      // comparisons. Among others (an upload added or removed since) it was an
+      // answer to a different question, so it is not used, and the run says so.
+      const candidateIds = sourceDocuments.filter(isDistinctComparison).map((document) => document.id);
+      const savedAnswer = answersThisRun
+        ? null
+        : resolveSavedCounterpartAnswer(activeReport.report.counterpartAnswers?.[selection.selectedSourceDocumentId], candidateIds);
+      if (savedAnswer && "stale" in savedAnswer) {
+        const savedName =
+          sourceDocuments.find((document) => document.id === savedAnswer.stale.insurerDocumentId)?.filename ?? "an estimate no longer on the case";
+        aggregateWarnings.add(
+          `The insurer's estimate saved with this case (${savedName}) was chosen among different uploads than this run's, so it was not used.`
+        );
+      }
+      const confirmedCounterpartDocumentId = answersThisRun
+        ? comparisonDocumentId
+        : savedAnswer && "apply" in savedAnswer
+          ? savedAnswer.apply.insurerDocumentId
+          : null;
       const comparisonEstimateTexts = sourceDocuments
         .filter(isDistinctComparison)
         .map((document) => ({
@@ -505,7 +527,8 @@ export async function POST(request: Request) {
         vehicleMake,
         jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
-        confirmedCounterpartDocumentId: answersThisRun ? comparisonDocumentId : null,
+        confirmedCounterpartDocumentId,
+        confirmedCounterpartSaved: !answersThisRun && confirmedCounterpartDocumentId !== null,
         // The forensic report's header block. The decoded vehicle identity is
         // authoritative here — it survives a header the estimate prints across
         // two lines — and the annotator falls back to reading the document
@@ -549,6 +572,26 @@ export async function POST(request: Request) {
         ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
         : undefined;
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
+      // An answer the run took is saved with the case, so a later run (another
+      // session, a reloaded case) uses it without asking. A failed save never
+      // fails the run: the answer still applied here, and the run says so.
+      let counterpartChoice = result.counterpartChoice;
+      if (answersThisRun && counterpartChoice?.confirmedByUser && !counterpartChoice.required) {
+        const notSaved = "Your choice of the insurer's estimate applies to this run but could not be saved with the case.";
+        try {
+          const saved = await saveCounterpartAnswer({
+            reportId: activeReport.id,
+            ownerUserId: user.id,
+            annotatedDocumentId: selection.selectedSourceDocumentId,
+            answer: { insurerDocumentId: comparisonDocumentId, candidateIds, answeredAt: new Date().toISOString() },
+          });
+          if (saved) counterpartChoice = { ...counterpartChoice, savedWithCase: true };
+          else aggregateWarnings.add(notSaved);
+        } catch (error) {
+          console.warn("[citation-density] counterpart answer not saved", { reason: error instanceof Error ? error.message : "unknown" });
+          aggregateWarnings.add(notSaved);
+        }
+      }
       annotatedFindingCount += citationCopy?.badgeCount ?? result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
       outputs.push({
@@ -572,7 +615,7 @@ export async function POST(request: Request) {
           ? Buffer.from(result.plainSummaryBytes).toString("base64")
           : undefined,
         plainSummaryPageCount: result.plainSummaryPageCount,
-        counterpartChoice: result.counterpartChoice,
+        counterpartChoice,
         annotatedFindingCount: citationCopy?.badgeCount ?? result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,

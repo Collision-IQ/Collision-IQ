@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import { prisma } from "@/lib/prisma";
+import type { CounterpartAnswer } from "@/lib/reports/counterpartChoice";
 
 export type StoredAnalysisReport = {
   id: string;
@@ -104,12 +105,22 @@ export async function updateAnalysisReport(params: {
     },
     select: {
       id: true,
+      report: true,
     },
   });
 
   if (!existing) {
     return null;
   }
+
+  // The user's saved answers to which upload is the insurer's estimate ride
+  // through a full rewrite (a re-analysis builds the report afresh); only
+  // saveCounterpartAnswer writes them.
+  const storedAnswers = (existing.report as { counterpartAnswers?: unknown } | null)?.counterpartAnswers;
+  const report =
+    params.report.counterpartAnswers === undefined && storedAnswers && typeof storedAnswers === "object"
+      ? { ...params.report, counterpartAnswers: storedAnswers as RepairIntelligenceReport["counterpartAnswers"] }
+      : params.report;
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.analysisReportArtifact.deleteMany({
@@ -123,7 +134,7 @@ export async function updateAnalysisReport(params: {
         id: params.id,
       },
       data: {
-        report: params.report as unknown as Prisma.InputJsonValue,
+        report: report as unknown as Prisma.InputJsonValue,
         artifacts: params.artifactIds.length
           ? {
               create: [...new Set(params.artifactIds)].map((attachmentId) => ({
@@ -143,6 +154,37 @@ export async function updateAnalysisReport(params: {
   });
 
   return toStoredAnalysisReport(updated);
+}
+
+/**
+ * Saves the user's answer to which comparison upload is the insurer's
+ * estimate, for one annotated estimate on one case. One atomic statement sets
+ * only report.counterpartAnswers[annotatedDocumentId], so it never overwrites
+ * an analysis written meanwhile. Owner-scoped like every case read; false
+ * when the case is not the owner's.
+ */
+export async function saveCounterpartAnswer(params: {
+  reportId: string;
+  ownerUserId: string;
+  shopId?: string | null;
+  annotatedDocumentId: string;
+  answer: CounterpartAnswer;
+}): Promise<boolean> {
+  const owner = resolveOwner(params);
+  const updated = await prisma.$executeRaw`
+    UPDATE "AnalysisReport"
+    SET "report" = jsonb_set(
+          "report",
+          '{counterpartAnswers}',
+          (CASE WHEN jsonb_typeof("report"->'counterpartAnswers') = 'object' THEN "report"->'counterpartAnswers' ELSE '{}'::jsonb END)
+            || jsonb_build_object(${params.annotatedDocumentId}::text, ${JSON.stringify(params.answer)}::jsonb),
+          true
+        ),
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = ${params.reportId}
+      AND "ownerType" = ${owner.ownerType}::"ArtifactOwnerType"
+      AND "ownerId" = ${owner.ownerId}`;
+  return updated > 0;
 }
 
 export async function closeAnalysisReport(params: {

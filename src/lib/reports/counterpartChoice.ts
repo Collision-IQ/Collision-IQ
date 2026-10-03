@@ -23,8 +23,10 @@ export type CounterpartChoice = {
   reason: string | null;
   /** The comparison the run measured against, when there was one. */
   comparedDocumentId: string | null;
-  /** True when the user named the comparison on that request. */
+  /** True when the user named the comparison, on that request or in the answer saved with the case. */
   confirmedByUser: boolean;
+  /** True when that answer is saved with the case, so a later run uses it without asking. */
+  savedWithCase: boolean;
   /** Every comparison the user may name; one printing our own estimator is never offered. */
   candidates: CounterpartChoiceCandidate[];
 };
@@ -62,8 +64,45 @@ export function parseCounterpartChoice(value: unknown): CounterpartChoice | null
     reason: nullableString(raw.reason),
     comparedDocumentId: nullableString(raw.comparedDocumentId),
     confirmedByUser: raw.confirmedByUser === true,
+    savedWithCase: raw.savedWithCase === true,
     candidates,
   };
+}
+
+/**
+ * The user's answer as saved with the case (report.counterpartAnswers, keyed
+ * by the annotated estimate): the insurer's estimate, and the comparisons it
+ * was chosen among. A question over different comparisons — an upload added
+ * or removed since — is a new question, so the answer does not carry over.
+ */
+export type CounterpartAnswer = {
+  insurerDocumentId: string;
+  candidateIds: string[];
+  answeredAt: string;
+};
+
+/**
+ * The saved answer for a run whose comparisons are `candidateIds`: `apply`
+ * when it was given among exactly these, `stale` when among others, null when
+ * there is none (or it cannot be read).
+ */
+export function resolveSavedCounterpartAnswer(
+  saved: unknown,
+  candidateIds: string[]
+): { apply: CounterpartAnswer } | { stale: CounterpartAnswer } | null {
+  if (!saved || typeof saved !== "object") return null;
+  const raw = saved as Record<string, unknown>;
+  const insurerDocumentId = nullableString(raw.insurerDocumentId);
+  if (!insurerDocumentId || !Array.isArray(raw.candidateIds)) return null;
+  const answer: CounterpartAnswer = {
+    insurerDocumentId,
+    candidateIds: raw.candidateIds.filter((id): id is string => typeof id === "string"),
+    answeredAt: nullableString(raw.answeredAt) ?? "",
+  };
+  const asked = new Set(answer.candidateIds);
+  const now = new Set(candidateIds);
+  const same = asked.size === now.size && [...asked].every((id) => now.has(id));
+  return same && now.has(insurerDocumentId) ? { apply: answer } : { stale: answer };
 }
 
 /** Identifies a question by what it asks, so a new one starts unanswered. */
