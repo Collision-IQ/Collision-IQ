@@ -1959,6 +1959,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
    * is compared and labelled that party's; nothing about it is guessed.
    */
   confirmedCounterpartDocumentId?: string | null;
+  /** True when that answer is the one saved with the case, not this request's. */
+  confirmedCounterpartSaved?: boolean;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
   const reportIdentity = params.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
@@ -2314,7 +2316,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         .map((pdf) => ({ ...pdf, estimateRole: role })),
     };
     warnings.push(
-      `Compared against ${confirmedCounterpart.fileName}, which you identified as ${theirs}.${others.length ? ` Not compared: ${others.join(", ")}.` : ""}`
+      `Compared against ${confirmedCounterpart.fileName}, which you identified as ${theirs}${params.confirmedCounterpartSaved ? " (saved with this case)" : ""}.${others.length ? ` Not compared: ${others.join(", ")}.` : ""}`
     );
   } else {
     if (params.confirmedCounterpartDocumentId) {
@@ -3544,6 +3546,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           reason: required ? partyRefusal : null,
           comparedDocumentId: comparisonText?.sourceDocumentId ?? null,
           confirmedByUser: answered,
+          savedWithCase: answered && params.confirmedCounterpartSaved === true,
           candidates,
         };
       }

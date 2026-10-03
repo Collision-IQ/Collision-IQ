@@ -3,8 +3,10 @@
  * estimate when nothing printed settles it (counterpartChoice), and takes the
  * answer on the next request (comparisonDocumentId). An answer naming
  * anything but one of the case's comparison estimates is refused, never
- * ignored. The stores, auth and the network retrieval lane are stubbed; the
- * route and the builder run as in production.
+ * ignored. An answer the run took is saved with the case, and a later run
+ * without one uses it while the comparisons are the same. The stores, auth
+ * and the network retrieval lane are stubbed; the route and the builder run
+ * as in production.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
@@ -12,6 +14,8 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 const store = vi.hoisted(() => ({
   attachments: [] as Array<{ id: string; filename: string; type: string; text: string; imageDataUrl: string }>,
   evidenceRegistry: [] as Array<{ id: string; label: string; sourceType: string }>,
+  counterpartAnswers: undefined as Record<string, unknown> | undefined,
+  saveCounterpartAnswer: vi.fn(async (..._args: unknown[]) => true),
 }));
 
 vi.mock("@/lib/auth/require-current-user", () => ({
@@ -33,9 +37,11 @@ vi.mock("@/lib/analysisReportStore", () => ({
       evidence: [],
       recommendedActions: [],
       evidenceRegistry: store.evidenceRegistry,
+      counterpartAnswers: store.counterpartAnswers,
     },
   })),
   getLatestActiveAnalysisReport: vi.fn(async () => null),
+  saveCounterpartAnswer: (...args: unknown[]) => store.saveCounterpartAnswer(...args),
 }));
 vi.mock("@/lib/uploadedAttachmentStore", () => ({
   getUploadedAttachments: vi.fn(async (ids: string[]) => store.attachments.filter((attachment) => ids.includes(attachment.id))),
@@ -76,6 +82,9 @@ describe("the route asks which upload is the insurer's estimate, and takes the a
   beforeEach(() => {
     store.attachments = attachments;
     store.evidenceRegistry = [];
+    store.counterpartAnswers = undefined;
+    store.saveCounterpartAnswer.mockReset();
+    store.saveCounterpartAnswer.mockResolvedValue(true);
   });
   const annotateOurs = { selectedSourceDocumentId: "shop-final", selectedEstimateRole: "shop" };
 
@@ -94,6 +103,44 @@ describe("the route asks which upload is the insurer's estimate, and takes the a
     expect(response.status).toBe(200);
     expect(body.counterpartChoice).toMatchObject({ required: false, confirmedByUser: true, comparedDocumentId: "b" });
     expect(body.warnings.join("\n")).toContain("Compared against 22279 b.pdf, which you identified as the insurer's estimate. Not compared: 22279 final.pdf.");
+  }, 60_000);
+
+  it("saves the answer the run took with the case, among the comparisons it was given", async () => {
+    const response = await post({ ...annotateOurs, comparisonDocumentId: "b" });
+    const body = await response.json();
+    expect(store.saveCounterpartAnswer).toHaveBeenCalledTimes(1);
+    const [saved] = store.saveCounterpartAnswer.mock.calls[0] as [{ reportId: string; ownerUserId: string; annotatedDocumentId: string; answer: { insurerDocumentId: string; candidateIds: string[]; answeredAt: string } }];
+    expect(saved).toMatchObject({ reportId: "case-1", ownerUserId: "user-1", annotatedDocumentId: "shop-final", answer: { insurerDocumentId: "b" } });
+    expect([...saved.answer.candidateIds].sort()).toEqual(["b", "final"]);
+    expect(Number.isNaN(Date.parse(saved.answer.answeredAt))).toBe(false);
+    expect(body.counterpartChoice).toMatchObject({ confirmedByUser: true, savedWithCase: true });
+  }, 60_000);
+
+  it("a later run without an answer uses the saved one while the comparisons are the same", async () => {
+    store.counterpartAnswers = { "shop-final": { insurerDocumentId: "b", candidateIds: ["final", "b"], answeredAt: "2026-10-03T03:00:00.000Z" } };
+    const body = await (await post(annotateOurs)).json();
+    expect(body.warnings.join("\n")).toContain("Compared against 22279 b.pdf, which you identified as the insurer's estimate (saved with this case). Not compared: 22279 final.pdf.");
+    expect(body.counterpartChoice).toMatchObject({ required: false, confirmedByUser: true, savedWithCase: true, comparedDocumentId: "b" });
+    expect(store.saveCounterpartAnswer).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it("a saved answer given among other uploads is not used, and the run says so and asks", async () => {
+    // Saved when only 22279 b.pdf was the comparison; 22279 final.pdf was uploaded since.
+    store.counterpartAnswers = { "shop-final": { insurerDocumentId: "b", candidateIds: ["b"], answeredAt: "2026-10-03T03:00:00.000Z" } };
+    const body = await (await post(annotateOurs)).json();
+    expect(body.warnings.join("\n")).toContain("The insurer's estimate saved with this case (22279 b.pdf) was chosen among different uploads than this run's, so it was not used.");
+    expect(body.counterpartChoice).toMatchObject({ required: true, confirmedByUser: false, savedWithCase: false });
+  }, 60_000);
+
+  it("a save that fails never fails the run, and the run says the answer was not saved", async () => {
+    store.saveCounterpartAnswer.mockResolvedValue(false);
+    const notSaved = await (await post({ ...annotateOurs, comparisonDocumentId: "b" })).json();
+    expect(notSaved.warnings).toContain("Your choice of the insurer's estimate applies to this run but could not be saved with the case.");
+    expect(notSaved.counterpartChoice).toMatchObject({ confirmedByUser: true, savedWithCase: false });
+    store.saveCounterpartAnswer.mockRejectedValue(new Error("database unavailable"));
+    const thrown = await post({ ...annotateOurs, comparisonDocumentId: "b" });
+    expect(thrown.status).toBe(200);
+    expect((await thrown.json()).warnings).toContain("Your choice of the insurer's estimate applies to this run but could not be saved with the case.");
   }, 60_000);
 
   it("annotating both estimates, the answer applies to the run it is a comparison for", async () => {

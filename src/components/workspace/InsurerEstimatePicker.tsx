@@ -32,7 +32,7 @@ export function InsurerEstimatePicker({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-card px-3 py-2 text-[12px] leading-5 text-muted-foreground">
         <span className="min-w-0 break-words">
           Insurer&apos;s estimate: <span className="font-medium text-foreground">{compared.fileName}</span>
-          {choice.confirmedByUser ? " (you chose it)" : ""}
+          {choice.confirmedByUser ? ` (you chose it${choice.savedWithCase ? "; saved with this case" : ""})` : ""}
         </span>
         <button
           type="button"
