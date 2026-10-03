@@ -40,7 +40,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildPdfTextLines, buildEstimateRowAnchorsFromLines, type EstimateRowAnchor, type PdfWord } from "../citationDensityRowAnchors";
 import { buildRequiredEstimatorDeltaFindings, pdfWordsToEnginePages } from "../annotatedCitationDensityEstimate";
 import { hoursReconcile, parseEstimateRows, parseSubtotalsFromWords } from "../deltaEngine/rowCluster";
-import { estimateFromDeltaRows, lineHoursRead, totalsFromReconciliation } from "../appraisalSummary/estimateFromDeltaRows";
+import { estimateFromDeltaRows, totalsFromReconciliation } from "../appraisalSummary/estimateFromDeltaRows";
+import { lineHoursRead } from "../appraisalSummary/gapLedger";
 import type { EstimateDeltaRow } from "../estimateDeltaMatcher";
 
 const FIXTURES = [
