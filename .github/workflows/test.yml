@@ -25,7 +25,8 @@ jobs:
     # TEST_DATABASE_URL. It lives only for this job; no real data, no secrets.
     services:
       postgres:
-        image: postgres:16
+        # pgvector ships in this image; the RAG tables use the vector type.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

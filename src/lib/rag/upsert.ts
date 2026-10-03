@@ -80,6 +80,8 @@ export async function upsertChunks(params: {
   ----------------------------------------
   */
 
+  // The embedding is passed as "[x,y,...]" text; Postgres will not assign text
+  // to a vector column without the explicit ::vector cast below.
   for (const v of values) {
     if (sourceColumn) {
       await prisma.$executeRawUnsafe(`
@@ -100,7 +102,7 @@ export async function upsertChunks(params: {
         )
         VALUES
         (
-          $1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10,$11
+          $1,$2,$3,$4,$5,$6::vector,NOW(),$7,$8,$9,$10,$11
         )
         ON CONFLICT (id) DO UPDATE SET
           content = EXCLUDED.content,
@@ -144,7 +146,7 @@ export async function upsertChunks(params: {
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10
+        $1,$2,$3,$4,$5::vector,NOW(),$6,$7,$8,$9,$10
       )
       ON CONFLICT (id) DO UPDATE SET
         content = EXCLUDED.content,
