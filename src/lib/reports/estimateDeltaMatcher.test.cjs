@@ -324,9 +324,9 @@ run("category is confirmed via the section header appearing in the lower text (k
     lowerIsOcr: true,
     lowerCategoryText,
   });
-  const module = result.deltas.find((d) => /module/i.test(d.higherRow.description));
-  assert.ok(module);
-  assert.equal(module.kind, "expanded_scope", "ELECTRICAL header present in lower text => expanded scope");
+  const moduleDelta = result.deltas.find((d) => /module/i.test(d.higherRow.description));
+  assert.ok(moduleDelta);
+  assert.equal(moduleDelta.kind, "expanded_scope", "ELECTRICAL header present in lower text => expanded scope");
 });
 
 // ── Delta ledger discriminators (RO22059 patterns) ─────────────────────────
