@@ -56,6 +56,7 @@ describe("an absent basis is not a zero basis", () => {
 
 describe("the banned vocabulary is gone from the source, not just from one path", () => {
   const ROOT = path.join(__dirname, "../../..");
+  const INTERNAL_USE_TAG = "// internal, never reader-facing: wording scan";
   const SKIP = new Set(["node_modules", "__tests__", ".next", "dist"]);
 
   function walk(dir: string, out: string[] = []): string[] {
@@ -80,6 +81,10 @@ describe("the banned vocabulary is gone from the source, not just from one path"
         // A comment may cite a defect by name; a template may not.
         const lines = source.split("\n");
         lines.forEach((line, index) => {
+          // A pipeline placeholder, an enum key, or the filter that keeps one
+          // out of prose must name the phrase; it carries INTERNAL_USE_TAG on
+          // its own line, so an untagged literal still fails.
+          if (line.includes(INTERNAL_USE_TAG)) return;
           const code = line.replace(/^\s*(\/\/|\*|\/\*).*$/, "");
           if (code.toLowerCase().includes(phrase.toLowerCase())) {
             offenders.push(`${path.relative(ROOT, file)}:${index + 1} ${phrase}`);
@@ -88,6 +93,21 @@ describe("the banned vocabulary is gone from the source, not just from one path"
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("exempts only the reviewed internal-use lines, so the tag cannot become a loophole", () => {
+    // The scrubber's parser-fallback placeholders, its two filters and its
+    // label-map key (estimateScrubberPdfBuilder.ts), and the citation type map
+    // key (annotatedCitationDensityEstimate.ts). A new tagged line updates
+    // this count in review.
+    const tagged = files.flatMap((file) =>
+      fs
+        .readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line.includes(INTERNAL_USE_TAG))
+        .map(() => path.relative(ROOT, file))
+    );
+    expect(tagged).toHaveLength(7);
   });
 
   it("scanned a meaningful number of files, so a passing result means something", () => {
