@@ -116,3 +116,48 @@ run("two independently-authored estimates are not forced into original/supplemen
     false
   );
 });
+
+// CCC ONE text layers often print a block of labels and then their values
+// below ("Workfile ID:\nFederal ID:\n<id>\n<federal id>"). A reader whose
+// whitespace crosses the newline takes the next label word as the value, so
+// two different shops' prints both read "FEDERAL" and were called one source.
+const labelsThenValues = (workfile, federal) =>
+  ["Workfile ID:", "Federal ID:", workfile, federal, "Estimate Date: 5/1/2026"].join("\n");
+
+run("labels-then-values prints from different workfiles are not the same source", () => {
+  const a = extractEstimateProvenance(labelsThenValues("a1b2c3d4", "12-3456789"));
+  const b = extractEstimateProvenance(labelsThenValues("9f8e7d6c", "98-7654321"));
+  assert.equal(a.workfileId, "A1B2C3D4");
+  assert.equal(b.workfileId, "9F8E7D6C");
+  assert.equal(isSameSourceEstimatePair(a, b), false);
+});
+
+run("the same workfile printed inline and as labels-then-values is the same source", () => {
+  const inline = extractEstimateProvenance("Workfile ID: 613bea70\nEstimate Date: 5/1/2026");
+  const stacked = extractEstimateProvenance(labelsThenValues("613bea70", "12-3456789"));
+  const nextLine = extractEstimateProvenance("Workfile ID:\n613bea70\nEstimate Date: 6/1/2026");
+  assert.equal(inline.workfileId, "613BEA70");
+  assert.equal(stacked.workfileId, "613BEA70");
+  assert.equal(nextLine.workfileId, "613BEA70");
+  assert.equal(isSameSourceEstimatePair(inline, stacked), true);
+  assert.equal(isSameSourceEstimatePair(inline, nextLine), true);
+});
+
+run("OCR letter/digit confusions in a workfile ID do not split one workfile", () => {
+  const clean = extractEstimateProvenance("Workfile ID: 613bea70");
+  const ocr = extractEstimateProvenance("Workfile ID: 6l3bea7O");
+  assert.equal(isSameSourceEstimatePair(clean, ocr), true);
+});
+
+run("a label word is never read as an RO number, workfile ID, or writer", () => {
+  const prov = extractEstimateProvenance(
+    ["Repair Order:", "Workfile ID:", "Written By:", "Federal ID:", "Estimate Date: 5/1/2026"].join("\n")
+  );
+  assert.equal(prov.roNumber, null);
+  assert.equal(prov.workfileId, null);
+  assert.equal(prov.writtenBy, null);
+  // Two such prints carry no identity at all, so they are not the same source.
+  assert.equal(isSameSourceEstimatePair(prov, extractEstimateProvenance(
+    ["Repair Order:", "Workfile ID:", "Written By:", "Federal ID:", "Estimate Date: 6/1/2026"].join("\n")
+  )), false);
+});
