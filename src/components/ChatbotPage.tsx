@@ -583,9 +583,11 @@ export function ChatbotWorkspacePage({
     };
   }, [revokeBottomReportObjectUrl]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- closing also revokes the viewer's object URL, a side effect, when the report changes */
   useEffect(() => {
     closeBottomReportViewer();
   }, [analysisReportId, closeBottomReportViewer]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     return () => {

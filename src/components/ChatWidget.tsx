@@ -1424,6 +1424,7 @@ export default function ChatWidget({
   // entitlement on every request, so the client flag is UX only.
   const researchAllowed = canAccessFeature(productPlan, "researched_answers");
   const [researchMode, setResearchMode] = useState(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- restores the stored toggle after mount; reading storage during render would mismatch the server HTML */
   useEffect(() => {
     try {
       setResearchMode(window.localStorage.getItem("ciq_researched_answers") === "1");
@@ -1431,6 +1432,7 @@ export default function ChatWidget({
       // localStorage unavailable (private mode) — stay on Quick.
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const researchModeEffective = researchMode && researchAllowed;
   const toggleResearchMode = () => {
     if (!researchAllowed) {

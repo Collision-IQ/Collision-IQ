@@ -1,12 +1,11 @@
 import {
   buildExportModel,
-  buildPreferredRebuttalSubjectVehicleLabel,
-  preferCanonicalField,
   redactExportModelForDownload,
   resolveCanonicalVehicleLabel,
   type ExportModel,
   type ExportSupplementItem,
   type ResolvedExportInput,
+  resolveRebuttalSubjectVehicle,
 } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, ExportResearchSnapshot, RepairIntelligenceReport } from "../types/analysis";
@@ -134,11 +133,7 @@ export function buildExportTemplateSourceModel(params: ExportBuilderInput): Expo
 export function buildRebuttalEmailTemplate(params: ExportBuilderInput): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
-  const subjectVehicle =
-    preferCanonicalField(
-      exportModel.reportFields.vehicleLabel,
-      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
-    ) ?? "Current repair file";
+  const subjectVehicle = resolveRebuttalSubjectVehicle(exportModel);
   const topItems = exportModel.supplementItems.slice(0, 4);
   const asks = topItems.length > 0
     ? topItems.map((item) => `- ${displaySupplementTitle(item.title)}: ${buildRequestSentence(item)}`)

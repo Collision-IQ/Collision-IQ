@@ -214,6 +214,7 @@ export default function CollisionWorkspaceV2({
     right: false,
     bottom: false,
   });
+  /* eslint-disable react-hooks/set-state-in-effect -- restores the stored rail state after mount; reading storage during render would mismatch the server HTML */
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(RAIL_STATE_STORAGE_KEY);
@@ -229,6 +230,7 @@ export default function CollisionWorkspaceV2({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const applyRails = (updates: Partial<Record<"left" | "right" | "bottom", boolean>>) => {
     setRailsOpen((current) => {
       const next = { ...current, ...updates };

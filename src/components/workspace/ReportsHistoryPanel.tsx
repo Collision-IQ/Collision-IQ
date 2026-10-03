@@ -127,9 +127,11 @@ export default function ReportsHistoryPanel({
   }, []);
 
   // Deep link from the Analysis Workspace "Recent reports" strip.
+  /* eslint-disable react-hooks/set-state-in-effect -- a deep link opens the report by fetching it */
   useEffect(() => {
     if (initialReportId) void openReport(initialReportId);
   }, [initialReportId, openReport]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── Detail view (replaces the list; Back returns) ─────────────────────────
   if (openReportId) {
