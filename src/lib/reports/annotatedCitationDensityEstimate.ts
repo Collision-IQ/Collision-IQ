@@ -23,6 +23,8 @@ import { buildLowerEstimateFindings } from "./appraisalSummary/lowerEstimateFind
 import { buildLowerEstimateCitationPdf } from "./lowerEstimateCitationDensity";
 import { NonLaborParseError } from "./appraisalSummary/nonLaborBuckets";
 import { adaptForensicToPlainSummary } from "./plainLanguageSummaryAdapter";
+import { applyComparisonInclusionNotes } from "./comparisonInclusionNotes";
+import { userCategoriesByDigit } from "./appraisalSummary/estimateFromDeltaRows";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import { normalizeOverprintLine, normalizeOverprintText } from "./overprintNormalize";
 /**
@@ -270,6 +272,11 @@ function engineRowsToDeltaRows(
         const engineOp = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
         deltaRow.opCode = engineOp ? engineOp[1] : null;
       }
+      // A CCC user-defined labor category digit ("1"-"4") is the row's labor
+      // type, as the text lane reads it. Dropped here, RO 21548's 7.6 hr of
+      // Calibration/Reset (category 3) and its Aluminum Or Steel Repair test
+      // fit (category 1) were counted as body labor.
+      if (/^[1-4]$/.test(row.laborClass) && deltaRow.labor !== null) deltaRow.laborType = row.laborClass;
       out.push(deltaRow);
     }
   }
@@ -611,6 +618,7 @@ function engineResultToLineItemDeltas(params: {
   potentialDuplicateLowerRows: DeltaEngineRow[];
   matchedPairCount: number;
   missingOperationCount: number;
+  equalPairs: Array<{ higherLine: number | null; lowerLine: number | null }>;
 } {
   const { engine, anchorByLineNumber } = params;
   const deltas: EstimateLineItemDelta[] = [];
@@ -745,7 +753,38 @@ function engineResultToLineItemDeltas(params: {
     potentialDuplicateLowerRows,
     matchedPairCount: engine.pairs.length,
     missingOperationCount,
+    // Pairs made at equal values: no finding, but each line is the other's
+    // counterpart. Dropped, RO 21548's "Transport vehicle to & from sublet"
+    // and the carrier's "Transport To & From Alignment" (1.0 hr each) read as
+    // one line missing from each sheet.
+    equalPairs: engine.pairs
+      .filter((pair) => !findingSubjects.has(pair.subject))
+      .map((pair) => ({ higherLine: pair.subject.line, lowerLine: pair.competing.line })),
   };
+}
+
+/** Which printed category each shop-defined labor digit on these rows bills
+ *  under (userCategoriesByDigit: hours first, then numeric against print order). */
+function userLaborCategoryNames(
+  rows: EstimateDeltaRow[],
+  totals: { categories: Array<{ category: string; hours: number | null; rate: number | null; cost: number | null }> } | null
+): Map<string, string> {
+  if (!totals) return new Map();
+  const digitHours = new Map<string, number>();
+  for (const row of rows) {
+    if (!/^[1-4]$/.test(row.laborType ?? "") || !row.labor) continue;
+    digitHours.set(row.laborType!, Math.round(((digitHours.get(row.laborType!) ?? 0) + row.labor) * 100) / 100);
+  }
+  if (!digitHours.size) return new Map();
+  const userTotals = totals.categories
+    .filter(
+      (category) =>
+        category.hours !== null &&
+        !/^(body|paint|refinish|mechanical|frame|structural|diagnostic|electrical|glass)\b/i.test(category.category.trim()) &&
+        !/suppl|material/i.test(category.category)
+    )
+    .map((category) => ({ cat: "other" as const, label: category.category, hours: category.hours ?? 0, rate: category.rate ?? 0, cost: category.cost ?? 0 }));
+  return new Map([...userCategoriesByDigit(digitHours, userTotals)].map(([digit, total]) => [digit, total.label]));
 }
 
 /** Group extracted PdfWords into the delta engine's per-page Word map.
@@ -865,7 +904,12 @@ export type AnnotatedEstimateGeneratedFindings = {
     /** Both sides' parsed rows (the rows the pairing used), for the Appraisal
      *  Dispute Report's closed ledger and integrity pass. Absent or empty when
      *  the line-item comparison was withheld. */
-    rows?: { higher: EstimateDeltaRow[]; lower: EstimateDeltaRow[]; deltas: EstimateLineItemDelta[] };
+    rows?: {
+      higher: EstimateDeltaRow[];
+      lower: EstimateDeltaRow[];
+      deltas: EstimateLineItemDelta[];
+      equalPairs?: Array<{ higherLine: number | null; lowerLine: number | null }>;
+    };
   };
 };
 
@@ -4622,6 +4666,7 @@ export function buildRequiredEstimatorDeltaFindings(
         lower: deltaMatch?.lowerRows ?? [],
         // Same OCR gate as the no-counterpart rows below.
         deltas: (deltaMatch?.orderedDeltas ?? []).filter((delta) => !delta.ocrUncertain),
+        equalPairs: deltaMatch?.equalPairs ?? [],
       },
       // Only confirmed omissions. An OCR-unverified line is not evidence the
       // comparison lacks the operation, so it must not be listed as one.
@@ -4929,7 +4974,9 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   // reduced_labor — name the actual labor category (mechanical/diagnostic/…):
   // an M-marked line bills at the mechanical rate, and calling it "body labor"
   // misstates the dollars behind the hour difference.
-  const laborNoun = laborTypeNoun(delta.higherRow.laborType ?? delta.lowerRow?.laborType);
+  const laborNoun = delta.higherRow.laborType
+    ? laborTypeNoun(delta.higherRow.laborType, delta.higherRow.laborCategoryName)
+    : laborTypeNoun(delta.lowerRow?.laborType, delta.lowerRow?.laborCategoryName);
   return {
     findingType: "delta-reduced-labor",
     title: `Comparison estimate allows less ${laborNoun}: ${label}`,
@@ -4960,6 +5007,8 @@ type StructuredLineItemDeltaMatch = {
   totalsAnchors: EstimateRowAnchor[];
   /** Lower-estimate lines with no counterpart on the annotated (higher) estimate. */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** Line pairs the matcher made at equal values (no delta), by line number. */
+  equalPairs: Array<{ higherLine: number | null; lowerLine: number | null }>;
   /** F1: which estimating platform the comparison text resolved to. */
   comparisonPlatform: "ccc" | "mitchell" | "audatex" | null;
   /** F1: comparison lines the platform booked as parts that are really sublets. */
@@ -5376,6 +5425,7 @@ function matchStructuredLineItemDeltas(
     missingOperationCount: number;
     lowerOnlyRows: EstimateDeltaRow[];
     potentialDuplicateLowerRows: EstimateDeltaRow[];
+    matchedPairs?: Array<{ higherRow: EstimateDeltaRow; lowerRow: EstimateDeltaRow }>;
   } = engineMatch
     ? {
         deltas: engineMatch.deltas,
@@ -5443,6 +5493,29 @@ function matchStructuredLineItemDeltas(
             `"${item.lowerRow.description}"${money(item.lowerRow)} on ${comparison[0]?.fileName ?? "the comparison estimate"}. ` +
             `If they are the same operation, neither document omits it and the difference is one of price or method — ` +
             `confirm before relying on the omission claim.`
+      );
+    }
+  }
+
+  // A comparison line whose own note names the work it includes is compared
+  // once with our lines that do that work, never reported as missing from
+  // either side (RO 21548: "Other diagnostic services … includes pre and post
+  // and 1 Calibration and Service Mode").
+  if (comparison[0]?.text) {
+    const covered = applyComparisonInclusionNotes({
+      deltas: match.deltas,
+      lowerOnlyRows: match.lowerOnlyRows,
+      comparisonText: comparison[0].text,
+      comparisonName: comparison[0].fileName || "the comparison estimate",
+    });
+    const coveredCount = covered.coverage.reduce((sum, item) => sum + item.coveredRows.length, 0);
+    match.deltas = covered.deltas;
+    match.lowerOnlyRows = covered.lowerOnlyRows;
+    match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredCount);
+    for (const item of covered.coverage) {
+      contradictionNotes.push(
+        `"${item.lowerRow.description}" on ${comparison[0].fileName || "the comparison estimate"} states it includes ${item.included}; ` +
+          `it is compared with the ${item.coveredRows.length} line${item.coveredRows.length === 1 ? "" : "s"} of this estimate that do that work, and neither side reports them as missing.`
       );
     }
   }
@@ -5541,6 +5614,10 @@ function matchStructuredLineItemDeltas(
     mergedDeltas.push({
       ...lead,
       higherRow: neutralRow,
+      mergedMembers: group.map((delta) => ({
+        higherLine: delta.higherRow.lineNumber,
+        lowerLine: delta.lowerRow?.lineNumber ?? null,
+      })),
       laborDelta: mergedLabor,
       paintDelta: mergedPaint,
       priceDelta: mergedPrice,
@@ -5620,6 +5697,28 @@ function matchStructuredLineItemDeltas(
     comparisonWordPages,
     "comparison"
   );
+  // A shop-defined labor digit names a category the totals block prints by
+  // name; the findings say "Calibration/Reset labor", not "category 3".
+  for (const [rows, totals] of [
+    [dedupedHigherRows, higherTotals],
+    [lowerRows, lowerTotals],
+  ] as const) {
+    const names = userLaborCategoryNames(rows, totals);
+    if (!names.size) continue;
+    for (const row of rows) {
+      const name = row.laborType ? names.get(row.laborType) : undefined;
+      if (name) row.laborCategoryName = name;
+    }
+    for (const delta of orderedDeltas) {
+      // Merged and covered deltas carry copies of their rows.
+      const side = rows === dedupedHigherRows ? delta.higherRow : delta.lowerRow;
+      const own = side?.laborType ? names.get(side.laborType) : undefined;
+      if (side && own) side.laborCategoryName = own;
+      for (const [digit, name] of names) {
+        delta.summary = delta.summary.split(`user-defined category ${digit} labor`).join(`${name.replace(/\s*labor\s*$/i, "")} labor`);
+      }
+    }
+  }
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
   // Sanity check before publishing: line-level "not present" claims in a
   // category may not exceed the gap the two totals blocks state for it.
@@ -5674,6 +5773,13 @@ function matchStructuredLineItemDeltas(
     totalsDeltas,
     totalsAnchors,
     lowerOnlyRows: lineItemsWithheld ? [] : match.lowerOnlyRows,
+    equalPairs: lineItemsWithheld
+      ? []
+      : engineMatch
+        ? engineMatch.equalPairs
+        : (match.matchedPairs ?? [])
+            .filter((pair) => !match.deltas.some((delta) => delta.higherRow === pair.higherRow))
+            .map((pair) => ({ higherLine: pair.higherRow.lineNumber, lowerLine: pair.lowerRow.lineNumber })),
     comparisonPlatform,
     subletsBookedAsParts,
     contradictionNotes,

@@ -17,7 +17,7 @@
  * diagnostic app) are recognition vocabulary, like a carrier-name list — no
  * rule branches on a vehicle make or a carrier.
  */
-import { shopRateFor } from "./gapLedger";
+import { shopLineRate, shopRateFor } from "./gapLedger";
 import { round2, type Estimate, type EstimateLine } from "./types";
 
 export interface EquivGroup {
@@ -84,6 +84,16 @@ export const EQUIV_GROUPS: EquivGroup[] = [
     shop: /transport\s+(vehicle\s+)?(to|from)\s+sublet/i,
     carrier: /tow\s+(to|from)\s+sublet/i,
   },
+  {
+    // RO 21548: our "Finish sand & polish" (1.0 paint hr) against their
+    // "Denib and Polish" (0.5 hr) AND "Color Sand and Buff" (1.0 hr + $12).
+    // Paired line to line, ours read as 0.5 hr short; as the group it is,
+    // theirs pays more.
+    key: "finish",
+    label: "Finish sand / denib / polish",
+    shop: /finish\s+sand|sand\s*(&|and)?\s*(polish|buff)|color\s+sand|\bdenib\b/i,
+    carrier: /finish\s+sand|sand\s*(&|and)?\s*(polish|buff)|color\s+sand|\bdenib\b/i,
+  },
 ];
 
 /** Carrier notes that explicitly EXCLUDE work — the strongest evidence the summary can cite. */
@@ -109,9 +119,12 @@ export function groupEquivalents(shop: Estimate, carrier: Estimate) {
   const usedShop = new Set<number>();
   const usedCarrier = new Set<number>();
   const groups: GroupDelta[] = [];
+  // Paint hours count: one sheet can write the same finishing work as paint
+  // and the other as body (RO 21548's finish sand & polish).
+  const paintRate = shopRateFor(shop, "paint", 0);
   const value = (lines: EstimateLine[]) =>
-    round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) + (l.price ?? 0), 0));
-  const hours = (lines: EstimateLine[]) => round2(lines.reduce((sum, l) => sum + (l.hours ?? 0), 0));
+    round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) * shopLineRate(shop, l) + (l.paintHours ?? 0) * paintRate + (l.price ?? 0), 0));
+  const hours = (lines: EstimateLine[]) => round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0));
   for (const group of EQUIV_GROUPS) {
     const s = shop.lines.filter((l) => !usedShop.has(l.line) && matches(group.shop, l));
     const c = carrier.lines.filter((l) => !usedCarrier.has(l.line) && matches(group.carrier, l));

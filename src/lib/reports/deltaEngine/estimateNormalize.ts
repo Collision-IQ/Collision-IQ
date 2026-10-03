@@ -27,7 +27,18 @@ const STEMS: ReadonlyArray<[string, string]> = [
   ["PREREPAIR", "PRESCAN"],
   ["POSTREPAIR", "POSTSCAN"],
   ["WHEELALIGNMENT", "ALIGNMENT"],
+  // "Four wheel suspension alignment" vs the carrier's "Four Wheel Alignment"
+  // (RO 21548): one sublet, $268 vs $98, reported as missing on one side and
+  // carrier-only on the other.
+  ["SUSPENSIONALIGNMENT", "ALIGNMENT"],
   ["PERFORMVEHICLEALIGNMENT", "ALIGNMENT"],
+  // "Set back, secure Protect wiring & connectors" vs "Set Back Wiring" (RO 21548).
+  ["SETBACKSECUREPROTECTWIRING", "SETBACKWIRING"],
+  ["SETBACKWIRING", "SETBACKWIRING"],
+  // "Interior Protection kit" vs "Cover Car for Interior" (RO 21548): the
+  // same protection item, never one missing and one carrier-only.
+  ["INTERIORPROTECTION", "INTERIORPROTECTION"],
+  ["COVERCARFORINTERIOR", "INTERIORPROTECTION"],
   ["CAVITYWAX", "CAVITYWAX"],
   ["MASKINGTAPE", "MASKINGTAPE"],
   ["HAZARDOUSWASTE", "HAZARDOUSWASTE"],

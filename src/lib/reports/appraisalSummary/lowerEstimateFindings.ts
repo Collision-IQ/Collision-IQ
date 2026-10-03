@@ -55,6 +55,24 @@ export const BADGE_MIN = 50;
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const CAT_SHORT: Record<LaborCat, string> = { body: "", paint: "", mechanical: " M", frame: " F", structural: " S", aluminum: " Alum", other: "" };
 
+/**
+ * The category tag a line's hours print with. A category outside the named
+ * families ("other": Electrical, Diagnostic, a shop's own Calibration/Reset)
+ * is tagged from the category it bills under, never as body: RO 21548's
+ * stamps read "0.3 Body" for an Electrical battery line and "0.5 Body" for a
+ * Calibration/Reset road test.
+ */
+export function catTag(line: Pick<EstimateLine, "laborCat" | "laborLabel">): string {
+  if (!line.laborCat) return "";
+  if (line.laborCat !== "other") return CAT_SHORT[line.laborCat];
+  const label = line.laborLabel ?? "";
+  if (/electric/i.test(label)) return " E";
+  if (/diag/i.test(label)) return " D";
+  if (/glass/i.test(label)) return " G";
+  const word = label.split(/[\s/]+/)[0] ?? "";
+  return word ? ` ${word.length > 6 ? `${word.slice(0, 5)}.` : word}` : "";
+}
+
 export function buildLowerEstimateFindings(model: PlainSummaryModel, pairs: MatcherPair[]): LowerFindingSet {
   const { shop, carrier } = model;
   const { units, shopToCarrier } = assignUnits({
@@ -143,7 +161,7 @@ function sideText(lines: EstimateLine[]): string {
   const paint = round2(lines.reduce((sum, l) => sum + (l.paintHours ?? 0), 0));
   const price = round2(lines.reduce((sum, l) => sum + (l.price ?? 0), 0));
   const parts = [
-    hours ? `${hours.toFixed(1)} hr${lines.length === 1 && lines[0].laborCat ? CAT_SHORT[lines[0].laborCat] : ""}` : "",
+    hours ? `${hours.toFixed(1)} hr${lines.length === 1 ? catTag(lines[0]) : ""}` : "",
     paint ? `${paint.toFixed(1)} paint` : "",
     price ? money(price) : "",
   ].filter(Boolean);
@@ -188,7 +206,10 @@ function stampsFor(unit: ShortPayUnit, shopBy: Map<number, EstimateLine>, carrie
   const sh = s.hours ?? 0;
   const ch = c.hours ?? 0;
   if (sh !== ch || (sh && s.laborCat !== c.laborCat)) {
-    stamps.push({ field: "labor", value: `${sh.toFixed(1)}${s.laborCat ? CAT_SHORT[s.laborCat] || (s.laborCat !== c.laborCat ? " Body" : "") : ""}` });
+    stamps.push({
+      field: "labor",
+      value: `${sh.toFixed(1)}${s.laborCat ? catTag(s) || (s.laborCat === "body" && s.laborCat !== c.laborCat ? " Body" : "") : ""}`,
+    });
   }
   if ((s.paintHours ?? 0) !== (c.paintHours ?? 0)) stamps.push({ field: "paint", value: (s.paintHours ?? 0).toFixed(1) });
   if ((s.price ?? 0) !== (c.price ?? 0)) {

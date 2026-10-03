@@ -22,6 +22,13 @@ export interface EstimateLine {
   hours?: number;
   /** Resolved from the printed labor-type letter (M/F/S…) or user category digit. */
   laborCat?: LaborCat;
+  /**
+   * The totals-block category the line's hours bill under, when it is known
+   * exactly ("Calibration/Reset", "Electrical Labor"). Two categories can
+   * share a family at different rates, so a line is valued at its own
+   * category's rate when this names one.
+   */
+  laborLabel?: string;
   paintHours?: number;
   /** The "Note:" text printed under the line, joined. */
   note?: string;
