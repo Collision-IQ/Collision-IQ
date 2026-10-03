@@ -236,7 +236,12 @@ run("explicit standalone summary requests do not trigger annotated estimate inte
 
 run("export card primary Citation Density action calls annotated route, not standalone report builder", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
-  const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber")');
+  // 5a73fc3 ("Review one estimate on its own terms...") widened the download
+  // branch to `estimate_scrubber || forensic_estimate_review`, so the bare
+  // `if (reportType === "estimate_scrubber")` now first matches the throwing
+  // guard in buildReportDocument. Anchor on the download handler's branch.
+  const downloadFnIndex = source.indexOf("async function downloadReportDocument(");
+  const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber"', downloadFnIndex);
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
   const selectorIndex = source.indexOf("<CitationDensityTargetSelector");
@@ -265,6 +270,12 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.match(source, /Carrier estimate - \$\{candidate\.filename\}/);
   assert.match(source, /Shop estimate - \$\{candidate\.filename\}/);
   assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
+  assert.ok(downloadFnIndex !== -1 && downloadIndex !== -1);
+  assert.match(
+    source.slice(downloadIndex, source.indexOf('if (reportType === "oem_citation_density")', downloadIndex)),
+    // b7e0e05 passes the user's answer to "which upload is the insurer's".
+    /await generateAnnotatedCitationDensityEstimate\((?:options\.comparisonDocumentId)?\)/
+  );
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
 });
@@ -429,7 +440,11 @@ run("annotated export uses persisted artifact id for download and metadata", () 
   assert.match(routeSource, /This export is no longer available\. Regenerate Delta Citation Density Report\./);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /toSourcePdfPageIndex\(sourcePdfPageNumber\)/);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /sourcePdfPageNumber - 1/);
-  assert.match(routeSource, /pdfBase64: Buffer\.from\(result\.bytes\)\.toString\("base64"\)/);
+  // fd3b7c2 (Delta Citation Density on the lower estimate) ships the lower-
+  // estimate copy when built, else the selected estimate. The inline bytes and
+  // the persisted artifact id must come from the SAME copy.
+  assert.match(routeSource, /const artifactId = citationCopy\?\.exportId \?\? result\.exportId;/);
+  assert.match(routeSource, /pdfBase64: Buffer\.from\(citationCopy\?\.bytes \?\? result\.bytes\)\.toString\("base64"\)/);
   assert.match(routeSource, /pdfBase64: primaryOutput\?\.pdfBase64/);
   assert.match(pageSource, /artifactId/);
   assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl,\s*pdfBase64,\s*\(\) =>/);

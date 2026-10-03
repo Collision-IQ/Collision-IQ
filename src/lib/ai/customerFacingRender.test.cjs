@@ -202,7 +202,18 @@ run("snapshot modal/PDF final render strips forbidden debug and parser text", ()
   const pdfText = flattenDocument(buildCollisionSnapshotPdfFromSnapshot(dirtySnapshot));
 
   assert.equal(modalText.includes("Hidden mounting or structural damage is not verified from the reviewed file"), true);
-  assert.equal(modalText.includes("The current file appears to support this item."), true);
+  // Since f913bcd ("partnership-review round 1 — truthfulness ...") the
+  // snapshot renders each item's OWN evidence state instead of the blanket
+  // "The current file appears to support this item." claim. An evidence state
+  // that is nothing but debug confidence text must fall back to the softened
+  // wording, never survive as an orphan fragment ("Documented evidence at.").
+  assert.equal(modalText.includes("The current file appears to support this item."), false);
+  assert.equal(
+    cleanSnapshot.topDisputeItems[0].evidenceState,
+    "The current file points to this concern and it should be confirmed during repair review."
+  );
+  assert.doesNotMatch(modalText, /evidence\s+at\s*\./i);
+  assert.doesNotMatch(pdfText, /evidence\s+at\s*\./i);
   assertNoForbiddenCustomerText(modalText);
   assertNoForbiddenCustomerText(pdfText);
 });

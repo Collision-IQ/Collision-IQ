@@ -158,3 +158,6 @@ android/app/client_secret_*.json
 
 # Explee daily monitor snapshots (local data, regenerate with scripts/explee-daily-monitor.cjs)
 scripts/explee-performance-log.jsonl
+
+# Claude Code agent worktrees (local checkouts, never committed)
+.claude/worktrees/

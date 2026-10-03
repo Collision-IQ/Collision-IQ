@@ -1006,4 +1006,7 @@ export const __testables = {
   estimateSectionHeight,
   estimateSectionKeepTogetherHeight,
   estimateComparisonRowHeight,
+  // The export-boundary redaction every downloaded report passes through;
+  // builders deliberately keep the full record (redaction happens here).
+  redactCarrierReportDocument,
 };

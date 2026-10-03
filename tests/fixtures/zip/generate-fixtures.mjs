@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const OUT = path.dirname(fileURLToPath(import.meta.url));
 
+// Fixed entry timestamp so regenerating the fixtures is byte-identical. The
+// Date is built from local-time fields and only the DOS timestamp is written
+// (no UT extra field), so the encoded bytes do not depend on the clock or TZ.
+const ENTRY_OPTIONS = { mtime: new Date(2026, 0, 1, 0, 0, 0), forceDosTimestamp: true };
+
 function write(name, zipfile) {
   return new Promise((resolve, reject) => {
     const out = fs.createWriteStream(path.join(OUT, name));
@@ -17,8 +22,8 @@ function write(name, zipfile) {
 
 async function buildValid() {
   const z = new yazl.ZipFile();
-  z.addBuffer(Buffer.from("%PDF-1.4\n%fake pdf body\n%%EOF\n"), "estimate.pdf");
-  z.addBuffer(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]), "photo.jpg");
+  z.addBuffer(Buffer.from("%PDF-1.4\n%fake pdf body\n%%EOF\n"), "estimate.pdf", ENTRY_OPTIONS);
+  z.addBuffer(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]), "photo.jpg", ENTRY_OPTIONS);
   await write("valid.zip", z);
 }
 
@@ -26,7 +31,7 @@ async function buildZipSlip() {
   const z = new yazl.ZipFile();
   const safeName = "safe/safe/passwdxxx";
   const unsafeName = "../../../etc/passwd";
-  z.addBuffer(Buffer.from("payload"), safeName);
+  z.addBuffer(Buffer.from("payload"), safeName, ENTRY_OPTIONS);
   await write("zip-slip.zip", z);
 
   const target = path.join(OUT, "zip-slip.zip");
@@ -50,14 +55,14 @@ const TOO_MANY_ENTRIES = 1001;
 async function buildTooMany() {
   const z = new yazl.ZipFile();
   for (let i = 0; i < TOO_MANY_ENTRIES; i += 1) {
-    z.addBuffer(Buffer.from(`%PDF-1.4\n%entry ${i}\n%%EOF\n`), `f${i}.pdf`);
+    z.addBuffer(Buffer.from(`%PDF-1.4\n%entry ${i}\n%%EOF\n`), `f${i}.pdf`, ENTRY_OPTIONS);
   }
   await write("too-many-entries.zip", z);
 }
 
 async function buildEncrypted() {
   const z = new yazl.ZipFile();
-  z.addBuffer(Buffer.from("placeholder content"), "secret.txt");
+  z.addBuffer(Buffer.from("placeholder content"), "secret.txt", ENTRY_OPTIONS);
   const tmp = path.join(OUT, ".encrypted-pre.zip");
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(tmp);
