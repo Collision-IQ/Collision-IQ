@@ -61,10 +61,12 @@ describe("determineResponseMode", () => {
 });
 
 describe("buildResponseModeInstruction", () => {
-  it("injects the exact concise instruction", () => {
-    expect(buildResponseModeInstruction("concise")).toContain(
-      "Default to concise answers. Answer the user's question first."
-    );
+  it("injects the concise instruction: answer first, short, no scaffolding", () => {
+    const instruction = buildResponseModeInstruction("concise");
+    expect(instruction.startsWith("RESPONSE DEPTH: CONCISE\n")).toBe(true);
+    expect(instruction).toContain("Answer in 2-5 sentences or at most 4 short bullets.");
+    expect(instruction).toContain("Lead with the direct answer.");
+    expect(instruction).toContain("NO headers, NO section scaffolding");
   });
 });
 

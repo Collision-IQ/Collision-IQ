@@ -136,8 +136,9 @@ describe("composer wiring (source-level)", () => {
   it("composer uses the inline typo underline overlay (no Fix-typos button)", () => {
     expect(source).toContain("ComposerTypoUnderline");
     expect(source).not.toContain("data-type-helper-button");
-    // Native squiggles are replaced by the overlay; mobile helpers remain.
-    expect(source).toContain("spellCheck={false}");
+    // Native spell check stays on (desktop squiggles, mobile autocorrect);
+    // the overlay supplements it with idle-time rechecks.
+    expect(source).toContain("spellCheck={true}");
     expect(source).toContain('autoCorrect="on"');
     expect(source).toContain('autoCapitalize="sentences"');
   });
