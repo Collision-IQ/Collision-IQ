@@ -17,7 +17,6 @@
  * usage page means the report cannot say "both OEM"; an unread note means an
  * exclusion is not cited.
  */
-import { hoursReconcile } from "../deltaEngine/rowCluster";
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "../estimateDeltaMatcher";
 import { detectEstimatePlatform } from "../estimatePlatform";
 import type { ForensicReconciliation } from "../forensicEstimateAnalysis";
@@ -286,38 +285,6 @@ export function estimateFromDeltaRows(params: {
     deductible: deductibleFromText(params.text),
     platform: detectEstimatePlatform(params.text),
   };
-}
-
-export interface LineHoursRead {
-  /** The labor column (every labor category but paint): Σ line hours, printed hours. */
-  labor: { lines: number; printed: number };
-  /** The paint column: Σ line paint hours, printed paint-labor hours. */
-  paint: { lines: number; printed: number };
-  closes: boolean;
-}
-
-/**
- * The rows' hours against the document's own printed labor categories, column
- * by column, under the typed lane's column-identity rule (RC-3). That guard
- * runs only when both sides were read as typed word-layer cells; rows from the
- * text lane reach this report unchecked, and on the repository's CCC fixtures
- * that lane's rows carry too much labor and too little paint (20766: 33.1 /
- * 7.3 hr against 28.0 / 17.9 printed; typed rows of the same print close to
- * the tenth). Every hour the report quotes comes from these rows, so a read
- * that does not close ships no report.
- */
-export function lineHoursRead(estimate: Estimate): LineHoursRead {
-  const round1 = (n: number) => Math.round(n * 10) / 10;
-  const sum = (values: number[]) => round1(values.reduce((total, value) => total + value, 0));
-  const labor = {
-    lines: sum(estimate.lines.map((l) => l.hours ?? 0)),
-    printed: sum(estimate.totals.labor.filter((t) => t.cat !== "paint").map((t) => t.hours)),
-  };
-  const paint = {
-    lines: sum(estimate.lines.map((l) => l.paintHours ?? 0)),
-    printed: sum(estimate.totals.labor.filter((t) => t.cat === "paint").map((t) => t.hours)),
-  };
-  return { labor, paint, closes: hoursReconcile(labor.lines, labor.printed) && hoursReconcile(paint.lines, paint.printed) };
 }
 
 /** The matcher's differences as line-number pairs (merged rows name every line: "(both sides, L119/L120)"). */
