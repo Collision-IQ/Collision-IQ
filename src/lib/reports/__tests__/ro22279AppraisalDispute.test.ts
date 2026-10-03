@@ -1551,20 +1551,29 @@ describe("review — what the report may claim when lines are unread or read dif
   it("on a partial read, no item is argued: an unread price and a dropped row look the same", () => {
     for (const mutate of [
       (d: Delta) => (lowerRow(d, 102).price = null),
-      // Dropped: their L102 replaces the subframe with 5.5 hr, so "no
-      // counterpart" for our crossmember R&I would be false.
-      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 102)),
       (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 134)),
       // Their oil pump's price unread: "they pay the part" is not shown.
       (d: Delta) => (lowerRow(d, 61).price = null),
-      // A labor-only row dropped: their L2 R&I bumper (1.6 hr) is the counterpart of our O/H.
-      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 2)),
     ]) {
       const { m, text } = model21995(mutate);
       expect(m.ledger.unreadCarrierLines + m.ledger.unreadCarrierHours).toBeGreaterThan(0);
       expect(m.items).toEqual([]);
       expect(text).not.toMatch(/No counterpart on their sheet|They pay the part/);
       expect(text).toMatch(/So no item is listed below/);
+    }
+  });
+
+  it("a dropped carrier row that carries hours refuses the report rather than arguing around it", () => {
+    for (const [line, labor] of [
+      // Their L102 replaces the subframe with 5.5 hr, so "no counterpart"
+      // for our crossmember R&I would be false.
+      [102, "57.7"],
+      // A labor-only row: their L2 R&I bumper (1.6 hr) is the counterpart of our O/H.
+      [2, "61.6"],
+    ] as const) {
+      expect(() => model21995((d) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== line)))).toThrow(
+        new RegExp(`^their estimate's lines carry ${labor.replace(".", "\\.")} labor and 8\\.4 paint hours as read, but it prints 63\\.2 and 8\\.4`)
+      );
     }
   });
 
