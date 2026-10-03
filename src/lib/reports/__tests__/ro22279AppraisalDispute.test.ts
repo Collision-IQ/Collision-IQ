@@ -1551,25 +1551,20 @@ describe("review — what the report may claim when lines are unread or read dif
   it("on a partial read, no item is argued: an unread price and a dropped row look the same", () => {
     for (const mutate of [
       (d: Delta) => (lowerRow(d, 102).price = null),
+      // Dropped: their L102 replaces the subframe with 5.5 hr, so "no
+      // counterpart" for our crossmember R&I would be false.
+      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 102)),
       (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 134)),
       // Their oil pump's price unread: "they pay the part" is not shown.
       (d: Delta) => (lowerRow(d, 61).price = null),
+      // A labor-only row dropped: their L2 R&I bumper (1.6 hr) is the counterpart of our O/H.
+      (d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 2)),
     ]) {
       const { m, text } = model21995(mutate);
       expect(m.ledger.unreadCarrierLines + m.ledger.unreadCarrierHours).toBeGreaterThan(0);
       expect(m.items).toEqual([]);
       expect(text).not.toMatch(/No counterpart on their sheet|They pay the part/);
       expect(text).toMatch(/So no item is listed below/);
-    }
-    // A dropped row that carries hours: their L102 replaces the subframe with
-    // 5.5 hr, their L2 R&I bumper is 1.6 hr. The sheet's line hours then no
-    // longer reproduce its printed labor hours, and since every hour the
-    // report quotes is a line's, no report is produced (main's line-hours
-    // rule, which supersedes disclosing the shortfall for hours).
-    for (const line of [102, 2]) {
-      expect(() => model21995((d: Delta) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== line)))).toThrow(
-        /their estimate's lines carry [\d.]+ labor and [\d.]+ paint hours as read, but it prints [\d.]+ and [\d.]+, so any hour the report quoted could be a misread line/
-      );
     }
   });
 
