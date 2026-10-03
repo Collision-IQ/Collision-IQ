@@ -60,8 +60,11 @@ const INTERNAL_PATTERNS = [
   /\bcmox[a-z0-9_-]*\b/gi,
   /\b[A-Z]{2,}_[A-Z0-9_]{3,}\b/g,
   /\b(?:evidence|issue|finding|linked|drive|artifact|snapshot|render)[-_:]?[a-z0-9_-]{6,}\b/gi,
-  /\b\d{1,3}%\s*(?:confidence|supported|verified)?\b/gi,
+  // The whole "documented evidence at 86% confidence" phrase must go BEFORE
+  // the bare-percentage rule: run after it, this rule never matched and the
+  // orphan "Documented evidence at." shipped as an item's evidence state.
   /\b(?:documented|referenced|missing|inferred|verified)\s+evidence\s+at\s+\d{1,3}%\s+confidence\b/gi,
+  /\b\d{1,3}%\s*(?:confidence|supported|verified)?\b/gi,
   /\bProc\s*\d+\s*#?\s*\*+\s*[^.;\n]*/gi,
   /\bwheelm\d+(?:\.\d+)?\b/gi,
   /\bbattery\s+primarym\d+(?:\.\d+)?\b/gi,
