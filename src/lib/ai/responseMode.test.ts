@@ -62,9 +62,14 @@ describe("determineResponseMode", () => {
 
 describe("buildResponseModeInstruction", () => {
   it("injects the exact concise instruction", () => {
-    expect(buildResponseModeInstruction("concise")).toContain(
-      "Default to concise answers. Answer the user's question first."
+    // Concise wording tightened in e0bd2b6 ("Chat: depth-matched speed +
+    // brevity for simple questions"): 2-5 sentences, no section scaffolding.
+    const instruction = buildResponseModeInstruction("concise");
+    expect(instruction).toContain("RESPONSE DEPTH: CONCISE");
+    expect(instruction).toContain(
+      "Answer in 2-5 sentences or at most 4 short bullets. Lead with the direct answer."
     );
+    expect(instruction).toContain("NO headers, NO section scaffolding, NO case recap");
   });
 });
 

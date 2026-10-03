@@ -202,7 +202,9 @@ describe("POST /api/upload - ZIP handling", () => {
   });
 
   it("reports budget failures for oversized and high-ratio archives", () => {
-    expect(checkZipBudget({ uncompressed: 201 * 1024 * 1024 })).toEqual({
+    // Default extracted-bytes cap is 250 MB since cb0d92a ("Add tiered ZIP and
+    // video upload limits"); plan-specific caps are passed via `limits`.
+    expect(checkZipBudget({ uncompressed: 250 * 1024 * 1024 + 1 })).toEqual({
       ok: false,
       code: "ZIP_TOO_LARGE",
     });
