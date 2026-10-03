@@ -107,8 +107,10 @@ import {
   isCarrierAuthoredEstimateDocument,
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
+import type { CounterpartChoice } from "./counterpartChoice";
 import {
   describeExcludedComparisons,
+  describePrintedEstimate,
   namesAnotherPartysEstimate,
   printedPartyConflict,
   samePrintedParty,
@@ -988,7 +990,18 @@ export type AnnotatedEstimateResult = {
     badgeCount: number;
     fileName: string;
   };
+  /**
+   * The question the Appraisal Dispute Report puts to the user on a shop run:
+   * which comparison upload is the insurer's estimate. `required` when the
+   * report was not produced because nothing printed settles whose estimate
+   * the comparison is — the run asks rather than guesses. Otherwise present
+   * when the user could choose (several comparisons, or one the user named),
+   * so the choice can be changed. Absent when there is nothing to ask.
+   */
+  counterpartChoice?: CounterpartChoice;
 };
+
+export type { CounterpartChoice };
 
 export type CitationDensityDebugTrace = {
   buildCommit?: string;
@@ -1940,6 +1953,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
    */
   reportContext?: ForensicClaimContext;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
+  /**
+   * The comparison the user named as the other party's estimate (on a shop
+   * run, the insurer's), answering the run's counterpartChoice question. It
+   * is compared and labelled that party's; nothing about it is guessed.
+   */
+  confirmedCounterpartDocumentId?: string | null;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
   const reportIdentity = params.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
@@ -2271,24 +2290,57 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // Names the estimates left when none of them could be identified as the
   // other party's: the one compared was then picked by print order alone.
   let counterpartPartyUnidentified: string[] | null = null;
-  if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
-    const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
-      sourceParty: sourceDocumentRole,
-      pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
-      sourceText: params.sourceText ?? "",
-    });
-    const chosen = selection.counterpart;
-    if (chosen) {
-      const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
-        chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
-      params = {
-        ...params,
-        comparisonEstimateTexts: [chosen],
-        comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
-      };
-      const note = describeExcludedComparisons(selection);
-      if (note) warnings.push(note);
-      if (selection.unidentified.length) counterpartPartyUnidentified = selection.unidentified.map((candidate) => candidate.fileName);
+  // Every comparison the case offered, before narrowing: what the user may
+  // name when the run has to ask whose estimate is whose.
+  const offeredComparisons = params.comparisonEstimateTexts ?? [];
+  // THE USER'S ANSWER. When the user has named which upload is the other
+  // party's estimate, that one is compared and labelled that party's, and
+  // every other is left out: the run does not guess over the user's word.
+  const confirmedCounterpart = params.confirmedCounterpartDocumentId
+    ? offeredComparisons.find((entry) => entry.sourceDocumentId === params.confirmedCounterpartDocumentId)
+    : undefined;
+  if (confirmedCounterpart) {
+    const role: ComparisonEstimateText["estimateRole"] = sourceDocumentRole === "shop" ? "carrier" : confirmedCounterpart.estimateRole;
+    const theirs = sourceDocumentRole === "shop" ? "the insurer's estimate" : "the estimate to compare against";
+    const others = offeredComparisons.filter((entry) => entry !== confirmedCounterpart).map((entry) => entry.fileName);
+    const relabelled = { ...confirmedCounterpart, estimateRole: role };
+    // The identity gate's advisories are keyed by the comparison it read.
+    gateAdvisories.set(relabelled, gateAdvisories.get(confirmedCounterpart) ?? []);
+    params = {
+      ...params,
+      comparisonEstimateTexts: [relabelled],
+      comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? [])
+        .filter((pdf) => pdf.sourceDocumentId === confirmedCounterpart.sourceDocumentId)
+        .map((pdf) => ({ ...pdf, estimateRole: role })),
+    };
+    warnings.push(
+      `Compared against ${confirmedCounterpart.fileName}, which you identified as ${theirs}.${others.length ? ` Not compared: ${others.join(", ")}.` : ""}`
+    );
+  } else {
+    if (params.confirmedCounterpartDocumentId) {
+      warnings.push(
+        `The estimate named as ${sourceDocumentRole === "shop" ? "the insurer's" : "the comparison"} (${params.confirmedCounterpartDocumentId}) is not one of this run's comparison estimates, so it was not used.`
+      );
+    }
+    if (reportIdentity.reportType === "citation-density" && (params.comparisonEstimateTexts?.length ?? 0) > 1) {
+      const selection = selectComparisonCounterpart(params.comparisonEstimateTexts ?? [], {
+        sourceParty: sourceDocumentRole,
+        pinnedSourceDocumentId: params.canonicalDeltaSet?.estimateFiles.initial.sourceDocumentId ?? null,
+        sourceText: params.sourceText ?? "",
+      });
+      const chosen = selection.counterpart;
+      if (chosen) {
+        const sameDocument = (entry: { sourceDocumentId?: string; fileName?: string }) =>
+          chosen.sourceDocumentId ? entry.sourceDocumentId === chosen.sourceDocumentId : entry.fileName === chosen.fileName;
+        params = {
+          ...params,
+          comparisonEstimateTexts: [chosen],
+          comparisonEstimatePdfs: (params.comparisonEstimatePdfs ?? []).filter(sameDocument),
+        };
+        const note = describeExcludedComparisons(selection);
+        if (note) warnings.push(note);
+        if (selection.unidentified.length) counterpartPartyUnidentified = selection.unidentified.map((candidate) => candidate.fileName);
+      }
     }
   }
   for (const comparison of params.comparisonEstimateTexts ?? []) {
@@ -3211,6 +3263,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let plainSummaryBytes: Uint8Array | undefined;
   let plainSummaryPageCount = 0;
   let lowerEstimate: AnnotatedEstimateResult["lowerEstimate"];
+  let counterpartChoice: CounterpartChoice | undefined;
   // THE SECOND DOCUMENT IS THE FORENSIC REPORT, NOT A CARD DUMP.
   //
   // The Citation Density Report produces exactly two PDFs: the annotated delta
@@ -3354,29 +3407,41 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     const comparisonText = params.comparisonEstimateTexts?.[0];
     const comparisonRole = comparisonText?.estimateRole;
     const comparisonName = comparisonText?.fileName ?? "the comparison estimate";
-    const comparisonIsOurs = samePrintedParty(params.sourceText ?? "", comparisonText?.text ?? "");
-    const comparisonPrintConflict = printedPartyConflict(params.sourceText ?? "", comparisonText?.text ?? "");
-    const comparisonIsAnotherParty = namesAnotherPartysEstimate(comparisonText?.fileName ?? "");
+    // The user's answer settles what the print leaves open — our header on
+    // the insurer's print, a name marking an appraiser — never what it
+    // proves: an estimate printing our own estimator is ours, whoever named it.
+    const answered = confirmedCounterpart !== undefined;
+    const printedParty = samePrintedParty(params.sourceText ?? "", comparisonText?.text ?? "");
+    const comparisonIsOurs = answered && printedParty !== "estimator" ? null : printedParty;
+    const comparisonPrintConflict = answered ? null : printedPartyConflict(params.sourceText ?? "", comparisonText?.text ?? "");
+    const comparisonIsAnotherParty = answered ? false : namesAnotherPartysEstimate(comparisonText?.fileName ?? "");
     const renameAdvice =
       'Naming the insurer\'s file with "SOR" or "carrier" as a separate word (for example "SOR-1.pdf"), and without "shop" or "appraisal", marks it as the insurer\'s.';
+    // The refusals the user can settle by naming the insurer's estimate.
+    let partyRefusal: string | null = null;
     if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsOurs) {
       warnings.push(
         `Appraisal Dispute Report not produced: ${comparisonName} prints the same ${
           comparisonIsOurs === "estimator" ? 'estimator ("Written By")' : comparisonIsOurs
-        } as our estimate, so it reads as our own estimate, not the insurer's. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
+        } as our estimate, so it reads as our own estimate, not the insurer's${answered ? ", although it was identified as the insurer's" : ""}. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
+      // Named the insurer's and printing our own estimator: ask again, offering the others.
+      partyRefusal = warnings[warnings.length - 1];
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonPrintConflict) {
       warnings.push(
         `Appraisal Dispute Report not produced: ${comparisonName} prints our estimate's ${comparisonPrintConflict} but names a different writer, so nothing printed says whether it is our own estimate or the insurer's printed from our system. Comparing against the insurer's own print of its estimate settles it. The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
+      partyRefusal = warnings[warnings.length - 1];
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && counterpartPartyUnidentified) {
       warnings.push(
         `Appraisal Dispute Report not produced: nothing printed on ${counterpartPartyUnidentified.join(", ")} settles which one is the insurer's estimate, so the report would be guessing. Running it with only the insurer's latest estimate as the comparison avoids the guess; ${renameAdvice.charAt(0).toLowerCase()}${renameAdvice.slice(1)} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
+      partyRefusal = warnings[warnings.length - 1];
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && comparisonIsAnotherParty) {
       warnings.push(
         `Appraisal Dispute Report not produced: ${comparisonName} is named as an independent or another party's appraiser, an umpire, an appraisal award or a public adjuster, so nothing shows it is the insurer's estimate. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
+      partyRefusal = warnings[warnings.length - 1];
     } else if (sourceDocumentRole === "shop" && comparisonRole === "carrier" && forensicInput.lineItemComparisonWithheld) {
       // The summary's ledger and items are built from both sheets' lines;
       // with the line-item comparison withheld those lines are unread, and a
@@ -3456,6 +3521,32 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           comparisonRole === "shop" ? "it is labelled a shop estimate" : "its author is not identified"
         }. ${renameAdvice} The annotated estimate and the Forensic Estimate Analysis are unaffected.`
       );
+      partyRefusal = warnings[warnings.length - 1];
+    }
+    // ASK, DON'T GUESS. A refusal the user can settle becomes a question:
+    // which of the comparisons is the insurer's estimate. Every comparison is
+    // offered (the one the run settled on may not be it) except one printing
+    // our own estimator, which is ours. With several comparisons, the choice
+    // stays open after a report too, so a wrong pick can be corrected.
+    if (sourceDocumentRole === "shop") {
+      const candidates = offeredComparisons
+        .filter((entry): entry is ComparisonEstimateText & { sourceDocumentId: string } => Boolean(entry.sourceDocumentId))
+        .map((entry) => ({ entry, tie: samePrintedParty(params.sourceText ?? "", entry.text) }))
+        .flatMap(({ entry, tie }) =>
+          tie === "estimator"
+            ? []
+            : [{ sourceDocumentId: entry.sourceDocumentId, fileName: entry.fileName, ...describePrintedEstimate(entry.text), printsOur: tie }]
+        );
+      const required = partyRefusal !== null && candidates.length > 0;
+      if (required || answered || candidates.length > 1) {
+        counterpartChoice = {
+          required,
+          reason: required ? partyRefusal : null,
+          comparedDocumentId: comparisonText?.sourceDocumentId ?? null,
+          confirmedByUser: answered,
+          candidates,
+        };
+      }
     }
   }
 
@@ -3652,6 +3743,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     plainSummaryBytes,
     plainSummaryPageCount,
     lowerEstimate,
+    counterpartChoice,
   };
 }
 

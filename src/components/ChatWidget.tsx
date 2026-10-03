@@ -113,6 +113,7 @@ import {
   scoreEstimateRoleSignals,
 } from "@/lib/reports/estimateTriageClassifier";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
+import { describeCounterpartCandidate, parseCounterpartChoice } from "@/lib/reports/counterpartChoice";
 import {
   FalVisionClientError,
   getFalVisionResult,
@@ -3000,7 +3001,16 @@ export default function ChatWidget({
             annotatedFindingCount?: number;
             unresolvedAnchorCount?: number;
             warnings?: string[];
+            counterpartChoice?: unknown;
           };
+          // A chat reply cannot carry the picker: name the candidates and
+          // where to answer.
+          const counterpartChoice = parseCounterpartChoice(data.counterpartChoice);
+          const questionText = counterpartChoice?.required
+            ? `\n\n**Which upload is the insurer's estimate?** Nothing printed on these estimates settles it, so the Appraisal Dispute Report was not produced. Run the Citation Density Report from the Reports panel and choose it there:\n${counterpartChoice.candidates
+                .map((candidate) => `- ${candidate.fileName} (${describeCounterpartCandidate(candidate)})`)
+                .join("\n")}`
+            : "";
           const unanchoredText =
             (data.unresolvedAnchorCount ?? 0) > 0
               ? " Unanchored items were placed in the appendix."
@@ -3014,8 +3024,8 @@ export default function ChatWidget({
             : `[Download Citation Density Report](${data.downloadUrl ?? "#"})`;
           const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
           const reply = allUnanchored
-            ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`
-            : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}`;
+            ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}${questionText}`
+            : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}${questionText}`;
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();
