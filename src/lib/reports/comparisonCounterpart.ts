@@ -201,9 +201,10 @@ export function readPrintedLetterhead(text: string): string | null {
   const line = lines[first] ?? "";
   // The first line only: a name, never a label, an amount, a number or a
   // date line (a letter opens with its date), and never a letter's
-  // addressee (followed by "Attn", "Re:", "Dear").
+  // addressee ("Attn", "Re:", "Dear" below it, after an address block of
+  // any length). No estimate print sets these in its opening lines.
   if (!line || /[:$]|\d{3,}/.test(line)) return null;
-  if (lines.slice(first + 1, first + 3).some((next) => /^(?:attn|attention|re\b|dear|to:|subject)/i.test(next))) return null;
+  if (lines.slice(first + 1, first + 11).some((next) => /^(?:attn|attention|re\s*:|re\s+claim\b|dear|to:|subject|sincerely|enclosed)/i.test(next))) return null;
   const words = ocrLetters(line).toUpperCase().replace(/[^A-Z]+/g, " ").trim();
   // A header label OCR set on the same row ("... INSURANCE CO ESTIMATE ID").
   const letters = words.replace(/ /g, "").replace(/(?:ESTIMATEID|CLAIMNUMBER|WORKFILEID)$/, "").replace(/L/g, "I");
@@ -561,9 +562,13 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   // 22279.pdf"), and any estimate that party's print ties to it (its own
   // revision under a brand-only name is still that appraiser's) unless the
   // estimate is named as plainly the insurer's (an SOR-type name).
+  // Never to an estimate that prints the insurer's own workfile or licensed
+  // appraiser of a file named as plainly the insurer's: what lifts a
+  // set-aside above keeps one from spreading.
   const setAsides = base.filter((candidate) => ev(candidate).setAside);
   for (const candidate of base) {
     if (ev(candidate).setAside || ev(candidate).ours || !shopSource || ev(candidate).tier === 3) continue;
+    if (base.some((other) => other !== candidate && insurerMarked(other) && ev(other).tier === 3 && printsInsurers(candidate, other))) continue;
     const named = setAsides.find((other) => ev(other).setAside !== "conflict" && tiedBy(candidate, other));
     if (named) {
       ev(candidate).setAside = ev(named).setAside;
@@ -692,7 +697,11 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   // letterhead, with no writer of ours on it), may be the insurer's later
   // version: if it prints a later supplement or print date than the one
   // compared (or nothing to order them by), the run cannot say the one
-  // compared is the insurer's latest.
+  // compared is the insurer's latest. And one named as the insurer's (an
+  // SOR, its brand) that only our header ties to us, more plainly named than
+  // the one compared and not tied to it by print, may be the insurer's own
+  // estimate printed from our system, whatever its date or title: the one
+  // compared is then not shown to be the insurer's at all.
   const laterThan = (candidate: T, chosen: T) => {
     const [mine, theirsVersion] = [readPrintedEstimateVersion(candidate.text), readPrintedEstimateVersion(chosen.text)];
     if (mine !== null && theirsVersion !== null && mine !== theirsVersion) return mine > theirsVersion;
@@ -701,11 +710,14 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
     return mine === null || theirsVersion === null || mine > theirsVersion;
   };
   if (shopSource && counterpart) {
+    const byHeader = (candidate: T) => ev(candidate).byPrint !== null && ev(candidate).byPrint !== "estimator";
+    const namedOverChosen = (candidate: T) =>
+      byHeader(candidate) && ev(candidate).tier >= 2 && ev(candidate).tier > ev(counterpart).tier && !tiedBy(candidate, counterpart);
     const uncertain = base.filter(
       (candidate) =>
         candidate !== counterpart &&
-        (uncertainAside(candidate) || (ev(candidate).byPrint !== null && ev(candidate).byPrint !== "estimator" && !printsPreliminary(candidate.text))) &&
-        laterThan(candidate, counterpart)
+        (((uncertainAside(candidate) || (byHeader(candidate) && !printsPreliminary(candidate.text))) && laterThan(candidate, counterpart)) ||
+          namedOverChosen(candidate))
     );
     if (uncertain.length) unidentified = [...new Set([...unidentified, counterpart, ...uncertain])];
   }
