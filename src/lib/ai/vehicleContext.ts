@@ -556,18 +556,42 @@ function normalizeVinShape(value?: string): string | undefined {
   return compact.match(/^[A-HJ-NPR-Z0-9]{17}$/)?.[0] ?? compact.match(/[A-HJ-NPR-Z0-9]{17}/)?.[0];
 }
 
-function normalizeAcceptedVin(value?: string): string | undefined {
+export function normalizeAcceptedVin(value?: string): string | undefined {
   const normalized = normalizeVinShape(value);
   if (!normalized) return undefined;
   if (!isAcceptableVinCandidate(normalized)) return undefined;
+  if (GLUED_PART_WORD.test(normalized)) return undefined;
   return normalized;
+}
+
+// An unlabeled 17-character run is only VIN-shaped; a part number can pass the
+// checksum by chance ("PANEL517179320720"). Unlabeled runs on a part-number
+// line, or that open with a part word glued to digits, are not VINs. Words
+// holding I, O or Q never need listing: the VIN alphabet excludes them.
+const PART_NUMBER_LINE = /\b(?:part\s*(?:number|no\b|#)|p\/n\b)/i;
+const GLUED_PART_WORD = /^(?:PANEL|BUMPER|FENDER|LAMP|CLAMP|CABLE|LABEL|SEAL|BELT|TAPE|STRAP|WHEEL|FRAME|BRACE|PLATE|MEMBER|CAMERA|SPEAKER)\d/;
+
+function unlabeledVinCandidates(text: string, pattern: RegExp, group: number): string[] {
+  const out: string[] = [];
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[group];
+    if (!raw) continue;
+    const start = (match.index ?? 0) + match[0].indexOf(raw);
+    const lineStart = text.lastIndexOf("\n", start) + 1;
+    const lineEnd = text.indexOf("\n", start + raw.length);
+    const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+    const compact = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+    if (PART_NUMBER_LINE.test(line) || GLUED_PART_WORD.test(compact)) continue;
+    out.push(raw);
+  }
+  return out;
 }
 
 function extractVinFromTextBlock(text: string): string | undefined {
   const candidates = [
     extractLabeledValue(text, ["vin", "vin#", "vehicle identification number"]),
-    text.match(/(?:^|[^A-Z0-9])((?:[A-HJ-NPR-Z0-9][\s:-]*){17})(?=[^A-Z0-9]|$)/i)?.[1],
-    text.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0],
+    ...unlabeledVinCandidates(text, /(?:^|[^A-Z0-9])((?:[A-HJ-NPR-Z0-9][\s:-]*){17})(?=[^A-Z0-9]|$)/gi, 1),
+    ...unlabeledVinCandidates(text, /\b[A-HJ-NPR-Z0-9]{17}\b/gi, 0),
   ]
     .map((candidate) => normalizeVinShape(candidate))
     .filter((candidate): candidate is string => Boolean(candidate));
@@ -929,7 +953,7 @@ function decodeVinYear(vin: string): number | undefined {
   return validYears.length > 0 ? Math.max(...validYears) : Math.max(...candidateYears);
 }
 
-function validateVinChecksum(vin: string): boolean {
+export function validateVinChecksum(vin: string): boolean {
   const transliteration: Record<string, number> = {
     A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
     J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
