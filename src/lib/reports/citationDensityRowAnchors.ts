@@ -1081,13 +1081,26 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   const unnumberedAnchorIds = new Set<string>();
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
-    if (isGenericOrMalformedAnchorText(line.text)) continue;
     // A leading number counts as a line number only when the line starts in
     // the measured line-number column. A digit-led wrap that starts in the
     // description column carries no line number and continues the row above.
     const printedNumber = extractLineNumber(line.text);
     const wrappedPastLineNumberColumn = printedNumber !== null && startsPastLineNumberColumn(line, lineNumberColumn);
     const lineNumber = wrappedPastLineNumberColumn ? null : printedNumber;
+    // U-5 geometric gate: on documents where a table region is measurable,
+    // operation-type anchors may only exist INSIDE a region. A line-numbered
+    // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
+    // or below the SUBTOTALS rule is structurally non-anchorable.
+    const region = tableRegions.get(line.pageNumber);
+    const inRegion = tableRegions.size === 0 || (region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false);
+    // Boilerplate is judged by position before text. A line that opens a
+    // printed row in the MEASURED line-number column of a MEASURED table
+    // region is a line item whatever its words say: "4 # ****Work
+    // Authorization 1" is the shop's documentation line (the typed lane's
+    // U-3 rule keeps it, qty 1), not a contract page. Skipped by its text,
+    // the row vanished and its wrap ("Secured****") glued onto the row above.
+    const opensMeasuredTableRow = lineNumber !== null && lineNumberColumn !== null && region !== undefined && inRegion;
+    if (isGenericOrMalformedAnchorText(line.text) && !opensMeasuredTableRow) continue;
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
     // A numbered row of a supplier listing names the estimate line whose part
@@ -1112,12 +1125,6 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // A valued row of the ESTIMATE TOTALS block is a totals row by position,
     // whatever section it runs under (see measureEstimateTotalsRows).
     if (estimateTotalsRows.has(line) && /\d/.test(line.text)) type = "totals_row";
-    // U-5 geometric gate: on documents where a table region is measurable,
-    // operation-type anchors may only exist INSIDE a region. A line-numbered
-    // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
-    // or below the SUBTOTALS rule is structurally non-anchorable.
-    const region = tableRegions.get(line.pageNumber);
-    const inRegion = tableRegions.size === 0 || (region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false);
     if (!inRegion && (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")) {
       type = "guide_row";
     }
@@ -1213,6 +1220,11 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     if (type === "estimate_line" || type === "line_note" || type === "embedded_link_row") {
       previousEstimateRow = anchor;
       anchorLines.set(anchor, line);
+    } else if (lineNumber !== null) {
+      // Any other printed line ("3 UPDATE NOTES", a section header) closes the
+      // row above it: a wrap below it can no longer belong to that row, and
+      // attached anyway it stretched L2's box over L3 and L4.
+      previousEstimateRow = null;
     }
   }
 
