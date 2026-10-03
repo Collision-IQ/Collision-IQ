@@ -175,6 +175,24 @@ runTest("if only noisy OCR-shaped candidate exists VIN resolves to null", () => 
   assert.equal(extracted?.model, "X7 xDrive40i");
 });
 
+runTest("the part-number rule leaves real VINs alone", () => {
+  // An unlabeled VIN whose WMI the decoder does not know is still a VIN.
+  assert.equal(
+    extractVehicleIdentityFromText("2024 Kia Seltos\nKNDERCAA2R7545495\n", "attachment")?.vin,
+    "KNDERCAA2R7545495"
+  );
+  // A labeled VIN wins even on a line that also names a part number.
+  assert.equal(
+    extractVehicleIdentityFromText(`VIN: ${fixture.vin} Part Number 517179320720\n`, "attachment")?.vin,
+    fixture.vin
+  );
+  // A part word elsewhere in the text does not touch a separate VIN.
+  assert.equal(
+    extractVehicleIdentityFromText(`Panel 517179320720\nVIN ${fixture.vin}\n`, "attachment")?.vin,
+    fixture.vin
+  );
+});
+
 runTest("blacklisted header labels cannot become VIN candidates", () => {
   const headerOnly = extractVehicleIdentityFromText(
     [
