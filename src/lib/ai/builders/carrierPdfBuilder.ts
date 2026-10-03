@@ -161,7 +161,14 @@ export function buildCarrierReport({
   const canonicalVin = resolveCanonicalVin(exportModel) || "Unspecified";
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
   const comparisonTotals = exportModel.reportFields.comparisonTotals;
-  const comparisonTotalSummary = comparisonTotals
+  // Shop/carrier-attributed totals only when the file holds an estimate PAIR —
+  // the same test the customer report uses for comparisonAvailable. A single
+  // CCC estimate prints "Grand Total" whoever wrote it, so one extracted total
+  // is not a shop total; it falls through to the neutral "Estimate Total".
+  const hasEstimatePair =
+    typeof comparisonTotals?.shopEstimateGrandTotal === "number" &&
+    typeof comparisonTotals?.carrierTotalCostOfRepairs === "number";
+  const comparisonTotalSummary = comparisonTotals && hasEstimatePair
     ? [
         ...(typeof comparisonTotals.shopEstimateGrandTotal === "number"
           ? [{ label: "Shop estimate grand total", value: formatMoneyPrecise(comparisonTotals.shopEstimateGrandTotal) }]

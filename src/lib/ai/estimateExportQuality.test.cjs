@@ -57,6 +57,7 @@ const { extractEstimateLinksFromDocuments, isFetchableEstimateLink } = require("
 const { deriveRenderInsightsFromChat } = require("./builders/deriveRenderInsightsFromChat.ts");
 const { buildRepairStory } = require("./builders/buildRepairStory.ts");
 const { cleanVehicleSummaryLabel, cleanVehicleTrimLabel } = require("../ui/presentationText.ts");
+const { redactDownloadContent } = require("../privacy/redactDownloadContent.ts");
 
 const SHOP_21733_TEXT = `
 Vehicle Description: 2018 TESL Model S 75D AWD
@@ -844,7 +845,7 @@ run("collision snapshot strips internal IDs and malformed parsed line fragments"
   );
   assert.equal(
     snapshot.topDisputeItems[0].nextAction,
-    "Ask the insurer or repair shop to explain whether this item is included, and if not, why."
+    "Ask the insurer or repair shop to explain whether each open item is included, and if not, why."
   );
   assertNoCustomerDebugText(text);
 });
@@ -1036,7 +1037,10 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
   assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", /^(?:5YJSA1E21JF264319)?$/);
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  // The document model names the carrier (397ef17); the download layer
+  // redacts it when the PDF is rendered (36b26d5, exportPdf.redactLabeledExportValue).
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
+  assert.equal(redactDownloadContent("Insurer: GEICO"), "Insurer: [REDACTED_INSURER]");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
   const carrierText = flattenCarrierDocument(carrier);
@@ -1060,7 +1064,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     carrier.summary.find((item) => item.label === "VIN")?.value.includes("Not clearly supported"),
     false
   );
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
   assert.equal(carrier.summary.some((item) => item.value === "THOMAS"), false);
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
@@ -1131,7 +1135,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
   assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", new RegExp(`^(?:${renderModel.reportFields.vin})?$`));
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
     renderModel.reportFields.vehicleLabel
@@ -1140,7 +1144,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value ? renderModel.reportFields.vin : ""
   );
-  assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
+  assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
 });
 
 run("dispute intelligence text template stays decision-ready outside compare mode", () => {
@@ -1264,9 +1268,12 @@ run("OEM-backed supplement opportunities flow into supplement lines and negotiat
     },
   ];
   report.sourceEstimateText = SHOP_21733_TEXT.replace(/Pre-paint test fit/gi, "Test fits");
+  // OEM support must match the estimate's make: the applicability gate fails
+  // closed on a make-less file and rejects another make's documents (b8feea4).
+  report.vehicle = { year: 2018, make: "Tesla", model: "Model S", vin: "5YJSA1E21JF264319" };
   report.supplementOpportunities = [
-    "OEM support in BMW Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.",
-    "OEM support in BMW Position Statement.pdf indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.",
+    "OEM support in Tesla Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.",
+    "OEM support in Tesla Position Statement.pdf indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.",
   ];
   report.missingProcedures = [];
   report.presentProcedures = ["Pre-repair scan", "Post-repair scan"];
@@ -1282,7 +1289,7 @@ run("OEM-backed supplement opportunities flow into supplement lines and negotiat
     supplementLines.some((item) => item.title === "Pre-Paint Test Fit"),
     true
   );
-  assert.equal(/BMW Front Bumper Procedure\.pdf/i.test(negotiation), true);
+  assert.equal(/Tesla Front Bumper Procedure\.pdf/i.test(negotiation), true);
   assert.equal(/fit-sensitive repair path/i.test(negotiation), true);
 });
 
@@ -1351,6 +1358,9 @@ run("customer report keeps 21975 estimate framing nuanced and grammatically clea
       bottomLine: "Repair completion status is not established from the reviewed file.",
     },
     vehicle: "Vehicle",
+    // 21975 is a two-estimate file (shop $7,838.99 vs SOR-1 $4,597.17); comparison
+    // language is gated on an estimate pair (e227878).
+    comparisonTotals: { shopEstimateGrandTotal: 7838.99, carrierTotalCostOfRepairs: 4597.17 },
     findingReasoning: [
       {
         issue: "LKQ grille style contradiction",
