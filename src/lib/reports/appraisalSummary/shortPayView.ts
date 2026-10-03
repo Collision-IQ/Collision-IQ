@@ -15,7 +15,7 @@
  * when the units plus tax reproduce the printed gap within $0.01; otherwise it
  * is null and nothing is printed.
  */
-import { shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
+import { shopLineRate, shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
 import { normalizePartNumber, qualifierStem } from "./integrityChecks";
 import { classifyNonLabor } from "./nonLaborBuckets";
 import type { MatcherPair } from "./argueItems";
@@ -87,7 +87,7 @@ export function assignUnits(params: {
   const shopToCarrier = new Map<number, number>();
   const paintRate = shopRateFor(shop, "paint", 0);
   const value = (l: EstimateLine) =>
-    (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) +
+    (l.hours ?? 0) * shopLineRate(shop, l) +
     (l.paintHours ?? 0) * paintRate +
     (classifyNonLabor(l) === "rateAdjustment" ? 0 : l.price ?? 0);
   const shopBy = new Map(shop.lines.map((l) => [l.line, l]));
@@ -128,7 +128,8 @@ export function assignUnits(params: {
     const s = pair.shopLines.filter((n) => !usedShop.has(n)).map((n) => shopBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
     const c = carrierBy.get(pair.carrierLine);
     if (!s.length || !c) continue;
-    add(s[0].desc, s, [c]);
+    // Their one line whose note covers several of ours is named for itself.
+    add(pair.coveredByCarrierNote && s.length > 1 ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c]);
   }
   // What the matcher did not report as a difference pairs here by part number,
   // then by full component name and operation; the rest is one-sided.

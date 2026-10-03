@@ -63,14 +63,26 @@ function aggKeyOf(row: EstimateRow): string {
   return row.side ? `${row.key}|${row.side}` : row.key;
 }
 
+/** Operation codes and supplement tags print on every row: never content. */
+const NON_CONTENT_WORD = /^(rpr|repl|subl|refn|blnd|algn|sect|add|incl|s\d{2})$/;
+
+/** The operation code a row prints ("rpr", "repl", "r&i" …), or "". */
+function operationOf(row: EstimateRow): string {
+  return row.rawDesc.match(/(?:^|[\s#*])(R&I|Rpr|Repl|Subl|Refn|Blnd|O\/H|Algn)(?=\s|$)/i)?.[1].toLowerCase() ?? "";
+}
+
 /** Content words of a row's printed description, for the near-variant pass
- *  (the canonical key is a compact string with no word boundaries). */
+ *  (the canonical key is a compact string with no word boundaries). The
+ *  operation code is not one: counted as a shared word it paired RO 21548's
+ *  "Rpr Set up & initiate camera" with the carrier's "Rpr Set Back Wiring"
+ *  on {rpr, set}, and the shop's own set-back-wiring line then read as
+ *  missing from the carrier. */
 function descriptionWords(row: EstimateRow): string[] {
   return row.rawDesc
     .toLowerCase()
     .replace(/[^a-z0-9 ]+/g, " ")
     .split(/\s+/)
-    .filter((word) => word.length >= 3 && !/^\d+$/.test(word));
+    .filter((word) => word.length >= 3 && !/^\d+$/.test(word) && !NON_CONTENT_WORD.test(word));
 }
 
 /**
@@ -86,7 +98,16 @@ function isNearVariant(a: EstimateRow, b: EstimateRow): boolean {
   const wordsA = descriptionWords(a);
   const wordsB = new Set(descriptionWords(b));
   const shared = wordsA.filter((word) => wordsB.has(word));
-  if (shared.length < 2 || shared.length < Math.min(wordsA.length, wordsB.size) * 0.5) return false;
+  // A one-word description is identified by that word, under the same
+  // operation: "Rpr Battery" is the carrier's "Rpr D&R battery/Reset
+  // Electronics" (RO 21548), where two shared words cannot exist.
+  const oneWord =
+    Math.min(wordsA.length, wordsB.size) === 1 &&
+    shared.length === 1 &&
+    shared[0].length >= 6 &&
+    operationOf(a) !== "" &&
+    operationOf(a) === operationOf(b);
+  if (!oneWord && (shared.length < 2 || shared.length < Math.min(wordsA.length, wordsB.size) * 0.5)) return false;
   const price = (row: EstimateRow) => (row.price !== null && row.price > 0 ? row.price : null);
   const hours = (row: EstimateRow) => (row.labor ?? 0) + (row.paint ?? 0);
   const priceA = price(a);
