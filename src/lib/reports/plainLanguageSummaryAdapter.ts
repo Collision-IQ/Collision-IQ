@@ -12,7 +12,7 @@
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "./estimateDeltaMatcher";
 import type { ForensicReconciliation } from "./forensicEstimateAnalysis";
 import type { PlainSummaryInput } from "./plainLanguageSummary";
-import { estimateFromDeltaRows, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
+import { estimateFromDeltaRows, lineHoursRead, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
 
 export type PlainSummaryAdapterInput = {
   reconciliation: ForensicReconciliation;
@@ -60,6 +60,45 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
     lines: estimate.lines.map((line) => ({ ...line, desc: scrub(line.desc), note: line.note ? scrub(line.note) : undefined })),
   });
 
+  const shop = estimateFromDeltaRows({
+    role: "shop",
+    fileName: scrub(input.higherDocumentName),
+    rows: input.rows.higher,
+    totals: higher.totals,
+    userCategory: higher.userCategory,
+    userCategories: higher.userCategories,
+    text: input.higherText,
+  });
+  const carrier = estimateFromDeltaRows({
+    role: "carrier",
+    fileName: scrub(input.lowerDocumentName),
+    rows: input.rows.lower,
+    totals: lower.totals,
+    userCategory: lower.userCategory,
+    userCategories: lower.userCategories,
+    text: input.lowerText,
+  });
+  // Every hour the report quotes is a line's, so lines that do not reproduce
+  // their own printed hours ship no report (the typed lane's RC-3 rule).
+  const unreadHours = [
+    { estimate: shop, which: "our" },
+    { estimate: carrier, which: "their" },
+  ].flatMap(({ estimate, which }) => {
+    const read = lineHoursRead(estimate);
+    const hr = (n: number) => n.toFixed(1);
+    return read.closes
+      ? []
+      : [
+          `${which} estimate's lines carry ${hr(read.labor.lines)} labor and ${hr(read.paint.lines)} paint hours as read, but it prints ${hr(read.labor.printed)} and ${hr(read.paint.printed)}`,
+        ];
+  });
+  if (unreadHours.length) {
+    return {
+      ok: false,
+      reason: `${unreadHours.join("; ")}, so any hour the report quoted could be a misread line rather than what the estimate says`,
+    };
+  }
+
   return {
     ok: true,
     input: {
@@ -67,24 +106,8 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
       vehicle,
       roNumber,
       identity,
-      shop: redact(estimateFromDeltaRows({
-        role: "shop",
-        fileName: scrub(input.higherDocumentName),
-        rows: input.rows.higher,
-        totals: higher.totals,
-        userCategory: higher.userCategory,
-        userCategories: higher.userCategories,
-        text: input.higherText,
-      })),
-      carrier: redact(estimateFromDeltaRows({
-        role: "carrier",
-        fileName: scrub(input.lowerDocumentName),
-        rows: input.rows.lower,
-        totals: lower.totals,
-        userCategory: lower.userCategory,
-        userCategories: lower.userCategories,
-        text: input.lowerText,
-      })),
+      shop: redact(shop),
+      carrier: redact(carrier),
       pairs: pairsFromDeltas(input.rows.deltas),
     },
   };

@@ -205,6 +205,7 @@ import {
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
+  hoursReconcile,
   parseEstimateRows as parseDeltaEngineRows,
   parseGrandTotalFromWords as parseDeltaEngineGrandTotal,
   parseSubtotalsFromWords as parseDeltaEngineSubtotals,
@@ -4886,9 +4887,7 @@ function matchStructuredLineItemDeltas(
         const body = printed.page ? rows.filter((row) => row.page <= printed.page) : rows;
         const laborSum = body.reduce((total, row) => total + (row.labor ?? 0), 0);
         const paintSum = body.reduce((total, row) => total + (row.paint ?? 0), 0);
-        const laborOk = printed.labor === null || Math.abs(laborSum - printed.labor) <= 0.21;
-        const paintOk = printed.paint === null || Math.abs(paintSum - printed.paint) <= 0.21;
-        return laborOk && paintOk;
+        return hoursReconcile(laborSum, printed.labor) && hoursReconcile(paintSum, printed.paint);
       };
       const subjectReconciles = subtotalsOk(subjectEngineRows, subjectWordPages);
       const competingReconciles = subtotalsOk(
