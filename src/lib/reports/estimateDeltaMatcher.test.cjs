@@ -782,5 +782,28 @@ run("P0-3 (RO 22185): a deduction is never reported as scope the other side omit
   assert.equal(isDeductionRow(parseCccEstimateRows("11 Repl Bumper cover 1 800.00 2.0")[0]), false);
 });
 
+run("a combined-line group folds only when no member is the comparison line's own twin", () => {
+  // RO 20792: CCC bills "Add for Clear Coat" per panel (0.8 + 1.2) where
+  // Mitchell carries one 1.6 line. The group IS that line: one net finding.
+  const combined = matchEstimateLineItems({
+    higherRows: parseCccEstimateRows(["7Add for Clear Coat 0.8", "12Add for Clear Coat 1.2"].join("\n")),
+    lowerRows: parseCccEstimateRows("9Add for Clear Coat 1.6"),
+  });
+  assert.equal(combined.deltas.length, 1);
+  assert.deepEqual(combined.deltas[0].statusLabels, ["COMBINED_OCCURRENCES"]);
+  assert.match(combined.deltas[0].summary, /0\.8 \+ 1\.2 = 2\.0 hr in total/);
+  // RO 22140: when one member equals the line (2.5 = 2.5), that member is the
+  // line's twin and the other occurrence is unpaid. Folded, the twin hid
+  // inside a net "reduced labor +1.0" and the unpaid line was never named.
+  const twin = matchEstimateLineItems({
+    higherRows: parseCccEstimateRows(["7Add for Clear Coat 2.5", "12Add for Clear Coat 1.0"].join("\n")),
+    lowerRows: parseCccEstimateRows("9Add for Clear Coat 2.5"),
+  });
+  assert.equal(twin.deltas.length, 1);
+  assert.equal(twin.deltas[0].kind, "missing_operation");
+  assert.deepEqual(twin.deltas[0].statusLabels, ["QUANTITY_SHORTFALL"]);
+  assert.equal(twin.deltas[0].higherRow.lineNumber, 12);
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

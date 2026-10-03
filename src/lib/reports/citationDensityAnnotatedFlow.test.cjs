@@ -236,13 +236,14 @@ run("explicit standalone summary requests do not trigger annotated estimate inte
 
 run("export card primary Citation Density action calls annotated route, not standalone report builder", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
-  const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber")');
+  const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber" || reportType === "forensic_estimate_review") {');
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
   const selectorIndex = source.indexOf("<CitationDensityTargetSelector");
   const deltaCardIndex = source.indexOf("Citation Density Report", selectorIndex);
   const snapshotCardIndex = source.indexOf("1-Page Snapshot");
 
+  assert.ok(downloadIndex !== -1, "downloadReportDocument estimate_scrubber branch exists");
   assert.match(source, /Download Citation Density Report/);
   assert.match(source, /Email Citation Density Report/);
   assert.match(source, /Delta Citation Density Report/);
@@ -429,7 +430,8 @@ run("annotated export uses persisted artifact id for download and metadata", () 
   assert.match(routeSource, /This export is no longer available\. Regenerate Delta Citation Density Report\./);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /toSourcePdfPageIndex\(sourcePdfPageNumber\)/);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /sourcePdfPageNumber - 1/);
-  assert.match(routeSource, /pdfBase64: Buffer\.from\(result\.bytes\)\.toString\("base64"\)/);
+  assert.match(routeSource, /const artifactId = citationCopy\?\.exportId \?\? result\.exportId;/);
+  assert.match(routeSource, /pdfBase64: Buffer\.from\(citationCopy\?\.bytes \?\? result\.bytes\)\.toString\("base64"\)/);
   assert.match(routeSource, /pdfBase64: primaryOutput\?\.pdfBase64/);
   assert.match(pageSource, /artifactId/);
   assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl,\s*pdfBase64,\s*\(\) =>/);

@@ -3942,7 +3942,7 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     const firstTitles = result.annotationMetadata.slice(0, 8).map((item) => item.shortTitle).join(" ");
 
     assert.ok(result.debugTrace.lineItemDeltaFindingCount >= 10);
-    assert.match(joined, /Annotated estimate \(higher-cost\): Shop Final 21896\.pdf/i);
+    assert.match(joined, /Higher-cost estimate: Shop Final 21896\.pdf/i);
     assert.match(joined, /Comparison estimate \(lower-cost\): (?:Shop 21896\.pdf|not present on Shop 21896\.pdf)/i);
     assert.match(joined, /Amount delta: \$5?|\$620\.00|\$480\.00/i);
     assert.match(joined, /Labor delta: (?:3\.0|2\.5|1\.5) hours/i);

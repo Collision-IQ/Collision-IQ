@@ -2771,6 +2771,11 @@ export function matchEstimateLineItems(params: {
       if (candidates.length !== 1) continue;
       const lowerIndex = candidates[0];
       const lowerRow = lowerRows[lowerIndex];
+      // A member that agrees with the one line on its own values IS that
+      // line's twin, not a share of a combined line: the 1:1 passes pair it
+      // (same section first, RO 22140 line 7) and the rest are occurrences
+      // the comparison does not pay (quantity shortfall, RO 22140 cavity wax).
+      if (members.some((row) => rowValuesEqual(row, lowerRow))) continue;
       used.add(lowerIndex);
       recordLowerConsumption(lowerIndex, "combined");
       for (const index of indexes) {
