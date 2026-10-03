@@ -556,7 +556,7 @@ function normalizeVinShape(value?: string): string | undefined {
   return compact.match(/^[A-HJ-NPR-Z0-9]{17}$/)?.[0] ?? compact.match(/[A-HJ-NPR-Z0-9]{17}/)?.[0];
 }
 
-function normalizeAcceptedVin(value?: string): string | undefined {
+export function normalizeAcceptedVin(value?: string): string | undefined {
   const normalized = normalizeVinShape(value);
   if (!normalized) return undefined;
   if (!isAcceptableVinCandidate(normalized)) return undefined;
@@ -929,7 +929,7 @@ function decodeVinYear(vin: string): number | undefined {
   return validYears.length > 0 ? Math.max(...validYears) : Math.max(...candidateYears);
 }
 
-function validateVinChecksum(vin: string): boolean {
+export function validateVinChecksum(vin: string): boolean {
   const transliteration: Record<string, number> = {
     A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
     J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,

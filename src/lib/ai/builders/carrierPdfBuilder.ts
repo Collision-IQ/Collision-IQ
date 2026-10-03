@@ -26,6 +26,7 @@ import {
   formatAppraisalAwardPosture,
 } from "@/lib/ai/appraisalAwardEvaluator";
 import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
+import { normalizeAcceptedVin } from "@/lib/ai/vehicleContext";
 
 export type CarrierReportSection = {
   title: string;
@@ -1177,7 +1178,11 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
-    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, "")
+    // Internal ids go; a checksum-valid VIN is case evidence and stays (the
+    // VIN summary field printed blank on every carrier report).
+    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, (token) =>
+      normalizeAcceptedVin(token) === token ? token : ""
+    )
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")
     .trim();

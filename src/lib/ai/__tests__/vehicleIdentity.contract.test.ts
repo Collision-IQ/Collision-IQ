@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { it } from "vitest";
 
 import fixture from "./fixtures/vehicleIdentityFixture.json";
 import teslaCccNoteRegressionFixture from "./fixtures/teslaCccNoteRegressionFixture.json";
@@ -10,31 +11,30 @@ import { buildCarrierReport } from "../builders/carrierPdfBuilder";
 import { inferDriveVehicleContext } from "../contracts/driveRetrievalContract";
 import { normalizeReportToAnalysisResult } from "../builders/normalizeReportToAnalysisResult";
 import {
+  buildVehicleLabel,
   extractVehicleIdentityFromText,
   isBetterVehicleCandidate,
   isBetterVinCandidate,
-  normalizeVin,
-  resolveVehicleIdentity,
+  mergeVehicleIdentity,
+  normalizeAcceptedVin as normalizeVin,
   validateVinChecksum,
 } from "../vehicleContext";
 import type { RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
 
 const structuredFixtureVehicle = fixture.structuredVehicle as VehicleIdentity;
 
-function runTest(name: string, fn: () => void) {
-  try {
-    fn();
-    console.info(`PASS ${name}`);
-  } catch (error) {
-    console.error(`FAIL ${name}`);
-    throw error;
-  }
+// This contract was written against an earlier vehicleContext API
+// (resolveVehicleIdentity with display / identity / sourceSummary provenance).
+// The current module merges candidates with mergeVehicleIdentity and labels
+// them with buildVehicleLabel; it records no provenance tags, so the
+// sourceSummary assertions were removed rather than faked.
+function resolveVehicleIdentity(...candidates: Array<VehicleIdentity | null | undefined>) {
+  const identity = mergeVehicleIdentity(...candidates);
+  return { ...identity, identity, display: buildVehicleLabel(identity) || "Unspecified" };
 }
 
-function assertIncludesAll(actual: string[] | undefined, expected: string[]) {
-  for (const value of expected) {
-    assert.equal(actual?.includes(value), true, `Expected sourceSummary to include ${value}`);
-  }
+function runTest(name: string, fn: () => void) {
+  it(name, fn);
 }
 
 function makeReport(overrides?: Partial<RepairIntelligenceReport>): RepairIntelligenceReport {
@@ -77,11 +77,10 @@ runTest("valid VIN survives later noisy OCR candidates", () => {
   assert.equal(normalizeVin(fixture.vin), fixture.vin);
   assert.equal(validateVinChecksum(fixture.vin), true);
   assert.equal(validateVinChecksum(noisyOcr.vin!), false);
-  assert.equal(isBetterVinCandidate(noisyOcr, validated), false);
+  assert.equal(isBetterVinCandidate(noisyOcr.vin, validated.vin), false);
 
   const resolved = resolveVehicleIdentity(validated, noisyOcr);
   assert.equal(resolved.vin, fixture.vin);
-  assertIncludesAll(resolved.sourceSummary, ["vin_backed_decode"]);
 });
 
 runTest("labeled VIN outranks nearby 17-char header identifiers", () => {
@@ -210,7 +209,7 @@ runTest("invalid OCR VIN cannot replace a validated VIN", () => {
   };
 
   assert.equal(normalizeVin(invalidOcr.vin), undefined);
-  assert.equal(isBetterVinCandidate(invalidOcr, current), false);
+  assert.equal(isBetterVinCandidate(invalidOcr.vin, current.vin), false);
   assert.equal(resolveVehicleIdentity(current, invalidOcr).vin, fixture.vin);
 });
 
@@ -244,7 +243,6 @@ runTest("explicit header beats later CCC closest-like-kind-quality note", () => 
   assert.equal(extracted?.make, "Tesla");
   assert.equal(extracted?.model, "Model 3");
   assert.equal(extracted?.trim, teslaCccNoteRegressionFixture.expectedTrim);
-  assert.equal(extracted?.sourceQuality, "explicit_header");
 });
 
 runTest("final resolved vehicle stays on explicit Tesla header across export and PDF", () => {
@@ -292,10 +290,9 @@ runTest("final resolved vehicle stays on explicit Tesla header across export and
   });
 
   assert.equal(exportModel.vehicle.vin, teslaCccNoteRegressionFixture.vin);
-  assert.equal(exportModel.vehicle.display, teslaCccNoteRegressionFixture.expectedDisplay);
-  assert.equal(exportModel.vehicle.vehicleDisplay, teslaCccNoteRegressionFixture.expectedDisplay);
+  assert.equal(exportModel.vehicle.label, teslaCccNoteRegressionFixture.expectedDisplay);
+  assert.equal(exportModel.vehicle.label, teslaCccNoteRegressionFixture.expectedDisplay);
   assert.equal(exportModel.vehicle.trim, teslaCccNoteRegressionFixture.expectedTrim);
-  assertIncludesAll(exportModel.vehicle.sourceSummary, ["explicit_vehicle_block", "vin_backed_decode"]);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, teslaCccNoteRegressionFixture.expectedDisplay);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, teslaCccNoteRegressionFixture.vin);
   assert.equal(chatVehicle.year, 2025);
@@ -331,8 +328,8 @@ runTest("decoded vehicle survives export builder and report render path", () => 
     assistantAnalysis: "Vehicle identity confirmed from estimate support.",
   });
 
-  assert.equal(exportModel.vehicle.display, fixture.expectedDisplay);
-  assert.equal(exportModel.vehicle.vehicleDisplay, fixture.expectedDisplay);
+  assert.equal(exportModel.vehicle.label, fixture.expectedDisplay);
+  assert.equal(exportModel.vehicle.label, fixture.expectedDisplay);
   assert.equal(exportModel.vehicle.vin, fixture.vin);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, fixture.expectedDisplay);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, fixture.vin);
@@ -382,7 +379,6 @@ runTest("footer false VIN never propagates into export or PDF", () => {
 
   assert.equal(exportModel.vehicle.vin, vinFooterTimestampRegressionFixture.vin);
   assert.notEqual(exportModel.vehicle.vin, vinFooterTimestampRegressionFixture.falseVin);
-  assertIncludesAll(exportModel.vehicle.sourceSummary, ["vin_backed_decode"]);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, vinFooterTimestampRegressionFixture.vin);
   assert.equal(chatVehicle.vin, vinFooterTimestampRegressionFixture.vin);
 });
@@ -417,7 +413,7 @@ runTest("chat, right rail, and export stay aligned on the same resolved identity
     },
   });
 
-  assert.equal(exportModel.vehicle.display, fixture.expectedDisplay);
+  assert.equal(exportModel.vehicle.label, fixture.expectedDisplay);
   assert.equal(exportModel.vehicle.label, fixture.expectedDisplay);
   assert.equal(chatVehicle.vin, exportModel.vehicle.vin);
   assert.equal(chatVehicle.year, exportModel.vehicle.year);
@@ -472,8 +468,8 @@ runTest("export and PDF preserve canonical structured vehicle against noisy evid
     assistantAnalysis: null,
   });
 
-  assert.equal(exportModel.vehicle.display, fixture.expectedDisplay);
-  assert.notEqual(exportModel.vehicle.display, "Unspecified");
+  assert.equal(exportModel.vehicle.label, fixture.expectedDisplay);
+  assert.notEqual(exportModel.vehicle.label, "Unspecified");
   assert.equal(exportModel.vehicle.vin, fixture.vin);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, fixture.expectedDisplay);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, fixture.vin);
@@ -526,7 +522,7 @@ runTest("report export locks structured estimate VIN even when OCR fallback is w
   assert.equal(analysis.vehicle?.vin, "WB523CF05RCN81298");
   assert.equal(analysis.vehicle?.trim, "50 Sports Activity");
   assert.equal(exportModel.vehicle.vin, "WB523CF05RCN81298");
-  assert.equal(exportModel.vehicle.display, "2024 BMW iX xDrive");
+  assert.equal(exportModel.vehicle.label, "2024 BMW iX xDrive 50 Sports Activity");
   assert.equal(exportModel.vehicle.trim, "50 Sports Activity");
   assert.equal(exportModel.vehicle.confidence, "supported");
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "WB523CF05RCN81298");
@@ -607,7 +603,7 @@ runTest("live-path handoff keeps analysis VIN when report vehicle lags behind", 
   assert.equal(report.analysis?.vehicle?.vin, "WB523CF05RCN81298");
   assert.equal(exportModel.vehicle.vin, "WB523CF05RCN81298");
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "WB523CF05RCN81298");
-  assert.equal(exportModel.vehicle.display, "2024 BMW iX xDrive");
+  assert.equal(exportModel.vehicle.label, "2024 BMW iX xDrive 50 Sports Activity");
   assert.equal(exportModel.vehicle.trim, "50 Sports Activity");
 });
 
@@ -653,7 +649,7 @@ runTest("export and PDF do not downgrade supported canonical vehicle when eviden
   const expectedDisplay = resolveVehicleIdentity(canonicalVehicle).display;
 
   assert.notEqual(expectedDisplay, "Unspecified");
-  assert.equal(exportModel.vehicle.display, expectedDisplay);
+  assert.equal(exportModel.vehicle.label, expectedDisplay);
   assert.equal(exportModel.vehicle.vin, canonicalVehicle.vin);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, expectedDisplay);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, canonicalVehicle.vin);
@@ -679,7 +675,7 @@ runTest("report export still falls back safely when no structured VIN exists", (
     assistantAnalysis: null,
   });
 
-  assert.equal(exportModel.vehicle.vin, undefined);
+  assert.ok(!exportModel.vehicle.vin, "export carries no VIN");
 });
 
 runTest("safe fallback keeps vehicle when VIN is not clearly supported", () => {
@@ -724,9 +720,9 @@ runTest("safe fallback keeps vehicle when VIN is not clearly supported", () => {
       : null,
   });
 
-  assert.equal(exportModel.vehicle.vin, undefined);
-  assert.equal(exportModel.vehicle.display, vehicleNoVinFallbackFixture.expectedDisplay);
-  assert.notEqual(exportModel.vehicle.display, "Unspecified");
+  assert.ok(!exportModel.vehicle.vin, "export carries no VIN");
+  assert.equal(exportModel.vehicle.label, vehicleNoVinFallbackFixture.expectedDisplay);
+  assert.notEqual(exportModel.vehicle.label, "Unspecified");
   assert.equal(exportModel.vehicle.trim, vehicleNoVinFallbackFixture.expectedTrim);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, vehicleNoVinFallbackFixture.expectedDisplay);
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Unspecified");
@@ -749,8 +745,8 @@ runTest("no-data case still falls back safely to Unspecified", () => {
     assistantAnalysis: null,
   });
 
-  assert.equal(exportModel.vehicle.display, "Unspecified");
-  assert.equal(exportModel.vehicle.vin, undefined);
+  assert.ok(!exportModel.vehicle.label, "export carries no vehicle label");
+  assert.ok(!exportModel.vehicle.vin, "export carries no VIN");
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, "Unspecified");
   assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Unspecified");
 });

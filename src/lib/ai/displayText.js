@@ -116,6 +116,14 @@ function titleCaseToken(token) {
     return token;
   }
 
+  // Casing the document already chose is the model's name: "xDrive40i",
+  // "iX", "RX350h" mix cases, and "330i" / "540e" are a BMW or Mercedes
+  // engine code with its lowercase suffix. Re-casing them printed
+  // "330I" and "Xdrive40i" in vehicle labels.
+  if ((/[a-z]/.test(token) && /[A-Z]/.test(token)) || /^\d{3}[a-z]$/.test(token)) {
+    return token;
+  }
+
   if (/^[A-Za-z]{1,4}\d[A-Za-z0-9]*$/.test(token)) {
     return token.toUpperCase();
   }
