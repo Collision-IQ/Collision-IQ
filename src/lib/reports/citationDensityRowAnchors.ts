@@ -431,9 +431,8 @@ async function extractPdfWordsWithPdfjs(
   const warnings: string[] = [];
   let infrastructureStage: PdfTextExtractionDiagnostics["textExtractionInfrastructureStage"] = "pdfjs-import";
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  let workerDiagnostics: ReturnType<typeof resolvePdfJsNodeWorker> | undefined;
   infrastructureStage = "worker-resolution";
-  workerDiagnostics = configurePdfJsNodeWorker(pdfjs, warnings);
+  const workerDiagnostics: ReturnType<typeof resolvePdfJsNodeWorker> | undefined = configurePdfJsNodeWorker(pdfjs, warnings);
 
   const getDocumentOptions = {
     ...documentOptions,
