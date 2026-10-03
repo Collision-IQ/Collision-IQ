@@ -642,7 +642,22 @@ export async function POST(request: Request) {
       outputCount: outputs.length,
     });
 
-    return NextResponse.json({
+    // ONE COPY OF EACH PDF. Vercel refuses a serverless response over 4.5 MB,
+    // and the run fails with no document at all. The primary output's PDFs,
+    // debug trace and annotation metadata ride at the top level, where the
+    // client reads them; repeating them in outputs[0] doubled the payload
+    // (RO 22279: 4.19 MB of the 4.5 MB). Every other output keeps its own.
+    const responseOutputs = outputs.map((output, index) => {
+      if (index !== 0) return output;
+      const { pdfBase64, findingsReportPdfBase64, plainSummaryPdfBase64, debugTrace, annotationMetadata, ...rest } = output;
+      void pdfBase64;
+      void findingsReportPdfBase64;
+      void plainSummaryPdfBase64;
+      void debugTrace;
+      void annotationMetadata;
+      return rest;
+    });
+    const responseBody = {
       ok: true,
       artifactId: primaryOutput?.artifactId ?? "",
       exportId: primaryOutput?.artifactId ?? "",
@@ -664,7 +679,7 @@ export async function POST(request: Request) {
       // estimate (required) or lets the user change it; answer with
       // comparisonDocumentId on the next request.
       counterpartChoice: primaryOutput?.counterpartChoice,
-      outputs,
+      outputs: responseOutputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,
       unresolvedAnchorCount,
@@ -695,7 +710,15 @@ export async function POST(request: Request) {
       artifactReportType: outputs[0]?.debugTrace?.artifactReportType,
       findingIdPrefixCheckPassed: outputs[0]?.debugTrace?.findingIdPrefixCheckPassed,
       ...sourceDiagnostics,
+    };
+    // The size the platform limit is measured against, logged so a run the
+    // platform refuses can be read from the logs.
+    const responseText = JSON.stringify(responseBody);
+    console.info("[citation-density.annotated-estimate] response size", {
+      bytes: Buffer.byteLength(responseText),
+      outputCount: outputs.length,
     });
+    return new NextResponse(responseText, { headers: { "Content-Type": "application/json" } });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

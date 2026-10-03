@@ -143,6 +143,19 @@ describe("the route asks which upload is the insurer's estimate, and takes the a
     expect((await thrown.json()).warnings).toContain("Your choice of the insurer's estimate applies to this run but could not be saved with the case.");
   }, 60_000);
 
+  it("sends each PDF once: at the top level, never repeated in outputs[0] (Vercel refuses responses over 4.5 MB)", async () => {
+    const response = await post({ ...annotateOurs, comparisonDocumentId: "b" });
+    const body = await response.json();
+    expect(typeof body.pdfBase64).toBe("string");
+    expect(typeof body.findingsReportPdfBase64).toBe("string");
+    expect(body.outputs).toHaveLength(1);
+    for (const heavy of ["pdfBase64", "findingsReportPdfBase64", "plainSummaryPdfBase64", "debugTrace", "annotationMetadata"]) {
+      expect(body.outputs[0]).not.toHaveProperty(heavy);
+    }
+    // What the chat reply reads from outputs[] is still there.
+    expect(body.outputs[0]).toMatchObject({ downloadUrl: expect.any(String), estimateRole: "shop" });
+  }, 60_000);
+
   it("annotating both estimates, the answer applies to the run it is a comparison for", async () => {
     // Two estimates the case classified: ours and the insurer's.
     store.attachments = attachments.filter((attachment) => attachment.id !== "final");
