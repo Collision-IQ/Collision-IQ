@@ -1,12 +1,11 @@
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { buildExportTemplateSourceModel, type ExportBuilderInput } from "./exportTemplates";
 import {
-  buildPreferredRebuttalSubjectVehicleLabel,
-  preferCanonicalField,
   resolveCanonicalInsurer,
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
   type ExportSupplementItem,
+  resolveRebuttalSubjectVehicle,
 } from "./buildExportModel";
 import { buildRebuttalOpeningLine, buildRebuttalClosingCta, type PressureMode } from "./pressureMode";
 import { cleanOperationDisplayText } from "../../ui/presentationText";
@@ -20,11 +19,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
   // and renders a blank VIN field (D-8) — || falls back on empty too.
   const vin = resolveCanonicalVin(exportModel) || "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
-  const subjectVehicle =
-    preferCanonicalField(
-      exportModel.reportFields.vehicleLabel,
-      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
-    ) ?? "Current repair file";
+  const subjectVehicle = resolveRebuttalSubjectVehicle(exportModel);
 
   const numberedAsks = buildNumberedRevisionAsks(rebuttalItems);
 
@@ -59,7 +54,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
     sections: [
       {
         title: "Recommended Subject",
-        body: `Request for Estimate Revision - ${subjectVehicle}`,
+        body: `Request for estimate revision - ${subjectVehicle}`,
       },
       {
         title: "Revision Asks",

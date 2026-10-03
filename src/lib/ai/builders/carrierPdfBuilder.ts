@@ -1178,10 +1178,10 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
-    // Internal ids go; a checksum-valid VIN is case evidence and stays (the
-    // VIN summary field printed blank on every carrier report).
-    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, (token) =>
-      normalizeAcceptedVin(token) === token ? token : ""
+    // Internal ids go; a checksum-valid VIN, or the tail of one after
+    // "VIN ending", is case evidence and stays (both printed blank).
+    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, (token, offset: number, text: string) =>
+      normalizeAcceptedVin(token) === token || /\bVIN ending\s+$/i.test(text.slice(0, offset)) ? token : ""
     )
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")

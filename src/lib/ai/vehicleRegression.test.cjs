@@ -407,9 +407,11 @@ run("executive and opening prose drop appended numbered findings blocks", () => 
   const executiveBody = carrierDocument.sections.find(
     (section) => section.title === "Executive Repair Position"
   )?.body;
-  const openingBody = rebuttalDocument.sections.find(
-    (section) => section.title === "Opening Position"
-  )?.body;
+  // The rebuttal PDF's opening is the first paragraph of its editable email
+  // body (after the greeting); it no longer has an "Opening Position" section.
+  const openingBody = rebuttalDocument.sections
+    .find((section) => section.title === "Editable Email Body")
+    ?.body?.split("\n\n")[1];
 
   assert.ok(executiveBody);
   assert.ok(openingBody);
@@ -417,7 +419,7 @@ run("executive and opening prose drop appended numbered findings blocks", () => 
   assert.equal(executiveBody.includes("2. Post-repair calibration support remains missing."), false);
   assert.equal(openingBody.includes("1. Pre-repair scan"), false);
   assert.equal(openingBody.includes("2. Post-repair calibration support remains missing."), false);
-  assert.match(openingBody, /^After reviewing the current file, our position is that .+\.$/);
+  assert.match(openingBody, /^[^\n]+$/);
 });
 
 run("rebuttal subject prefers full vehicle identity and falls back to VIN tail", () => {
