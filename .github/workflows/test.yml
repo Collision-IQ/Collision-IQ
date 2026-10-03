@@ -1,0 +1,35 @@
+name: test
+
+# Runs the full suite on every pull request to main and on every push to it.
+# Require the "npm test" check in main's branch protection so a red suite
+# cannot merge (and so cannot reach production, which deploys on push to main).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # The suite regenerates tests/fixtures/zip; a diff means the committed
+      # fixtures are stale or the generator stopped being deterministic.
+      - name: Working tree is clean after the suite
+        run: git diff --exit-code
