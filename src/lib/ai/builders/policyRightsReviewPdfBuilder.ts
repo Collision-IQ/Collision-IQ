@@ -154,7 +154,7 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         title: "What The User Reports",
         bullets: claimHandlingContext.userReports.length
           ? claimHandlingContext.userReports
-          : ["No specific appraisal-process conduct was isolated in the runtime context."],
+          : ["No specific appraisal-process conduct was found in the claim file."],
       },
       ...claimHandlingContext.explicitSections,
       {
@@ -373,7 +373,7 @@ function buildInsurerObligationAssertions(
     return [
       buildConfidenceWeightedAssertion({
         statement:
-          "Claim-handling concerns are present in the runtime context, but no verified insurer-obligation citation was isolated.",
+          "Claim-handling concerns appear in the claim file, but no verified insurer-obligation citation was found.",
         supportCategory: "claim_runtime_context",
         citations: [],
         commentary:
@@ -450,7 +450,7 @@ function buildImmutableCitations(
       source: "ClaimAnalysisRuntime",
       sourceAuthorityTier: "INDUSTRY_CONTEXT",
       sourceType: "runtime",
-      title: "Claim analysis runtime context",
+      title: "Claim file review coverage",
       locator: buildReviewCompletenessMessage({
         reviewed: exportModel.confidenceIntegrity.reviewedFileCount ?? 0,
         total: exportModel.confidenceIntegrity.reviewableFileCount ?? exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
@@ -1022,6 +1022,8 @@ function formatLabel(value: string): string {
 }
 
 function formatSupportCategory(value: PolicyRightsSupportCategory): string {
+  // The internal key names the pipeline ("runtime context"); readers see the claim file.
+  if (value === "claim_runtime_context") return "Claim file context";
   return formatLabel(value);
 }
 
