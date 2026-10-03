@@ -884,6 +884,29 @@ describe("review — what the report may claim when lines are unread or read dif
     }
   });
 
+  it("a carrier read that is only short is disclosed; a carrier misread still ships no report", () => {
+    const refusal = (mutate: (d: Delta) => void) => {
+      try {
+        model21995(mutate);
+        return null;
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    // Short only (dropped L102, 5.5 hr): the ledger carries the hours, no refusal.
+    expect(refusal((d) => (d.lower = d.lower.filter((r: EstimateDeltaRow) => r.lineNumber !== 102)))).toBeNull();
+    // Over-read: a line carries more labor than was printed.
+    expect(refusal((d) => (lowerRow(d, 2).labor = (lowerRow(d, 2).labor ?? 0) + 1))).toMatch(/^their estimate's lines carry .* labor/);
+    // Paint read into the labor column: the total still closes, the columns do not.
+    expect(
+      refusal((d) => {
+        const painted = d.lower.find((r: EstimateDeltaRow) => (r.paint ?? 0) >= 1);
+        painted.labor = (painted.labor ?? 0) + painted.paint;
+        painted.paint = null;
+      })
+    ).toMatch(/^their estimate's lines carry .* paint hours as read/);
+  });
+
   it("'Check this first' never says nothing needs resolving while a carrier price is unread", () => {
     const dual = (d: Delta) => (lowerRow(d, 98).description = String(lowerRow(d, 98).description).replace(/quad-motor/i, "dual-motor"));
     expect(model21995(dual).text).toMatch(/Carrier L169 "Damper Module Assembly" \(\$1,980\.00\) is not on our sheet/);

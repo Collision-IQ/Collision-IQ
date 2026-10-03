@@ -86,7 +86,12 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
   ].flatMap(({ estimate, which }) => {
     const read = lineHoursRead(estimate);
     const hr = (n: number) => n.toFixed(1);
-    return read.closes
+    // A CCC carrier read that is only short (no column over-read) is a line
+    // the read missed, not a misread one: the ledger carries it as
+    // unreadCarrierHours, discloses the figure and argues no item.
+    const shortOnly = [read.labor, read.paint].every((c) => c.lines - c.printed <= 0.21);
+    const disclosed = which === "their" && estimate.platform === "ccc" && shortOnly;
+    return read.closes || disclosed
       ? []
       : [
           `${which} estimate's lines carry ${hr(read.labor.lines)} labor and ${hr(read.paint.lines)} paint hours as read, but it prints ${hr(read.labor.printed)} and ${hr(read.paint.printed)}`,
