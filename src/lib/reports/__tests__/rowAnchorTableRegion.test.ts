@@ -217,6 +217,231 @@ describe("what stays outside the table region (U-5)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The ESTIMATE TOTALS block. A category row with no totals word of its own
+// ("Parts 3,180.20", "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50",
+// "Deductible 500.00") read as a totals row only under the running section
+// "estimate totals", and the section never reaches a block printed on the page
+// after the SUBTOTALS rule: that page has no table region. The block is
+// measured from its own header instead. Geometry is the RO 22084 shop print
+// (title at 80.7, column header at 95.8, rows on a 13.5pt pitch from 109.3 in
+// the Category column at x 143, disclaimer at the x 23 margin).
+// ---------------------------------------------------------------------------
+
+describe("an ESTIMATE TOTALS block printed on the page after the SUBTOTALS rule", () => {
+  /** A measured line: one word carrying the line's text at x. */
+  function at(pageNumber: number, x: number, y: number, text: string, height = 8): PdfTextLine {
+    const word: PdfWord = {
+      pageNumber,
+      text,
+      normalizedText: text.toLowerCase(),
+      x,
+      y,
+      width: text.length * 4.4,
+      height,
+      pageWidth: PAGE_WIDTH,
+      pageHeight: PAGE_HEIGHT,
+    };
+    return { ...line(pageNumber, y, text, height), x, width: word.width, words: [word] };
+  }
+
+  const CATEGORY_ROWS = [
+    "Parts 3,180.20",
+    "Body Labor 35.7 hrs @ $ 90.00 /hr 3,213.00",
+    "Paint Labor 19.2 hrs @ $ 90.00 /hr 1,728.00",
+    "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50",
+    "Aluminum Or Steel Repair 5.0 hrs @ $ 135.00 /hr 675.00",
+    "Bonded Or Welded Panel Replace 8.5 hrs @ $ 135.00 /hr 1,147.50",
+    "Paint Supplies 19.2 hrs @ $ 60.00 /hr 1,152.00",
+    "Miscellaneous 617.94",
+    "Subtotal 13,061.14",
+    "Sales Tax $ 13,061.14 @ 6.0000 % 783.67",
+    "Grand Total 13,844.81",
+  ];
+
+  /** The block from its title down, starting at `top`. */
+  function totalsBlock(
+    pageNumber: number,
+    top: number,
+    { title = "ESTIMATE TOTALS", header = "Category Basis Rate Cost $", categories = CATEGORY_ROWS } = {}
+  ): PdfTextLine[] {
+    return [
+      at(pageNumber, 144, top, title, 9.9),
+      at(pageNumber, 143, top + 15.1, header),
+      ...categories.map((text, index) => at(pageNumber, 143, top + 28.6 + index * PITCH, text)),
+    ];
+  }
+
+  const DISCLAIMER = "This estimate is based on our initial visual inspection. Ocassionally, addtional worn and/or damaged";
+
+  /** Pages 1-2: the column header prints once, on page 1; page 2 continues
+   * the table and closes it with the SUBTOTALS rule. */
+  function lineItemPages(): PdfTextLine[] {
+    return [
+      ...pageChrome(1),
+      line(1, 91.1, "Line Oper Description Part Number Qty Extended Labor Paint"),
+      line(1, 115.2, "1 FRONT BUMPER"),
+      line(1, 128.7, "2 Repl Bumper cover 1 475.00 2.0 3.0"),
+      ...pageChrome(2),
+      line(2, 79.6, "MISCELLANEOUS OPERATIONS"),
+      line(2, 93.1, "3 # Hazardous waste removal 1 5.00 T"),
+      line(2, 106.6, "SUBTOTALS 3,180.20 35.7 19.2"),
+    ];
+  }
+
+  /** The block under the repeated page header of page 3, then `rest`. */
+  function blockOnPage3(blockLines: PdfTextLine[], rest: PdfTextLine[] = []): PdfTextLine[] {
+    return [...lineItemPages(), ...pageChrome(3), ...blockLines, ...rest];
+  }
+
+  const anchorsOf = (lines: PdfTextLine[]) =>
+    buildEstimateRowAnchorsFromLines(lines, { sourceDocumentRole: "shop", sourceDocumentId: "totals-fixture" });
+  const typeOf = (found: EstimateRowAnchor[], text: string) => found.find((anchor) => anchor.rowText === text)?.anchorType;
+
+  it("anchors every category row as totals_row, including those with no totals word (RO 22084 shop page 7)", () => {
+    const found = anchorsOf(blockOnPage3(totalsBlock(3, 80.7), [at(3, 23, 292.4, DISCLAIMER, 9.9)]));
+    for (const text of CATEGORY_ROWS) expect(typeOf(found, text), text).toBe("totals_row");
+    // The title is a totals row by its own words; the disclaimer is not one.
+    expect(found.filter((anchor) => anchor.pageNumber === 3 && anchor.anchorType === "totals_row")).toHaveLength(
+      CATEGORY_ROWS.length + 1
+    );
+  });
+
+  it("reads the block the same whether or not it shares the SUBTOTALS page", () => {
+    const own = anchorsOf(blockOnPage3(totalsBlock(3, 80.7)));
+    const shared = anchorsOf([...lineItemPages(), ...totalsBlock(2, 132.7)]);
+    expect(CATEGORY_ROWS.map((text) => typeOf(shared, text))).toEqual(CATEGORY_ROWS.map(() => "totals_row"));
+    expect(CATEGORY_ROWS.map((text) => typeOf(own, text))).toEqual(CATEGORY_ROWS.map((text) => typeOf(shared, text)));
+  });
+
+  it("reads an OCR'd block whose title and rows lost their spaces (RO 22047 USAA page 6)", () => {
+    const ocr = [
+      "Parts 3,123.43",
+      "BodyLabor 20.0hrs @ $90.00/hr 1,800.00",
+      "MechanicalLabor 7.9hrs @ $175.00/hr 1,382.50",
+      "SalesTax $8,696.63 @ 6.0000% 521.80",
+      "Deductible 1,000.00",
+      "NetCostofRepairs 8,218.43",
+    ];
+    const found = anchorsOf(
+      blockOnPage3(totalsBlock(3, 80.7, { title: "ESTIMATETOTALS", header: "Category Basis Rate Cost$", categories: ocr }))
+    );
+    for (const text of ocr) expect(typeOf(found, text), text).toBe("totals_row");
+  });
+
+  it("leaves the running section alone: the next page's ALTERNATE PARTS USAGE lines do not inherit it", () => {
+    const usage = [
+      ...pageChrome(4),
+      at(4, 23, 80.7, "ALTERNATE PARTS USAGE", 9.9),
+      at(4, 23, 95.8, "VIN: 5YJ3E1EB6XXXXXXXX Production Date: 05/2018 Interior Color:"),
+      at(4, 23, 109.3, "Alternate Part Type # Of Available Parts # Of Parts Selected"),
+      at(4, 23, 122.8, "Aftermarket 1 1"),
+      at(4, 23, 136.3, "Optional OEM 0 0"),
+    ];
+    const found = anchorsOf(blockOnPage3(totalsBlock(3, 80.7), usage));
+    const block = found.filter((anchor) => CATEGORY_ROWS.includes(anchor.rowText));
+    expect(new Set(block.map((anchor) => anchor.section))).toEqual(new Set(["miscellaneous operations"]));
+    // "ALTERNATE PARTS USAGE" is a supplier row by its own words. A section
+    // that advanced to it would make every line under it one too.
+    for (const text of ["VIN: 5YJ3E1EB6XXXXXXXX Production Date: 05/2018 Interior Color:", "Optional OEM 0 0"]) {
+      expect(typeOf(found, text), text).not.toBe("supplier_row");
+    }
+    expect(found.filter((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row")).toEqual([]);
+  });
+
+  it("ends the block at the first line outside the Category column, even on the block's pitch", () => {
+    const found = anchorsOf(
+      blockOnPage3(totalsBlock(3, 80.7, { categories: ["Parts 3,180.20"] }), [
+        at(3, 23, 122.8, "Estimate prepared by APPRAISER, License #271128."),
+        at(3, 143, 136.3, "Workfile ID 00000000"),
+      ])
+    );
+    expect(typeOf(found, "Parts 3,180.20")).toBe("totals_row");
+    expect(typeOf(found, "Estimate prepared by APPRAISER, License #271128.")).not.toBe("totals_row");
+    expect(typeOf(found, "Workfile ID 00000000")).not.toBe("totals_row");
+  });
+
+  it("ends the block at a gap wider than its pitch, even in the Category column", () => {
+    // RO 20766 SOR-3 prints its cumulative-effects table in that column
+    // further down a totals page.
+    const below = 80.7 + 28.6 + CATEGORY_ROWS.length * PITCH + 50;
+    const found = anchorsOf(blockOnPage3(totalsBlock(3, 80.7), [at(3, 147, below, "Estimate 2,573.20 APPRAISER, REDACTED")]));
+    expect(typeOf(found, "Grand Total 13,844.81")).toBe("totals_row");
+    expect(typeOf(found, "Estimate 2,573.20 APPRAISER, REDACTED")).not.toBe("totals_row");
+  });
+
+  it("needs the column header: a lone ESTIMATE TOTALS title claims no rows", () => {
+    const found = anchorsOf(
+      blockOnPage3([
+        at(3, 144, 80.7, "ESTIMATE TOTALS", 9.9),
+        at(3, 143, 95.8, "Parts 3,180.20"),
+        at(3, 143, 109.3, "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50"),
+      ])
+    );
+    expect(typeOf(found, "Parts 3,180.20")).toBeUndefined();
+    expect(typeOf(found, "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50")).toBeUndefined();
+  });
+});
+
+describe("measured on the repo's ESTIMATE TOTALS blocks", () => {
+  const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures");
+
+  /** The three word-layer shapes in the repo, read into PdfWord[]. */
+  function loadWords(relativePath: string): PdfWord[] {
+    const raw = JSON.parse(readFileSync(path.join(FIXTURE_DIR, relativePath), "utf8")) as unknown;
+    const page = { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT };
+    if (Array.isArray(raw)) {
+      return raw.map((item) =>
+        "p" in item
+          ? { ...page, pageNumber: item.p, text: item.t, normalizedText: item.t.toLowerCase(), x: item.x, y: item.y, width: item.w, height: 9 }
+          : { ...item, normalizedText: item.text.toLowerCase() }
+      );
+    }
+    return Object.entries(raw as Record<string, Array<{ text: string; x0: number; x1: number; top: number; bottom: number }>>).flatMap(
+      ([pageNumber, list]) =>
+        list.map((item) => ({
+          ...page,
+          pageNumber: Number(pageNumber),
+          text: item.text,
+          normalizedText: item.text.toLowerCase(),
+          x: item.x0,
+          y: item.top,
+          width: item.x1 - item.x0,
+          height: item.bottom - item.top,
+        }))
+    );
+  }
+
+  // [fixture, page, the block's rows by category label]. The first four print
+  // the block on the page after the SUBTOTALS rule, the next four on the
+  // SUBTOTALS page, and the USAA print is OCR'd.
+  const BLOCKS: Array<[string, number, string[]]> = [
+    ["22084/shop_words.json", 7, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Aluminum Or Steel Repair", "Bonded Or Welded Panel Replace", "Paint Supplies", "Miscellaneous", "Subtotal", "Sales Tax", "Grand Total"]],
+    ["22182/shop_words.json", 8, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Aluminum Or Steel Repair", "Bonded Or Welded Panel Replace", "Paint Supplies", "Miscellaneous", "Subtotal", "Sales Tax", "Grand Total"]],
+    ["21995/sor3_words.json", 8, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Frame Labor", "Paint Supplies", "Subtotal", "Sales Tax", "Total Cost of Repairs", "Deductible", "Total Adjustments", "Net Cost of Repairs"]],
+    ["20766/sor3_words.json", 4, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Paint Supplies", "Miscellaneous", "Other Charges", "Subtotal", "Sales Tax", "Total Cost of Repairs", "Deductible", "Total Adjustments", "Net Cost of Repairs"]],
+    ["20766/shop_words.json", 5, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Electrical Labor", "Aluminum Or Steel Repair", "Calibration/Reset", "Paint Supplies", "Miscellaneous", "Subtotal", "Sales Tax", "Grand Total"]],
+    ["22047/shop_words.json", 5, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Aluminum Or Steel Repair", "Paint Supplies", "Miscellaneous", "Subtotal", "Sales Tax", "Grand Total"]],
+    ["22084/sor5_words.json", 6, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Structural Labor", "Paint Supplies", "Other Charges", "Subtotal", "Sales Tax", "Total Cost of Repairs", "Total Adjustments", "Net Cost of Repairs"]],
+    ["ccc-1259209948-words.json", 5, ["Parts", "Body Labor", "Paint Labor", "Paint Supplies", "Miscellaneous", "Subtotal", "Sales Tax", "Grand Total"]],
+    ["22047/usaa_words.json", 6, ["Parts", "BodyLabor", "PaintLabor", "MechanicalLabor", "Aluminum", "PaintSupplies", "Miscellaneous", "Subtotal", "SalesTax", "TotalCostofRepairs", "Deductible", "TotalAdjustments", "NetCostofRepairs"]],
+  ];
+
+  for (const [relativePath, pageNumber, labels] of BLOCKS) {
+    it(`${relativePath} page ${pageNumber}: every category row anchors as totals_row`, () => {
+      const found = buildEstimateRowAnchorsFromLines(buildPdfTextLines(loadWords(relativePath)), {
+        sourceDocumentRole: "shop",
+        sourceDocumentId: relativePath,
+      });
+      const onPage = found.filter((anchor) => anchor.pageNumber === pageNumber);
+      for (const label of labels) {
+        const rows = onPage.filter((anchor) => anchor.rowText.startsWith(`${label} `));
+        expect(rows.map((anchor) => anchor.anchorType), label).toEqual(["totals_row"]);
+      }
+    });
+  }
+});
+
 /*
  * Supplement-with-summary prints. After the line items close, CCC ONE prints
  * a SUPPLEMENT SUMMARY table (its own column header and SUBTOTALS rule), then

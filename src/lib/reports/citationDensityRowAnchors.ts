@@ -1076,6 +1076,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   /** Where the next digit-led wrap goes in an anchor's rowText, so a second
    * one lands after the first instead of ahead of it. */
   const wrapInsertOffsets = new Map<EstimateRowAnchor, number>();
+  const estimateTotalsRows = measureEstimateTotalsRows(lines);
   /** Ids already given to anchors with no line number (see buildRowAnchorId). */
   const unnumberedAnchorIds = new Set<string>();
 
@@ -1108,6 +1109,9 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       // the unanchored appendix.
       if (tableRegions.size === 0 || tableRegions.has(line.pageNumber)) section = sectionName;
     }
+    // A valued row of the ESTIMATE TOTALS block is a totals row by position,
+    // whatever section it runs under (see measureEstimateTotalsRows).
+    if (estimateTotalsRows.has(line) && /\d/.test(line.text)) type = "totals_row";
     // U-5 geometric gate: on documents where a table region is measurable,
     // operation-type anchors may only exist INSIDE a region. A line-numbered
     // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
@@ -1687,6 +1691,59 @@ function isTotalsRow(normalized: string, currentSection: string, rawText = "") {
       /(?:\$?\d[\d,.]*|\d+(?:\.\d+)?\s*(?:hrs?|@))/.test(normalized);
   }
   return false;
+}
+
+/**
+ * The rows of CCC ONE's ESTIMATE TOTALS block, measured from the block's own
+ * header: the title "ESTIMATE TOTALS" ("ESTIMATETOTALS" on an OCR'd print)
+ * with the column header "Category Basis Rate Cost $" on the next line, then
+ * one row per category ("Parts 3,180.20", "Mechanical Labor 7.7 hrs @ $ 175.00
+ * /hr 1,347.50", "Deductible 500.00"). Rows run down from the column header
+ * while they start in the Category column, within one text height of where
+ * "Category" starts, and no farther apart than the title sits above the column
+ * header. The disclaimer under the block starts at the page margin and ends it.
+ *
+ * isTotalsRow reads a category row with no totals word of its own as a totals
+ * row only under the running section "estimate totals", and that section
+ * advances only on a page with a U-5 table region. A block printed on the page
+ * AFTER the SUBTOTALS rule (RO 22084 and RO 22182 shop, RO 20766 and RO 21995
+ * SOR-3) sits on a page with no region, so its Parts, Mechanical Labor, Sales
+ * Tax and Deductible rows got no anchor and their totals findings fell into
+ * the unanchored appendix. An OCR'd title advances the section to
+ * "estimatetotals", which isTotalsRow does not read either (RO 22047 USAA).
+ * Letting the section advance on pages without a region is not the fix: cover
+ * and ALTERNATE PARTS USAGE text then becomes the section. The block is
+ * measured here instead, and the running section is left alone.
+ *
+ * Page-local: a block never continues onto the next page. Measured lines only:
+ * stored-text synthetic lines carry no geometry.
+ */
+function measureEstimateTotalsRows(lines: PdfTextLine[]): Set<PdfTextLine> {
+  const rows = new Set<PdfTextLine>();
+  const byPage = new Map<number, PdfTextLine[]>();
+  for (const line of lines) {
+    if (!line.words.length) continue;
+    const list = byPage.get(line.pageNumber) ?? [];
+    if (!list.length) byPage.set(line.pageNumber, list);
+    list.push(line);
+  }
+  for (const pageLines of byPage.values()) {
+    pageLines.sort((a, b) => a.y - b.y);
+    pageLines.forEach((title, index) => {
+      if (!/^ESTIMATETOTALS?$/i.test(title.text.replace(/\s+/g, ""))) return;
+      const header = pageLines[index + 1];
+      if (!header || !/^Category\s*Basis\s*Rate/i.test(header.text)) return;
+      const left = header.words[0].x;
+      const maxGap = (header.y - title.y) * 1.5;
+      let previous = header;
+      for (const row of pageLines.slice(index + 2)) {
+        if (Math.abs(row.words[0].x - left) > header.height || row.y - previous.y > maxGap) break;
+        rows.add(row);
+        previous = row;
+      }
+    });
+  }
+  return rows;
 }
 
 function detectEmbeddedLinkRow(text: string) {
