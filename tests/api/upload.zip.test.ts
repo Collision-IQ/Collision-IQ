@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkZipBudget } from "../../src/lib/uploadSafety/zipSafety";
+import { PRO_MAX_EXTRACTED_BYTES } from "../../src/lib/uploadSafety/uploadLimits";
 
 vi.mock("server-only", () => ({}));
 
@@ -202,9 +203,8 @@ describe("POST /api/upload - ZIP handling", () => {
   });
 
   it("reports budget failures for oversized and high-ratio archives", () => {
-    // Default extracted-bytes cap is 250 MB since cb0d92a ("Add tiered ZIP and
-    // video upload limits"); plan-specific caps are passed via `limits`.
-    expect(checkZipBudget({ uncompressed: 250 * 1024 * 1024 + 1 })).toEqual({
+    // One byte past the default extracted-size budget (the Pro tier's, cb0d92a).
+    expect(checkZipBudget({ uncompressed: PRO_MAX_EXTRACTED_BYTES + 1 })).toEqual({
       ok: false,
       code: "ZIP_TOO_LARGE",
     });

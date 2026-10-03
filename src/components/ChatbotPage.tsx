@@ -35,6 +35,7 @@ import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermin
 import { canAccessFeature, toolboxSlotLimit } from "@/lib/featureAccess";
 import ToolboxEvictionOverlay from "@/components/workspace/ToolboxEvictionOverlay";
 import { useToolboxSave } from "@/components/workspace/useToolboxSave";
+import { InsurerEstimatePicker } from "@/components/workspace/InsurerEstimatePicker";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import {
   buildExportModel,
@@ -78,6 +79,7 @@ import {
 } from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { planReports } from "@/lib/reports/forensicSingle/reportPlan";
+import { counterpartChoiceKey, parseCounterpartChoice, type CounterpartChoice } from "@/lib/reports/counterpartChoice";
 import { selectAcademyServiceCta, type AcademyServiceCta } from "@/lib/academy/serviceCta";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -138,6 +140,9 @@ type AnnotatedEstimateExportResult = {
   plainSummaryUrl?: string;
   plainSummaryPdfBase64?: string;
   plainSummaryFilename?: string;
+  // The dispute report's question: which comparison upload is the insurer's
+  // estimate. Delta flavor only; null when there is nothing to ask.
+  counterpartChoice?: CounterpartChoice | null;
 };
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
@@ -514,6 +519,25 @@ export function ChatbotWorkspacePage({
     useState<CitationDensityTargetEstimate>("auto");
   const [citationDensitySelectedSourceDocumentId, setCitationDensitySelectedSourceDocumentId] =
     useState<string>("");
+  // The user's answer to the Appraisal Dispute Report's question (which
+  // comparison upload is the insurer's estimate) and the question itself.
+  // Both belong to one case and one annotated estimate: each is kept with
+  // that scope and reads as unset under any other.
+  const citationDensityAnswerScope = `${analysisReportId ?? ""}|${citationDensitySelectedSourceDocumentId}`;
+  const [insurerEstimateAnswer, setInsurerEstimateAnswer] = useState<{ scope: string; documentId: string } | null>(null);
+  const [counterpartQuestion, setCounterpartQuestion] = useState<{ scope: string; choice: CounterpartChoice | null } | null>(null);
+  const citationDensityInsurerEstimateId =
+    insurerEstimateAnswer?.scope === citationDensityAnswerScope ? insurerEstimateAnswer.documentId : "";
+  const citationDensityCounterpartChoice =
+    counterpartQuestion?.scope === citationDensityAnswerScope ? counterpartQuestion.choice : null;
+  const setCitationDensityInsurerEstimateId = useCallback(
+    (documentId: string) => setInsurerEstimateAnswer({ scope: citationDensityAnswerScope, documentId }),
+    [citationDensityAnswerScope]
+  );
+  const setCitationDensityCounterpartChoice = useCallback(
+    (choice: CounterpartChoice | null) => setCounterpartQuestion({ scope: citationDensityAnswerScope, choice }),
+    [citationDensityAnswerScope]
+  );
   const bottomReportObjectUrlRef = useRef<string | null>(null);
   const immersiveHeaderExpandedRef = useRef(true);
 
@@ -1347,6 +1371,10 @@ export function ChatbotWorkspacePage({
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
             onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
+            citationDensityInsurerEstimateId={citationDensityInsurerEstimateId}
+            onCitationDensityInsurerEstimateIdChange={setCitationDensityInsurerEstimateId}
+            citationDensityCounterpartChoice={citationDensityCounterpartChoice}
+            onCitationDensityCounterpartChoiceChange={setCitationDensityCounterpartChoice}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1818,6 +1846,10 @@ export function ChatbotWorkspacePage({
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
             onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
+            citationDensityInsurerEstimateId={citationDensityInsurerEstimateId}
+            onCitationDensityInsurerEstimateIdChange={setCitationDensityInsurerEstimateId}
+            citationDensityCounterpartChoice={citationDensityCounterpartChoice}
+            onCitationDensityCounterpartChoiceChange={setCitationDensityCounterpartChoice}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -2205,6 +2237,10 @@ function RailContent({
   onCitationDensityTargetEstimateChange,
   citationDensitySelectedSourceDocumentId,
   onCitationDensitySelectedSourceDocumentIdChange,
+  citationDensityInsurerEstimateId,
+  onCitationDensityInsurerEstimateIdChange,
+  citationDensityCounterpartChoice,
+  onCitationDensityCounterpartChoiceChange,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -2250,6 +2286,10 @@ function RailContent({
   onCitationDensityTargetEstimateChange: (target: CitationDensityTargetEstimate) => void;
   citationDensitySelectedSourceDocumentId: string;
   onCitationDensitySelectedSourceDocumentIdChange: (documentId: string) => void;
+  citationDensityInsurerEstimateId: string;
+  onCitationDensityInsurerEstimateIdChange: (documentId: string) => void;
+  citationDensityCounterpartChoice: CounterpartChoice | null;
+  onCitationDensityCounterpartChoiceChange: (choice: CounterpartChoice | null) => void;
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -2287,6 +2327,7 @@ function RailContent({
   const [reportSending, setReportSending] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [reportSendStatus, setReportSendStatus] = useState<string | null>(null);
+  const [insurerEstimateRunPending, setInsurerEstimateRunPending] = useState(false);
   const [reportReviewed, setReportReviewed] = useState(false);
   const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
@@ -2727,7 +2768,7 @@ function RailContent({
     );
   }
 
-  async function downloadReportDocument(reportType: ReportKind) {
+  async function downloadReportDocument(reportType: ReportKind, options: { comparisonDocumentId?: string } = {}) {
     if (reportType === "estimate_scrubber" || reportType === "forensic_estimate_review") {
       try {
         if (forensicSingleMode) {
@@ -2738,15 +2779,16 @@ function RailContent({
             return;
           }
         }
-        const exportResult = await generateAnnotatedCitationDensityEstimate();
+        const exportResult = await generateAnnotatedCitationDensityEstimate(options.comparisonDocumentId);
         downloadBlob(exportResult.blob, exportResult.filename);
         await downloadCitationDensityFindingsReport(exportResult);
         await downloadPlainLanguageSummary(exportResult);
         onCitationDensityReportReady({
           reportFlavor: "delta",
           result: exportResult,
+          // Regenerating keeps this run's answer to which estimate is the insurer's.
           onRegenerate: () => {
-            void downloadReportDocument("estimate_scrubber");
+            void downloadReportDocument("estimate_scrubber", options);
           },
         });
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
@@ -2891,7 +2933,18 @@ function RailContent({
     };
   }
 
-  async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
+  /** Runs the user's answer to which comparison is the insurer's estimate, then reruns the report with it. */
+  async function runWithInsurerEstimate(documentId: string) {
+    onCitationDensityInsurerEstimateIdChange(documentId);
+    setInsurerEstimateRunPending(true);
+    try {
+      await downloadReportDocument("estimate_scrubber", { comparisonDocumentId: documentId });
+    } finally {
+      setInsurerEstimateRunPending(false);
+    }
+  }
+
+  async function generateAnnotatedCitationDensityEstimate(comparisonDocumentIdOverride?: string): Promise<AnnotatedEstimateExportResult> {
     if (!analysisReportId) {
       throw new Error("Citation Density annotated export needs an active case.");
     }
@@ -2920,6 +2973,8 @@ function RailContent({
         includeLegend: true,
         includeSummaryPage: false,
         redactSensitive: true,
+        // The user's answer to "which upload is the insurer's estimate?".
+        comparisonDocumentId: (comparisonDocumentIdOverride ?? citationDensityInsurerEstimateId) || undefined,
       }),
     });
 
@@ -2933,6 +2988,8 @@ function RailContent({
       findingsReportPdfBase64?: unknown;
       plainSummaryUrl?: unknown;
       plainSummaryPdfBase64?: unknown;
+      counterpartChoice?: unknown;
+      comparisonDocumentId?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2944,9 +3001,14 @@ function RailContent({
     } | null;
 
     if (!response.ok || typeof data?.downloadUrl !== "string") {
+      // The answer named an estimate that is no longer a comparison on the
+      // case: drop it, so the next run asks again instead of failing again.
+      if (typeof data?.comparisonDocumentId === "string") onCitationDensityInsurerEstimateIdChange("");
       throw new Error(formatAnnotatedExportError(data, "Annotated estimate export failed."));
     }
 
+    const counterpartChoice = parseCounterpartChoice(data.counterpartChoice);
+    onCitationDensityCounterpartChoiceChange(counterpartChoice);
     const pdfBase64 = typeof data.pdfBase64 === "string" ? data.pdfBase64 : undefined;
     let artifactFallbackUsed = false;
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl, pdfBase64, () => {
@@ -2963,6 +3025,7 @@ function RailContent({
       plainSummaryPdfBase64:
         typeof data.plainSummaryPdfBase64 === "string" ? data.plainSummaryPdfBase64 : undefined,
       plainSummaryFilename: "appraisal-dispute-report.pdf",
+      counterpartChoice,
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -4224,6 +4287,14 @@ function RailContent({
                 {reportSendStatus}
               </div>
             ) : null}
+            {citationDensityCounterpartChoice ? (
+              <InsurerEstimatePicker
+                key={counterpartChoiceKey(citationDensityCounterpartChoice)}
+                choice={citationDensityCounterpartChoice}
+                busy={insurerEstimateRunPending}
+                onRun={(documentId) => void runWithInsurerEstimate(documentId)}
+              />
+            ) : null}
           </div>
         </section>
         </RailInsightSection>
@@ -4415,6 +4486,14 @@ function RailContent({
             <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
               {reportSendStatus}
             </div>
+          ) : null}
+          {citationDensityCounterpartChoice ? (
+            <InsurerEstimatePicker
+              key={counterpartChoiceKey(citationDensityCounterpartChoice)}
+              choice={citationDensityCounterpartChoice}
+              busy={insurerEstimateRunPending}
+              onRun={(documentId) => void runWithInsurerEstimate(documentId)}
+            />
           ) : null}
         </div>
       ) : null}

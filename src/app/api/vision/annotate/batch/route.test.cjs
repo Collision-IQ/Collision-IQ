@@ -95,13 +95,7 @@ Module._load = function interceptLoad(request, parent, isMain) {
     };
   }
   if (request === "@/lib/ai/renderDamageOverlay") {
-    // Only the canvas render is mocked; gradientHeatZones is the real pure
-    // helper runDamageAnnotation uses to decide heat-map overlay availability.
-    const real = require(path.join(cwd, "src/lib/ai/renderDamageOverlay.ts"));
-    return {
-      renderDamageOverlay: async (...args) => mockRenderImpl(...args),
-      gradientHeatZones: real.gradientHeatZones,
-    };
+    return { renderDamageOverlay: async (...args) => mockRenderImpl(...args), gradientHeatZones: () => [] };
   }
   if (request === "@/lib/ai/damageImageNormalization") {
     return { normalizeDamageImage: async (source) => ({ buffer: Buffer.isBuffer(source) ? source : Buffer.from("source"), dataUrl: "data:image/png;base64,c291cmNl", sourceHash: "a".repeat(64), naturalWidth: 100, naturalHeight: 80, originalOrientation: 1, normalizedOrientation: 1 }) };

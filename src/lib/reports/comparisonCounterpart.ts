@@ -738,6 +738,21 @@ export function selectComparisonCounterpart<T extends CounterpartCandidate>(
   return { counterpart, excluded: excluded.filter((entry) => entry.candidate !== counterpart), basis: order.basis, unidentified, counterpartCaveat };
 }
 
+/**
+ * What an estimate prints about itself, for asking the user which upload is
+ * the insurer's: its grand total, its version and its latest print time, each
+ * null when the print does not carry it. Nothing here is inferred.
+ */
+export function describePrintedEstimate(text: string): { grandTotal: number | null; version: string | null; printedAt: string | null } {
+  const version = readPrintedEstimateVersion(text);
+  const printed = readLatestPrintedTimestamp(text);
+  return {
+    grandTotal: parseEstimateTotalsForPlatform(text)?.grandTotal ?? null,
+    version: version === null ? null : version === 0 ? "Estimate of Record" : `Supplement ${version}`,
+    printedAt: printed === null ? null : stamp(printed),
+  };
+}
+
 /** The run warning naming every estimate a selection left out, or null when none was. */
 export function describeExcludedComparisons<T extends CounterpartCandidate>(selection: CounterpartSelection<T>): string | null {
   if (!selection.counterpart || selection.excluded.length === 0) return null;

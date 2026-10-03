@@ -46,17 +46,16 @@ async function buildZipSlip() {
   fs.writeFileSync(target, buf);
 }
 
-// One entry over the admin per-archive cap (ADMIN_UPLOAD_BATCH_FILE_LIMIT =
-// 1000 in src/lib/uploadSafety/uploadLimits.ts; tests/api/upload.zip.test.ts
-// posts as a platform admin). Entries are .pdf so each one passes the ZIP
-// type allow-list (.txt was dropped from it in cb0d92a) and the archive is
-// rejected by the entry-count cap, not by an earlier type check.
-const TOO_MANY_ENTRY_COUNT = 1001;
+// One entry past the admin plan's maxExtractedFiles (ADMIN_UPLOAD_BATCH_FILE_LIMIT
+// = 1000 in src/lib/uploadSafety/uploadLimits.ts; the route test runs as admin).
+// Entries are a ZIP-allowed type, so the entry-count cap is the only guard that
+// can reject the archive.
+const TOO_MANY_ENTRIES = 1001;
 
 async function buildTooMany() {
   const z = new yazl.ZipFile();
-  for (let i = 0; i < TOO_MANY_ENTRY_COUNT; i += 1) {
-    z.addBuffer(Buffer.from(`entry ${i}`), `f${i}.pdf`, ENTRY_OPTIONS);
+  for (let i = 0; i < TOO_MANY_ENTRIES; i += 1) {
+    z.addBuffer(Buffer.from(`%PDF-1.4\n%entry ${i}\n%%EOF\n`), `f${i}.pdf`, ENTRY_OPTIONS);
   }
   await write("too-many-entries.zip", z);
 }
