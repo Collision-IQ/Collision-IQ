@@ -791,13 +791,14 @@ run("customer report PDF strips internal audit language and parser fragments", (
   const text = flattenCarrierDocument(document);
   // Approved customer-facing section order.
   assert.equal(document.sections.map((section) => section.title.replace(/\.$/, "")).join("|"),
-    "Plain-English Summary|What This Means for You|Key Findings|Why These Items Matter|Questions to Ask|Supporting Documentation|Technical Appendix"
+    "The short version|What this actually means for you|What still needs to be double-checked|Why this actually matters|What you can do next|Supporting documentation on file|Where things stand"
   );
   assert.equal(
     text.includes("Hidden mounting or structural damage is not verified from the reviewed file"),
     true
   );
   assert.ok(/CCC Secure Share source confirms this estimate line was present in the structured estimate data\.?/i.test(text));
+  assert.equal(/\bevidence\s+at\s*[.,;]/i.test(text), false);
   assertNoCustomerDebugText(text);
 });
 

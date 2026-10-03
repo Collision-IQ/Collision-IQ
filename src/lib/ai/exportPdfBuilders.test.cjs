@@ -414,8 +414,10 @@ run("Citation Density Gap Report shows citation gaps beside estimate anchors", (
   assert.match(text, /Proof Needed Before Leading With This/);
   assert.match(text, /Citation density/i);
   assert.match(text, /Estimate evidence supports the existence of a difference/i);
-  assert.match(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
-  assert.match(text, /The CCC estimate data supports the existence of this line-item difference\. OEM\/P-page\/DEG\/legal support has not yet been verified/i);
+  // 00d0230: the CCC structured-data confirmation is gated on an actual Secure
+  // Share / workfile signal; this fixture has none, so the claim must not render.
+  assert.doesNotMatch(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
+  assert.doesNotMatch(text, /The CCC estimate data supports the existence of this line-item difference/i);
   assert.doesNotMatch(text, /Estimate documentation the existence/i);
   assert.doesNotMatch(text, /CCC Secure Share documentation this estimate line/i);
   assert.doesNotMatch(text, /OEMdocumentation/i);

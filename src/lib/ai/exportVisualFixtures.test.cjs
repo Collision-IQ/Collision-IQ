@@ -261,7 +261,7 @@ run("legacy dispute intelligence fixture renders unified Repair Intelligence rep
   assert.ok(total > layout.usableHeight);
   assert.ok((topDrivers?.bullets ?? []).length >= 4);
   assert.equal(
-    document.sections.some((section) => section.title === "Missing Verification Evidence"),
+    document.sections.some((section) => section.title === "Open Verification Items"),
     true
   );
 });

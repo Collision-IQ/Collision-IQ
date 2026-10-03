@@ -111,6 +111,16 @@ function makeReport(overrides = {}) {
   };
 }
 
+// Jurisdiction is resolved only from case evidence (explicit claim state,
+// policy governing law, owner/insured address, or shop/inspection fallback),
+// never from narrative text or citation titles. Fixtures that exercise
+// legal-source filtering therefore carry an owner address block.
+function makeOwnerAddressAnalysis(cityStateZip) {
+  return {
+    rawEstimateText: ["Owner:", "Jane Doe", "123 Main Street", cityStateZip].join("\n"),
+  };
+}
+
 function makeOperation(overrides = {}) {
   return {
     operation: "Proc",
@@ -1341,7 +1351,7 @@ run("policy rights review rejects mixed-jurisdiction and weak legal sources", ()
         },
       }),
       report: makeReport(),
-      analysis: null,
+      analysis: makeOwnerAddressAnalysis("Indianapolis, IN 46204"),
       panel: null,
       assistantAnalysis: "Indiana claim with complaint-process questions.",
     },
@@ -1383,6 +1393,7 @@ run("policy rights review rejects mixed-jurisdiction and weak legal sources", ()
 
   assert.equal(review.jurisdiction.state, "Indiana (IN)");
   assert.equal(review.jurisdiction.confidence, "high");
+  assert.equal(review.jurisdiction.source, "owner_zip");
   assert.equal(review.verifiedRegulations.length, 1);
   assert.match(review.verifiedRegulations[0].statement, /Indiana Department of Insurance/i);
   assert.equal(review.verifiedRegulations.some((item) => /Rhode Island|Texas|California/i.test(item.statement)), false);
@@ -1460,7 +1471,7 @@ run("legal citation authority tiers reject social repairer attorney news and tra
     {
       renderModel,
       report: makeReport(),
-      analysis: null,
+      analysis: makeOwnerAddressAnalysis("Philadelphia, PA 19103"),
       panel: null,
       assistantAnalysis: "Pennsylvania claim handling dispute review.",
     },
@@ -1468,6 +1479,8 @@ run("legal citation authority tiers reject social repairer attorney news and tra
   );
   const citationByTitle = new Map(review.citations.map((citation) => [citation.title, citation]));
 
+  assert.equal(review.jurisdiction.state, "Pennsylvania (PA)");
+  assert.equal(review.jurisdiction.source, "owner_zip");
   assert.equal(review.verifiedRegulations.length, 1);
   assert.match(review.verifiedRegulations[0].statement, /Pennsylvania Department of Insurance official consumer notice/);
   assert.equal(citationByTitle.get("Pennsylvania Department of Insurance official consumer notice").sourceAuthorityTier, "LEGAL_AUTHORITY");
@@ -1544,9 +1557,11 @@ run("uploaded Pennsylvania policy package establishes jurisdiction before web so
     renderModel
   );
 
-  assert.equal(review.jurisdiction.state, "PA");
+  assert.equal(review.jurisdiction.state, "Pennsylvania (PA)");
+  assert.equal(review.jurisdiction.stateCode, "PA");
   assert.equal(review.jurisdiction.confidence, "high");
-  assert.match(review.jurisdiction.basis, /policy governing-law clause/);
+  assert.equal(review.jurisdiction.source, "policy_governing_law");
+  assert.match(review.jurisdiction.basis, /governing-law state from uploaded policy evidence/);
   assert.equal(review.verifiedRegulations.length, 0);
 });
 
@@ -1589,7 +1604,7 @@ run("doi packet omits weak legal sources from verified support sections", () => 
   const document = buildDoiComplaintPacketPdf({
     renderModel,
     report: makeReport(),
-    analysis: null,
+    analysis: makeOwnerAddressAnalysis("Indianapolis, IN 46204"),
     panel: null,
     assistantAnalysis: "Indiana claim with complaint-process questions.",
   });
@@ -1600,6 +1615,7 @@ run("doi packet omits weak legal sources from verified support sections", () => 
   assert.doesNotMatch(text, /Texas bad faith overview by Smith Law Firm/);
   assert.doesNotMatch(text, /California DOI explainer on YouTube/);
   assert.match(text, /DOI Readiness Review/);
+  assert.match(text, /"label":"Jurisdiction","value":"Indiana \(IN\)"/);
 });
 
 run("policy rights review does not assert legal support without confirmed jurisdiction", () => {

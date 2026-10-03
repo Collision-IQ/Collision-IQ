@@ -209,7 +209,7 @@ run("proactive OEM-backed hardware guidance survives partial estimate hints", ()
       ],
       missingProcedures: [],
       supplementOpportunities: [
-        "OEM support in Ford Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.",
+        "OEM support in Tesla Model S Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.",
       ],
     })
   );
