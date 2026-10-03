@@ -910,7 +910,7 @@ function DiminishedValueFlow() {
             // Consult flow
             <>
               <p className="mb-2 text-sm text-muted-foreground">
-                Schedule a 1-on-1 consultation with a professional appraiser. They'll help you understand your claim, review strategy, and prepare documentation.
+                Schedule a 1-on-1 consultation with a professional appraiser. They&apos;ll help you understand your claim, review strategy, and prepare documentation.
               </p>
               <ul className="mb-6 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>Direct consultation with a licensed appraiser</li>
@@ -919,7 +919,7 @@ function DiminishedValueFlow() {
                 <li>Answers to your specific questions</li>
               </ul>
               <p className="mb-4 text-xs text-muted-foreground">
-                After payment, you'll receive a confirmation and scheduling information to book your consultation.
+                After payment, you&apos;ll receive a confirmation and scheduling information to book your consultation.
               </p>
             </>
           ) : (
