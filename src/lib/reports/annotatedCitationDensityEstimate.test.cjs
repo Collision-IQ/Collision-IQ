@@ -3946,7 +3946,7 @@ await run("delta citation density annotates the higher-cost estimate and lists c
     // (the delivered copy may be the lower estimate since #52).
     assert.match(joined, /Higher-cost estimate: Shop Final 21896\.pdf/i);
     assert.match(joined, /Comparison estimate \(lower-cost\): (?:Shop 21896\.pdf|not present on Shop 21896\.pdf)/i);
-    assert.match(joined, /Amount delta: \$5?|\$620\.00|\$480\.00/i);
+    assert.match(joined, /Price-column delta \(labor not included\): \$5?|\$620\.00|\$480\.00/i);
     assert.match(joined, /Labor delta: (?:3\.0|2\.5|1\.5) hours/i);
     assert.match(joined, /Delta category: missing_operation/i);
     assert.match(joined, /not present on the comparison estimate/i);

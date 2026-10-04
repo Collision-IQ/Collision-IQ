@@ -372,6 +372,22 @@ export function forensicDomainOf(finding: CitationDensityFinding): ForensicDomai
   return "other";
 }
 
+/** An Appendix A line: written on the higher-cost estimate only, as printed. */
+export type ForensicNoCounterpartRow = {
+  line: number | null;
+  description: string;
+  /** The price column, as printed. Never includes labor. */
+  amount: number | null;
+  laborHours?: number | null;
+  /** The printed labor letter ("M", "F"…); absent for the default body category. */
+  laborType?: string | null;
+  paintHours?: number | null;
+};
+
+/** "1.6 M", "0.3", or "—" when the line prints no hours. */
+const printedHours = (hours: number | null | undefined, letter?: string | null): string =>
+  typeof hours === "number" && hours > 0 ? `${hours.toFixed(1)}${letter?.trim() ? ` ${letter.trim()}` : ""}` : "—";
+
 export type ForensicReportInput = {
   reconciliation: ForensicReconciliation;
   findings: CitationDensityFinding[];
@@ -382,7 +398,7 @@ export type ForensicReportInput = {
   higherLineCount: number | null;
   lowerLineCount: number | null;
   /** Lines the higher estimate carries that have no counterpart at all. */
-  noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
+  noCounterpartRows: ForensicNoCounterpartRow[];
   vehicleLabel: string | null;
   /**
    * Claim identity rows for the header block (owner, VIN, RO, insurer…).
@@ -847,18 +863,22 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   if (input.noCounterpartRows.length > 0) {
     writer.heading(`Appendix A — operations and parts with no counterpart on ${input.lowerDocumentName}`);
     writer.paragraph(
-      `${input.noCounterpartRows.length} line items. Amounts are as printed on ${input.higherDocumentName}.`,
+      `${input.noCounterpartRows.length} line items, as printed on ${input.higherDocumentName}. Price is the line's price column and does not include labor; a labor-only operation shows $0.00 there and its value is in its hours. A letter after the hours is the labor category the line prints; section 4 prices the hours by category.`,
       { size: 8.4, color: MUTED }
     );
     writer.table({
       columns: [
-        { header: "Ln", width: 0.08, align: "right" },
-        { header: "Operation / part", width: 0.72 },
-        { header: "Amount", width: 0.2, align: "right" },
+        { header: "Ln", width: 0.07, align: "right" },
+        { header: "Operation / part", width: 0.55 },
+        { header: "Labor hr", width: 0.11, align: "right" },
+        { header: "Paint hr", width: 0.1, align: "right" },
+        { header: "Price (no labor)", width: 0.17, align: "right" },
       ],
       rows: input.noCounterpartRows.map((row) => [
         row.line === null ? "—" : String(row.line),
         row.description,
+        printedHours(row.laborHours, row.laborType),
+        printedHours(row.paintHours),
         money(row.amount),
       ]),
     });

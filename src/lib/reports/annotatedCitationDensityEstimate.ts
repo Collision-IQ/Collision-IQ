@@ -15,7 +15,7 @@ import {
   buildForensicReconciliation,
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
-import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
+import { buildForensicReportPdf, resolveExportScrub, type ForensicNoCounterpartRow } from "./forensicReportRenderer";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
 import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
 import type { MatcherPair } from "./appraisalSummary/argueItems";
@@ -897,7 +897,7 @@ export type AnnotatedEstimateGeneratedFindings = {
     reconciliation: ForensicReconciliation;
     higherLineCount: number | null;
     lowerLineCount: number | null;
-    noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
+    noCounterpartRows: ForensicNoCounterpartRow[];
     /** Non-null when the line-item comparison was withheld (typed columns
      *  failed SUBTOTALS reconciliation): the totals table stands, and the
      *  report must say why it lists no line-level differences. */
@@ -4687,6 +4687,9 @@ export function buildRequiredEstimatorDeltaFindings(
             .join(" ")
             .trim(),
           amount: delta.higherRow.price,
+          laborHours: delta.higherRow.labor,
+          laborType: delta.higherRow.laborType,
+          paintHours: delta.higherRow.paint,
         })),
     },
     debug: {
@@ -7556,6 +7559,11 @@ function formatDeltaHours(value: number | null) {
   return Number.isInteger(value) ? `${value}.0` : `${value}`;
 }
 
+/** "1.6 hours", but "not quantified", never "not quantified hours". */
+function withHoursUnit(formatted: string) {
+  return /^-?\d/.test(formatted) ? `${formatted} hours` : formatted;
+}
+
 function describeDeltaRowLocation(row: EstimateDeltaRow | null, fileName: string) {
   if (!row) return `${fileName}: source row missing`;
   const page = row.pageNumber ? ` page ${row.pageNumber}` : "";
@@ -7624,9 +7632,12 @@ function buildLineItemDeltaSupportSummary(params: {
     `Delta category: ${signedDeltaCategory(params.delta)}.`,
     `Higher-cost estimate: ${annotatedLocation}.`,
     `Comparison estimate (lower-cost): ${comparisonLocation}.`,
-    `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
-    `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
-    `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
+    // The price column only: a labor-only operation reads $0.00 here and its
+    // value is in its hours (RO 22120 review: "Amount delta" read as the
+    // operation's full value).
+    `Price-column delta (labor not included): ${formatDeltaMoney(params.delta.priceDelta)}.`,
+    `Labor delta: ${withHoursUnit(formatDeltaHours(params.delta.laborDelta))}.`,
+    `Paint delta: ${withHoursUnit(formatDeltaHours(params.delta.paintDelta))}.`,
     `Pairing basis: ${params.delta.matchBasis}.`,
     // Swallow an existing leading "the" so "on the lower estimate" never
     // doubles into "on the the comparison estimate" (RO 22140 Test 3 audit).
