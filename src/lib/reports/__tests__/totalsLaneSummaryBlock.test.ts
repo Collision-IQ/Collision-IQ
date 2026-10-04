@@ -24,7 +24,7 @@ import {
   type EstimateRowAnchor,
   type PdfWord,
 } from "../citationDensityRowAnchors";
-import { buildRequiredEstimatorDeltaFindings } from "../annotatedCitationDensityEstimate";
+import { buildRequiredEstimatorDeltaFindings, createTotalsAnchorClaimer } from "../annotatedCitationDensityEstimate";
 
 const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures");
 const read = (name: string) => fs.readFileSync(path.join(FIXTURE_DIR, name), "utf8");
@@ -68,4 +68,58 @@ describe("totals findings on a supplement annotated as the higher estimate", () 
     expect(rowFor("rate-difference-paint-labor")).toBe("Paint Labor 15.4 hrs @ $ 100.00 /hr 1,540.00");
     expect(rowFor("hours-difference-paint-supplies")).toBe("Paint Supplies 15.4 hrs @ $ 41.00 /hr 631.40");
   });
+
+  // The supplement's own line items and their SUBTOTALS rule print AFTER
+  // ESTIMATE TOTALS (page 7), so a search by document order alone put the
+  // lower-only listing on "SUBTOTALS 314.35 8.3 3.6" and the grand-total gap
+  // on the cumulative-effects table (page 8).
+  it("keeps the lower-only listing and the grand total on the ESTIMATE TOTALS block", () => {
+    expect(rowFor("lower-only-lines")).toBe("Total Cost of Repairs 11,618.63");
+    expect(rowFor("total-difference-grand-total")).toBe("Net Cost of Repairs 11,618.63");
+  });
+
+  it("anchors every totals finding inside the measured ESTIMATE TOTALS block", () => {
+    for (const finding of totals) {
+      expect([finding.anchor.pageNumber, finding.anchor.totalsBlock], `${finding.id} -> ${finding.anchor.rowText}`).toEqual([6, "estimate totals"]);
+    }
+  });
 });
+
+describe("createTotalsAnchorClaimer", () => {
+  /** Only the fields the claimer reads. */
+  const anchor = (anchorId: string, pageNumber: number, rowText: string, totalsBlock?: "estimate totals"): EstimateRowAnchor =>
+    ({ anchorId, pageNumber, rowText, sourceDocumentId: "sor", anchorType: "totals_row", ...(totalsBlock ? { totalsBlock } : {}) }) as EstimateRowAnchor;
+  // A supplement print: ESTIMATE TOTALS on page 6, then the supplement's own
+  // line items closing with their SUBTOTALS rule on page 7.
+  const anchors = [
+    anchor("title", 6, "ESTIMATE TOTALS", "estimate totals"),
+    anchor("parts", 6, "Parts 3,769.07", "estimate totals"),
+    anchor("subtotal", 6, "Subtotal 10,960.97", "estimate totals"),
+    anchor("grand", 6, "Total Cost of Repairs 11,618.63", "estimate totals"),
+    anchor("rule", 7, "SUBTOTALS 314.35 8.3 3.6"),
+  ];
+  const subtotal = (text: string) => /subtotal/.test(text);
+
+  it("takes a free row in the measured block over a later row outside it", () => {
+    expect(createTotalsAnchorClaimer(anchors, new Set())(subtotal)?.anchorId).toBe("subtotal");
+  });
+
+  it("reuses a claimed row in the block before taking a free row outside it", () => {
+    expect(createTotalsAnchorClaimer(anchors, new Set(["subtotal"]))(subtotal)?.anchorId).toBe("subtotal");
+  });
+
+  it("prefers a free row to a claimed one inside the block", () => {
+    const totals = (text: string) => /subtotal|total cost of repair/.test(text);
+    expect(createTotalsAnchorClaimer(anchors, new Set(["grand"]))(totals)?.anchorId).toBe("subtotal");
+  });
+
+  it("falls back to rows outside the block when nothing in it matches", () => {
+    expect(createTotalsAnchorClaimer(anchors, new Set())((text) => /^subtotals /.test(text))?.anchorId).toBe("rule");
+  });
+
+  it("searches from the end when no block was measured (stored text, Mitchell)", () => {
+    const unmeasured = anchors.map((measured) => ({ ...measured, totalsBlock: undefined }));
+    expect(createTotalsAnchorClaimer(unmeasured, new Set())(subtotal)?.anchorId).toBe("rule");
+  });
+});
+

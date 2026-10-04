@@ -5977,6 +5977,55 @@ function emitStructuredLineItemDeltaFindings(
   return findings;
 }
 
+/**
+ * Picks the totals_row anchor a totals finding renders on. The totals deltas
+ * are read from the LAST ESTIMATE TOTALS block (parseCccEstimateTotals), so
+ * that block, measured from its own header, is searched first. Document order
+ * alone is not enough: a supplement print follows ESTIMATE TOTALS with the
+ * supplement's own line items and their SUBTOTALS rule, and the lower-only
+ * listing landed on that rule ("SUBTOTALS 314.35 8.3 3.6", RO 22084 SOR-5 page
+ * 7) instead of the estimate's totals. With no measured block (stored text,
+ * Mitchell), the search runs from the END as before: supplement prints repeat
+ * earlier cumulative totals blocks, and the FINAL block is the operative one.
+ *
+ * A finding must never be silently dropped because its row was already
+ * claimed (categories can share rate text) or fragmented in extraction: an
+ * unused matching row is preferred, then a claimed one is REUSED. The
+ * operative block is tried whole, reuse included, before any row outside it:
+ * a reused row in the right block beats a free row in another.
+ */
+export function createTotalsAnchorClaimer(
+  totalsAnchors: EstimateRowAnchor[],
+  usedAnchorIds: ReadonlySet<string>
+): (matches: (rowText: string) => boolean) => EstimateRowAnchor | undefined {
+  const lastMeasured = [...totalsAnchors].reverse().find((anchor) => anchor.totalsBlock === "estimate totals");
+  const operativeBlock = lastMeasured
+    ? totalsAnchors.filter(
+        (anchor) =>
+          anchor.totalsBlock === "estimate totals" &&
+          anchor.pageNumber === lastMeasured.pageNumber &&
+          anchor.sourceDocumentId === lastMeasured.sourceDocumentId
+      )
+    : [];
+  const findAnchor = (
+    candidates: EstimateRowAnchor[],
+    matches: (rowText: string) => boolean,
+    allowUsed: boolean
+  ): EstimateRowAnchor | undefined => {
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const anchor = candidates[index];
+      if (!allowUsed && usedAnchorIds.has(anchor.anchorId)) continue;
+      if (matches(anchor.rowText.replace(/\s+/g, " ").toLowerCase())) return anchor;
+    }
+    return undefined;
+  };
+  return (matches) =>
+    findAnchor(operativeBlock, matches, false) ??
+    findAnchor(operativeBlock, matches, true) ??
+    findAnchor(totalsAnchors, matches, false) ??
+    findAnchor(totalsAnchors, matches, true);
+}
+
 // Rate / totals lane: headline rate, hour-subtotal, and category-amount
 // differences from the two ESTIMATE TOTALS blocks, plus the lower-only-lines
 // section. These anchor to totals_row anchors — the block on the annotated
@@ -5989,26 +6038,7 @@ function emitTotalsDeltaFindings(
   const findings: CitationDensityFinding[] = [];
   if (deltaMatch.totalsAnchors.length === 0) return findings;
 
-  // Search from the END: supplement prints repeat earlier cumulative totals
-  // blocks, and the FINAL block is the operative one.
-  const findAnchor = (
-    matches: (rowText: string) => boolean,
-    allowUsed: boolean
-  ): EstimateRowAnchor | undefined => {
-    for (let index = deltaMatch.totalsAnchors.length - 1; index >= 0; index -= 1) {
-      const anchor = deltaMatch.totalsAnchors[index];
-      if (!allowUsed && usedAnchorIds.has(anchor.anchorId)) continue;
-      if (matches(anchor.rowText.replace(/\s+/g, " ").toLowerCase())) return anchor;
-    }
-    return undefined;
-  };
-  // A rate/category delta must never be silently dropped because its totals
-  // row was already claimed (categories can share rate text) or because the
-  // category row fragmented in extraction — prefer an unused matching row,
-  // then REUSE a claimed matching row, then fall back to the totals block
-  // itself (Grand Total/Subtotal) so the finding still renders on that page.
-  const claimAnchor = (matches: (rowText: string) => boolean): EstimateRowAnchor | undefined =>
-    findAnchor(matches, false) ?? findAnchor(matches, true);
+  const claimAnchor = createTotalsAnchorClaimer(deltaMatch.totalsAnchors, usedAnchorIds);
   const blockFallbackAnchor = (): EstimateRowAnchor | undefined =>
     claimAnchor((text) => /estimate totals|grand total|total cost of repair|subtotal/.test(text));
 
