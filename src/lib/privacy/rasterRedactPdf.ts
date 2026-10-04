@@ -22,6 +22,7 @@
  * uses. The VIN box is narrowed by character proportion so the first 9
  * characters stay legible and only the last 8 are covered.
  */
+import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { COMMON_INSURERS } from "../ai/extractors/extractEstimateFacts";
 
@@ -94,7 +95,8 @@ const CONTACT_PATTERNS: RegExp[] = [
   // long part number that happens to be numeric.
   /(?<![\d-])(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?![\d-])/g,
   // street address and city/state/ZIP
-  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi,
+  // ("4 Wheel Drive" in a vehicle's options list is a drivetrain, not a street.)
+  /\b(?!\d\s+wheel\s+drive\b)\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi,
   /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g,
   // email
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
@@ -252,6 +254,22 @@ const BLOCK_WIDTH = 260;
  * band above the document title, and the block beneath each block label.
  * Pure, so the geometry is testable without rendering.
  */
+/**
+ * A label whose value sits to its RIGHT on the same line ("Insured:  XIN JIN")
+ * is a row label, not a block heading: the rows beneath it ("Type of Loss",
+ * "Point of Impact") are the claim's facts, not that person's address. A block
+ * heading ("Owner (Insured):") has nothing on its line but the next column's
+ * heading, and its value stacked beneath it.
+ */
+function isRowLabel(label: MeasuredTextItem, items: MeasuredTextItem[]): boolean {
+  const labelRight = label.x + label.width;
+  const nextOnLine = items
+    .filter((item) => item !== label && Math.abs(item.y - label.y) <= 3 && item.x >= labelRight - 1)
+    .sort((a, b) => a.x - b.x)[0];
+  if (!nextOnLine || nextOnLine.x - labelRight > BLOCK_WIDTH / 2) return false;
+  return !/:\s*$/.test(nextOnLine.text.trim());
+}
+
 export function planStructuralRedactions(
   items: MeasuredTextItem[],
   pageWidth: number,
@@ -269,6 +287,7 @@ export function planStructuralRedactions(
   }
   for (const label of items) {
     if (!BLOCK_LABEL.test(label.text.trim())) continue;
+    if (isRowLabel(label, items)) continue;
     regions.push({
       x: label.x - 10,
       y: label.y - BLOCK_HEIGHT,
@@ -323,6 +342,98 @@ export interface RasterRedactionResult {
  * Render every page, paint out the identifiers, and return an image-only PDF
  * of the same page dimensions, so annotation coordinates still land.
  */
+/**
+ * pdf.js's bundled font files (Foxit and Liberation), read from disk in Node.
+ * next.config.ts traces this directory into every route that rasterizes.
+ */
+export const PDFJS_STANDARD_FONT_DATA_URL = `${path.join(process.cwd(), "node_modules", "pdfjs-dist", "standard_fonts")}${path.sep}`;
+
+/** One word-level text item, as measured by pdf.js (points, y grows upward). */
+export interface MeasuredWord {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Words on one line close enough to read as one phrase ("XIN" + "JIN"). */
+export interface TextRun extends MeasuredWord {
+  /** Which word each slice of `text` came from: [start, end) in `text`. */
+  parts: Array<{ index: number; start: number; end: number }>;
+}
+
+/**
+ * Join word-level text items into the phrases the label rules read.
+ *
+ * Some prints' text layers split every word into its own item (an Allstate
+ * Supplement of Record: "Insured:" / "XIN" / "JIN"). The rules expect a label
+ * followed by its value, so on such a print the name was never taken as the
+ * value, the claim number was missed, and a block rule painted the next row
+ * instead. Words on the same baseline separated by no more than a word space
+ * are one run; a label and its value, or two columns, sit much further apart
+ * and stay separate. Each run remembers its words, so a box still lands on the
+ * measured position of the characters it covers.
+ */
+export function groupWordsIntoRuns(words: MeasuredWord[]): TextRun[] {
+  const order = words
+    .map((word, index) => ({ word, index }))
+    .filter(({ word }) => word.text.length > 0)
+    .sort((a, b) => (Math.abs(a.word.y - b.word.y) > 3 ? b.word.y - a.word.y : a.word.x - b.word.x));
+  const runs: TextRun[] = [];
+  let current: TextRun | null = null;
+  for (const { word, index } of order) {
+    if (current) {
+      const height = Math.max(current.height, word.height, 1);
+      const sameLine = Math.abs(word.y - current.y) <= Math.max(1, 0.3 * height);
+      const gap = word.x - (current.x + current.width);
+      if (sameLine && gap >= -0.5 * height && gap <= 0.6 * height) {
+        const separator = gap > 0.12 * height ? " " : "";
+        const start = current.text.length + separator.length;
+        current.text += separator + word.text;
+        current.parts.push({ index, start, end: start + word.text.length });
+        current.width = Math.max(current.x + current.width, word.x + word.width) - current.x;
+        current.height = height;
+        continue;
+      }
+      runs.push(current);
+    }
+    current = { ...word, parts: [{ index, start: 0, end: word.text.length }] };
+  }
+  if (current) runs.push(current);
+  return runs;
+}
+
+const LIBERATION_SANS_FILES = [
+  "LiberationSans-Regular.ttf",
+  "LiberationSans-Bold.ttf",
+  "LiberationSans-Italic.ttf",
+  "LiberationSans-BoldItalic.ttf",
+];
+let canvasFallbackFontsRegistered = false;
+
+/**
+ * pdf.js draws a print font that is neither embedded nor one of the standard
+ * 14 (CCC's Tahoma, for one) with the canvas's own fillText, in the generic
+ * family it names as the fallback ("sans-serif", "serif", "monospace"). The
+ * canvas resolves those from the host's system fonts, and a Vercel function
+ * has none, so every such glyph drew as nothing and the redacted copy came
+ * out blank. Liberation Sans (metric-compatible with Arial/Helvetica, shipped
+ * with pdf.js) answers to all three families.
+ */
+export function registerCanvasFallbackFonts(globalFonts: {
+  registerFromPath(fontPath: string, nameAlias?: string): unknown;
+}): void {
+  if (canvasFallbackFontsRegistered) return;
+  for (const file of LIBERATION_SANS_FILES) {
+    const fontPath = `${PDFJS_STANDARD_FONT_DATA_URL}${file}`;
+    for (const family of ["sans-serif", "serif", "monospace"]) {
+      globalFonts.registerFromPath(fontPath, family);
+    }
+  }
+  canvasFallbackFontsRegistered = true;
+}
+
 export async function redactAndRasterizePdf(
   sourceBytes: Uint8Array,
   options: { scale?: number; carriers?: string[]; scope?: RasterRedactionScope } = {}
@@ -351,12 +462,18 @@ export async function redactAndRasterizePdf(
       (globalThis as Record<string, unknown>)[name] = value;
     }
   }
+  registerCanvasFallbackFonts(napi.GlobalFonts);
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   const doc = await pdfjs.getDocument({
     data: sourceBytes.slice(),
     isEvalSupported: false,
     useSystemFonts: false,
+    // A font the print does not embed (CCC's Tahoma, the standard 14) is drawn
+    // from pdf.js's own font files. Without them pdf.js falls back to the
+    // host's system fonts, and a Vercel function has none: every glyph of the
+    // page rendered blank in production while local runs looked right.
+    standardFontDataUrl: PDFJS_STANDARD_FONT_DATA_URL,
   }).promise;
 
   const out = await PDFDocument.create();
@@ -370,16 +487,28 @@ export async function redactAndRasterizePdf(
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
     const page = await doc.getPage(pageNumber);
     const content = await page.getTextContent();
-    const items = (content.items as Array<Record<string, unknown>>)
-      .filter((item) => typeof item.str === "string" && (item.str as string).trim().length > 0)
-      .map((item) => ({
-        text: (item.str as string).trim(),
-        x: (item.transform as number[])[4],
-        y: (item.transform as number[])[5],
-      }));
-    // Reading order: same line (y within a glyph height), then left to right.
-    items.sort((a, b) => (Math.abs(a.y - b.y) > 3 ? b.y - a.y : a.x - b.x));
-    for (let i = 0; i < items.length - 1; i += 1) {
+    // Reading order, words joined into phrases (see groupWordsIntoRuns).
+    const items = groupWordsIntoRuns(
+      (content.items as Array<Record<string, unknown>>)
+        .filter((item) => typeof item.str === "string" && (item.str as string).trim().length > 0)
+        .map((item) => ({
+          text: (item.str as string).trim(),
+          x: (item.transform as number[])[4],
+          y: (item.transform as number[])[5],
+          width: item.width as number,
+          height: item.height as number,
+        }))
+    );
+    for (let i = 0; i < items.length; i += 1) {
+      // A label and its value printed close together read as one phrase
+      // ("Insured: YU, WENBAO"); the value is still swept everywhere else.
+      if (sweepLabel.test(items[i].text)) {
+        for (const span of identifierSpans(items[i].text, options.carriers, { scope })) {
+          const value = items[i].text.slice(span.start, span.end).trim();
+          if (isSweepableValue(value)) sweepValues.add(value.toUpperCase());
+        }
+      }
+      if (i === items.length - 1) break;
       if (NATURAL_PERSON_LABEL.test(items[i].text)) {
         const blocks = ownerBlocks.get(pageNumber) ?? [];
         blocks.push({ x: items[i].x, y: items[i].y });
@@ -409,16 +538,25 @@ export async function redactAndRasterizePdf(
 
     const textContent = await page.getTextContent();
     context.fillStyle = "#000000";
-    const items = (textContent.items as Array<Record<string, unknown>>).filter(
+    const textItems = (textContent.items as Array<Record<string, unknown>>).filter(
       (item) => typeof item.str === "string" && (item.str as string).trim().length > 0
     );
+    const runs = groupWordsIntoRuns(
+      textItems.map((item) => ({
+        text: (item.str as string).trim(),
+        x: (item.transform as number[])[4],
+        y: (item.transform as number[])[5],
+        width: item.width as number,
+        height: item.height as number,
+      }))
+    );
     const blocks = ownerBlocks.get(pageNumber) ?? [];
-    const measured: MeasuredTextItem[] = items.map((item) => ({
-      text: item.str as string,
-      x: (item.transform as number[])[4],
-      y: (item.transform as number[])[5],
-      width: item.width as number,
-      height: item.height as number,
+    const measured: MeasuredTextItem[] = runs.map((run) => ({
+      text: run.text,
+      x: run.x,
+      y: run.y,
+      width: run.width,
+      height: run.height,
     }));
     const unscaled = page.getViewport({ scale: 1 });
     // Full scope: the letterhead band (logo included — an image no text rule
@@ -431,10 +569,10 @@ export async function redactAndRasterizePdf(
       redactedRegionCount += 1;
     }
     const labelBlocks = structural.filter((candidate) => candidate.reason === "label_block");
-    for (const item of items) {
-      const text = item.str as string;
-      const itemX = (item.transform as number[])[4];
-      const itemY = (item.transform as number[])[5];
+    for (const run of runs) {
+      const text = run.text;
+      const itemX = run.x;
+      const itemY = run.y;
       // Beneath an owner-type label (pdf.js y grows upward), within its column.
       const inNaturalPersonBlock = blocks.some(
         (block) =>
@@ -470,7 +608,7 @@ export async function redactAndRasterizePdf(
         !IDENTITY_LABEL.test(text.trim()) &&
         !BLOCK_LABEL.test(text.trim()) &&
         labelBlocks.some((block) =>
-          itemInsideBlock({ text, x: itemX, y: itemY, width: item.width as number, height: item.height as number }, block)
+          itemInsideBlock({ text, x: itemX, y: itemY, width: run.width, height: run.height }, block)
         )
       ) {
         spans.push({ start: 0, end: text.length });
@@ -478,21 +616,28 @@ export async function redactAndRasterizePdf(
       const merged = mergeSpans(spans);
       if (merged.length === 0) continue;
 
-      const transform = pdfjs.Util.transform(viewport.transform, item.transform as number[]);
-      const width = (item.width as number) * scale;
-      const height = (item.height as number) * scale;
-      const left = transform[4];
-      // transform[5] is the BASELINE; the glyph box sits above it.
-      const top = transform[5] - height;
-
+      // Paint each covered slice over the measured box of the word it came
+      // from, so a span inside a run lands on exactly those characters.
       for (const span of merged) {
-        // Character proportion within the item's own measured width. This is
-        // what keeps the VIN's first 9 characters legible.
-        const x = left + (span.start / text.length) * width;
-        const spanWidth = ((span.end - span.start) / text.length) * width;
-        // A hair of padding so antialiased glyph edges do not survive.
-        context.fillRect(x - 1, top - 1, spanWidth + 2, height + 2);
-        redactedRegionCount += 1;
+        for (const part of run.parts) {
+          const from = Math.max(span.start, part.start);
+          const to = Math.min(span.end, part.end);
+          if (to <= from) continue;
+          const word = textItems[part.index];
+          const transform = pdfjs.Util.transform(viewport.transform, word.transform as number[]);
+          const width = (word.width as number) * scale;
+          const height = (word.height as number) * scale;
+          const length = part.end - part.start;
+          // Character proportion within the word's own measured width. This
+          // is what keeps the VIN's first 9 characters legible.
+          const x = transform[4] + ((from - part.start) / length) * width;
+          const spanWidth = ((to - from) / length) * width;
+          // transform[5] is the BASELINE; the glyph box sits above it.
+          const top = transform[5] - height;
+          // A hair of padding so antialiased glyph edges do not survive.
+          context.fillRect(x - 1, top - 1, spanWidth + 2, height + 2);
+          redactedRegionCount += 1;
+        }
       }
     }
 
