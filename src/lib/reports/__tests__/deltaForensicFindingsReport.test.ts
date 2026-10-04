@@ -94,7 +94,9 @@ async function buildDeltaReport(overrides: Parameters<typeof buildAnnotatedCitat
   });
 }
 
-describe("delta findings report", () => {
+// Every test here builds a full report, PDFs included: about 1.5 s alone, but
+// past vitest's 5 s default under a loaded full-suite run.
+describe("delta findings report", { timeout: 60_000 }, () => {
   it("ships the forensic estimate analysis as the only findings document", async () => {
     const result = await buildDeltaReport();
     expect(result.findingsReportBytes).toBeTruthy();
