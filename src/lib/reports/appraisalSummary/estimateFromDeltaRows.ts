@@ -325,6 +325,7 @@ export function estimateFromDeltaRows(params: {
       manual: annotation?.manual ?? false,
       supplement,
       partSource: row.partSource ?? [],
+      ...(row.section ? { section: row.section } : {}),
     };
   });
   return {
