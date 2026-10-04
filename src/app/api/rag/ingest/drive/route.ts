@@ -11,10 +11,14 @@ import { extractDriveText } from "@/lib/drive/extract";
 // TODO: import your existing impersonation auth builder here
 import { getImpersonatedAuth } from "@/lib/drive/auth"; // adjust to your real path
 import { google } from "googleapis";
+import { requirePlatformAdminResponse } from "@/lib/auth/requirePlatformAdminResponse";
 
 const DRIVE_ID = process.env.GOOGLE_SHARED_DRIVE_ID!;
 
 export async function POST() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   if (!DRIVE_ID) {
     return NextResponse.json({ error: "Missing GOOGLE_SHARED_DRIVE_ID" }, { status: 500 });
   }
