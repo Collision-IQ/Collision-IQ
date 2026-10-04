@@ -57,23 +57,26 @@ export function buildCustomerTotalsSummary(
   const net = comparisonTotals?.carrierNetAfterDeductible;
   const gap = comparisonTotals?.grossRepairAppraisalGap;
 
-  if (typeof shop === "number") {
-    rows.push({ label: "Shop estimate total", value: formatCustomerMoney(shop) });
+  // Shop / carrier attribution needs an estimate PAIR (e227878). A CCC
+  // estimate prints "Grand Total" whoever wrote it, so a lone extracted total
+  // is this estimate's total, not the shop's or the carrier's.
+  if (typeof shop !== "number" || typeof carrier !== "number") {
+    const single = typeof shop === "number" ? shop : carrier;
+    rows.push({
+      label: "Estimate Total",
+      value: typeof single === "number" ? formatCustomerMoney(single) : estimateTotal || "Not provided",
+    });
+    if (typeof net === "number") rows.push({ label: "Net after deductible", value: formatCustomerMoney(net) });
+    return rows;
   }
-  if (typeof carrier === "number") {
-    rows.push({ label: "Carrier total cost of repairs", value: formatCustomerMoney(carrier) });
-  }
-  if (typeof shop === "number" && typeof carrier === "number") {
-    const difference = typeof gap === "number" ? Math.abs(gap) : Math.abs(shop - carrier);
-    rows.push({ label: "Difference", value: formatCustomerMoney(difference) });
-  }
+
+  rows.push({ label: "Shop estimate total", value: formatCustomerMoney(shop) });
+  rows.push({ label: "Carrier total cost of repairs", value: formatCustomerMoney(carrier) });
+  const difference = typeof gap === "number" ? Math.abs(gap) : Math.abs(shop - carrier);
+  rows.push({ label: "Difference", value: formatCustomerMoney(difference) });
   // Net/payable is shown separately from the repair total, never as the basis.
   if (typeof net === "number") {
     rows.push({ label: "Carrier net after deductible", value: formatCustomerMoney(net) });
-  }
-
-  if (rows.length === 0) {
-    rows.push({ label: "Estimate Total", value: estimateTotal || "Not provided" });
   }
   return rows;
 }

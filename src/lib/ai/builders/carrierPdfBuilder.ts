@@ -161,7 +161,19 @@ export function buildCarrierReport({
   const canonicalVin = resolveCanonicalVin(exportModel) || "Unspecified";
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
   const comparisonTotals = exportModel.reportFields.comparisonTotals;
-  const comparisonTotalSummary = comparisonTotals
+  // Shop / carrier attribution needs an estimate PAIR (e227878). A CCC
+  // estimate prints "Grand Total" whoever wrote it, so a lone extracted total
+  // is this estimate's total, not the shop's: it shows as "Estimate Total"
+  // with the same value, and a printed net after deductible stays, unattributed.
+  const hasEstimatePair =
+    typeof comparisonTotals?.shopEstimateGrandTotal === "number" &&
+    typeof comparisonTotals?.carrierTotalCostOfRepairs === "number";
+  const singleEstimateTotal = hasEstimatePair
+    ? undefined
+    : comparisonTotals?.shopEstimateGrandTotal ??
+      comparisonTotals?.carrierTotalCostOfRepairs ??
+      (typeof exportModel.reportFields.estimateTotal === "number" ? exportModel.reportFields.estimateTotal : undefined);
+  const comparisonTotalSummary = comparisonTotals && hasEstimatePair
     ? [
         ...(typeof comparisonTotals.shopEstimateGrandTotal === "number"
           ? [{ label: "Shop estimate grand total", value: formatMoneyPrecise(comparisonTotals.shopEstimateGrandTotal) }]
@@ -211,8 +223,11 @@ export function buildCarrierReport({
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
         : []),
       ...comparisonTotalSummary,
-      ...(comparisonTotalSummary.length === 0 && typeof exportModel.reportFields.estimateTotal === "number"
-        ? [{ label: "Estimate Total", value: formatMoneyPrecise(exportModel.reportFields.estimateTotal) }]
+      ...(typeof singleEstimateTotal === "number"
+        ? [{ label: "Estimate Total", value: formatMoneyPrecise(singleEstimateTotal) }]
+        : []),
+      ...(!hasEstimatePair && typeof comparisonTotals?.carrierNetAfterDeductible === "number"
+        ? [{ label: "Net after deductible", value: formatMoneyPrecise(comparisonTotals.carrierNetAfterDeductible) }]
         : []),
       {
         label: "Repair Conclusion",
