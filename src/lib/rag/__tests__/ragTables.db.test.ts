@@ -1,6 +1,7 @@
 /**
  * The Drive RAG tables, as prisma/migrations creates them on a fresh
- * database, against the code that writes and reads them: upsertChunks,
+ * database (in production's shape: id serial, content, embedding, file_id),
+ * against the code that writes and reads them: upsertChunks,
  * searchChunks (pgvector distance) and keywordSearch (full text). Before
  * 20261003120000_add_rag_and_drive_watch_tables no migration created these
  * tables, so a database built from migrations alone could not run retrieval.
@@ -62,10 +63,10 @@ describe.skipIf(!url)("Drive RAG tables from migrations (Postgres + pgvector)", 
       chunks: [{ content: "Revised: post-repair scan required", embedding: [1, 0, 0], chunkIndex: 0 }],
     });
     const { prisma } = await import("@/lib/prisma");
-    const rows = await prisma.$queryRawUnsafe<Array<{ content: string; source: string }>>(
-      `SELECT content, source FROM document_chunks WHERE file_id = $1`,
+    const rows = await prisma.$queryRawUnsafe<Array<{ content: string }>>(
+      `SELECT content FROM document_chunks WHERE file_id = $1`,
       FILE_ID
     );
-    expect(rows).toEqual([{ content: "Revised: post-repair scan required", source: "google" }]);
+    expect(rows).toEqual([{ content: "Revised: post-repair scan required" }]);
   });
 });
