@@ -1055,11 +1055,11 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", /^(?:5YJSA1E21JF264319)?$/);
   assertInsurerRedactedOnExport(carrier, "GEICO");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
-  // 623133e ("Fix report diagnostics and citation anchors") names the resolved
-  // total ("Shop estimate grand total", cased in eb2dd0e) instead of a generic
-  // "Estimate Total" whenever comparison totals resolve; the value is unchanged.
-  assert.equal(carrier.summary.find((item) => item.label === "Shop estimate grand total")?.value, "$19,428.53");
-  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, undefined);
+  // One estimate: its "Grand Total" is this estimate's total, not the shop's.
+  // Shop / carrier labels need an estimate pair (e227878); the value is unchanged.
+  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
+  assert.equal(carrier.summary.find((item) => item.label === "Shop estimate grand total"), undefined);
+  assert.equal(carrier.summary.some((item) => /^(?:Shop|Carrier) /.test(item.label)), false);
   const carrierText = flattenCarrierDocument(carrier);
   assert.equal(
     /cavity wax/i.test(carrierText),
