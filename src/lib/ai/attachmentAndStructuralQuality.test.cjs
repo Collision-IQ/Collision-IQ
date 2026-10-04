@@ -319,6 +319,90 @@ runAsync("PDF vision observations contribute when the PDF file payload is availa
   assert.equal(attachments[0].pageCount, 4);
 });
 
+runAsync("one image-only page in a text-heavy PDF gets the PDF summarized", async () => {
+  // The document average (300 words a page) is not sparse; page 3 is a photo.
+  const denseText = Array.from({ length: 900 }, (_, index) => `word${index}`).join(" ");
+  let summarized = false;
+  const attachments = await enrichAnalysisAttachments({
+    attachments: [
+      {
+        id: "pdf4",
+        filename: "estimate-with-photo.pdf",
+        type: "application/pdf",
+        text: denseText,
+        imageDataUrl: "data:application/pdf;base64,JVBERi0xLjQK",
+        pageCount: 3,
+      },
+    ],
+    deps: {
+      profilePdfPages: async () => [
+        { page: 1, words: 450, paintsImage: false },
+        { page: 2, words: 450, paintsImage: false },
+        { page: 3, words: 0, paintsImage: true },
+      ],
+      summarizePdfAttachment: async () => {
+        summarized = true;
+        return "Visible damage/photo observations: front-right damage photo";
+      },
+    },
+  });
+
+  assert.equal(summarized, true);
+  assert.match(attachments[0].text, /front-right damage photo/);
+});
+
+runAsync("a PDF whose pages all carry text is never summarized, even when its text is short", async () => {
+  let called = false;
+  await enrichAnalysisAttachments({
+    attachments: [
+      {
+        id: "pdf5",
+        filename: "short.pdf",
+        type: "application/pdf",
+        text: "Signature page only",
+        imageDataUrl: "data:application/pdf;base64,JVBERi0xLjQK",
+        pageCount: 1,
+      },
+    ],
+    deps: {
+      profilePdfPages: async () => [{ page: 1, words: 3, paintsImage: false }],
+      summarizePdfAttachment: async () => {
+        called = true;
+        return "should not appear";
+      },
+    },
+  });
+
+  assert.equal(called, false);
+});
+
+runAsync("a PDF whose text layer carries its content is never summarized", async () => {
+  // 2 pages x 60 words: above MIN_WORDS_FOR_TEXT_PAGE (40) per page.
+  const denseText = Array.from({ length: 120 }, (_, index) => `word${index}`).join(" ");
+  let called = false;
+  const attachments = await enrichAnalysisAttachments({
+    attachments: [
+      {
+        id: "pdf3",
+        filename: "estimate-text.pdf",
+        type: "application/pdf",
+        text: denseText,
+        imageDataUrl: "data:application/pdf;base64,JVBERi0xLjQK",
+        pageCount: 2,
+      },
+    ],
+    deps: {
+      summarizePdfAttachment: async () => {
+        called = true;
+        return "should not appear";
+      },
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(attachments[0].text, denseText);
+});
+
 runAsync("a PDF without its file payload keeps its extracted text and is never summarized", async () => {
   let called = false;
   const attachments = await enrichAnalysisAttachments({

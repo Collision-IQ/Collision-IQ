@@ -6,16 +6,37 @@
  * probe is run against real PDFs built here: text over a full-page image
  * (hybrid), image only (scan), text only (text).
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import {
   MIN_WORDS_FOR_TEXT_PAGE,
   classifyPdfTextLayer,
+  hasImageOnlyPage,
+  isSparsePdfText,
   probePdfTextLayer,
   type PdfPageTextProfile,
 } from "../pdfTextLayerProbe";
 
 const profile = (page: number, words: number, paintsImage: boolean): PdfPageTextProfile => ({ page, words, paintsImage });
+
+describe("isSparsePdfText", () => {
+  const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index}`).join(" ");
+
+  it("averages words over pages against MIN_WORDS_FOR_TEXT_PAGE", () => {
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE * 3 - 1), 3)).toBe(true);
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE * 3), 3)).toBe(false);
+    expect(isSparsePdfText("", 4)).toBe(true);
+    // No page count reads as one page.
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE), undefined)).toBe(false);
+  });
+
+  it("a real CCC shop estimate is not sparse (RO 20766, 7 pages)", () => {
+    const text = fs.readFileSync(path.join(__dirname, "../../../../tests/fixtures/20766/shop_text.txt"), "utf8");
+    expect(isSparsePdfText(text, 7)).toBe(false);
+  });
+});
 
 describe("classifyPdfTextLayer", () => {
   it("text on every page with a raster underneath is hybrid, never a scan", () => {
@@ -91,5 +112,55 @@ describe("probePdfTextLayer on real documents", () => {
 
   it("bytes that are not a PDF throw, so the caller falls back to its previous path", async () => {
     await expect(probePdfTextLayer(Buffer.from("not a pdf"))).rejects.toThrow();
+  });
+});
+
+/** One page per spec: `words` drawn as text, `image` a full-page raster under it. */
+async function buildPagesPdf(specs: Array<{ words: number; image: boolean }>): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const png = await doc.embedPng(ONE_PIXEL_PNG);
+  for (const spec of specs) {
+    const page = doc.addPage([612, 792]);
+    if (spec.image) page.drawImage(png, { x: 0, y: 0, width: 612, height: 792 });
+    for (let line = 0; line * 10 < spec.words; line += 1) {
+      const words = Array.from({ length: Math.min(10, spec.words - line * 10) }, (_, i) => `w${line}${i}`);
+      page.drawText(words.join(" "), { x: 40, y: 740 - line * 14, size: 9, font });
+    }
+  }
+  return doc.save();
+}
+
+describe("hasImageOnlyPage", () => {
+  it("is true only for a page with too few words AND a painted image", () => {
+    expect(hasImageOnlyPage([profile(1, 200, true), profile(2, MIN_WORDS_FOR_TEXT_PAGE - 1, true)])).toBe(true);
+    // A short text-only page (a signature page) is not an image page.
+    expect(hasImageOnlyPage([profile(1, 200, false), profile(2, 5, false)])).toBe(false);
+    // Text over a raster (a CCC form) is not an image page.
+    expect(hasImageOnlyPage([profile(1, MIN_WORDS_FOR_TEXT_PAGE, true)])).toBe(false);
+    expect(hasImageOnlyPage([])).toBe(false);
+  });
+
+  it("finds the one photo page in an otherwise text-heavy PDF, which the document average misses", async () => {
+    const specs = [
+      { words: 300, image: false },
+      { words: 300, image: false },
+      { words: 300, image: false },
+      { words: 0, image: true },
+    ];
+    const probe = await probePdfTextLayer(await buildPagesPdf(specs));
+    expect(probe.pages.map((page) => page.words)).toEqual([300, 300, 300, 0]);
+    expect(hasImageOnlyPage(probe.pages)).toBe(true);
+    expect(isSparsePdfText(probe.text, probe.numpages)).toBe(false);
+  });
+
+  it("a hybrid form and a short text-only page have no image page", async () => {
+    const probe = await probePdfTextLayer(
+      await buildPagesPdf([
+        { words: 200, image: true },
+        { words: 12, image: false },
+      ])
+    );
+    expect(hasImageOnlyPage(probe.pages)).toBe(false);
   });
 });

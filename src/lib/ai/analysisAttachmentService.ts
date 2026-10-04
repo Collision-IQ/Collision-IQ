@@ -15,10 +15,17 @@ import {
   isDriveEnabled,
 } from "@/lib/drive/download";
 import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
+import {
+  hasImageOnlyPage,
+  isSparsePdfText,
+  probePdfTextLayer,
+  type PdfPageTextProfile,
+} from "@/lib/attachments/pdfTextLayerProbe";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
   summarizePdfAttachment?: (attachment: StoredAttachment) => Promise<string>;
+  profilePdfPages?: (buffer: Buffer) => Promise<PdfPageTextProfile[]>;
   downloadLinkedFile?: (fileIdOrUrl: string) => Promise<ArrayBuffer>;
 };
 
@@ -73,8 +80,14 @@ async function normalizeStoredAttachment(
 
   // A PDF's text layer misses what it only shows: totals pages that print as
   // images, photo and screenshot pages, scanned pages. The stored data URL
-  // (uploads up to MAX_REUSABLE_DATA_URL_BYTES) lets the model read them.
-  if (attachment.type === "application/pdf" && attachment.imageDataUrl) {
+  // (uploads up to MAX_REUSABLE_DATA_URL_BYTES) lets the model read them, but
+  // only a PDF with such a page gets that read: a normal estimate's text
+  // layer already carries its content, and the summary is one model call.
+  if (
+    attachment.type === "application/pdf" &&
+    attachment.imageDataUrl &&
+    (await pdfHasImageOnlyContent(attachment, deps))
+  ) {
     const summary = await (deps?.summarizePdfAttachment ?? summarizePdfAttachment)(attachment);
     return {
       ...attachment,
@@ -228,6 +241,23 @@ If visible damage raises concern for related verification, phrase it as an open 
     });
     return "";
   }
+}
+
+/**
+ * Page by page: any page that is an image (hasImageOnlyPage). The stored
+ * attachment keeps no per-page counts, so the PDF it carries is probed here.
+ * A PDF that cannot be probed falls back to the document average.
+ */
+async function pdfHasImageOnlyContent(attachment: StoredAttachment, deps?: AttachmentVisionDeps) {
+  try {
+    const base64 = (attachment.imageDataUrl ?? "").split(",", 2)[1] ?? "";
+    const buffer = Buffer.from(base64, "base64");
+    const pages = await (deps?.profilePdfPages ?? (async (bytes: Buffer) => (await probePdfTextLayer(bytes)).pages))(buffer);
+    if (pages.length > 0) return hasImageOnlyPage(pages);
+  } catch {
+    // Unreadable bytes say nothing about the pages; use the text average.
+  }
+  return isSparsePdfText(attachment.text, attachment.pageCount);
 }
 
 async function summarizePdfAttachment(attachment: StoredAttachment) {
