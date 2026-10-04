@@ -119,6 +119,21 @@ export function buildCustomerEstimatePostureHeading(posture: EstimatePostureDeci
  * items" reads as a comparison against a carrier estimate that was never
  * uploaded — reframe as proof needs for the single reviewed estimate.
  */
+const IRREGULAR_SINGULAR: Record<string, string> = { are: "is", were: "was", have: "has", do: "does" };
+// Verbs that follow "both estimates" in report prose; anything else (an
+// adverb, a noun) is left untouched rather than guessed at.
+const PLURAL_VERBS = new Set([
+  "use", "include", "list", "show", "carry", "call", "describe", "agree", "omit", "need",
+  "match", "contain", "require", "appear", "note", "support", "reflect", "cover", "mention",
+]);
+
+function singularVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  if (IRREGULAR_SINGULAR[lower]) return IRREGULAR_SINGULAR[lower];
+  if (!PLURAL_VERBS.has(lower)) return verb;
+  return /(?:s|sh|ch|x|z)$/.test(lower) ? `${verb}es` : lower.endsWith("y") ? `${verb.slice(0, -1)}ies` : `${verb}s`;
+}
+
 export function stripEstimateComparisonLanguage(text: string): string {
   const INSURER_ESTIMATE =
     /(?:\[REDACTED_INSURER\]('s)?|insurance|insurer'?s?|carrier)\s+estimate/;
@@ -133,6 +148,12 @@ export function stripEstimateComparisonLanguage(text: string): string {
     .replace(new RegExp(`\\b(the|your|any)\\s+${INSURER_ESTIMATE.source}`, "gi"), "$1 estimate")
     .replace(new RegExp(INSURER_ESTIMATE.source, "gi"), "the estimate")
     .replace(/\bwhere the estimates differ\b/gi, "what still needs supporting proof")
+    .replace(/\b(?:both|the two|either)\s+estimates'/gi, "the estimate's")
+    // Singular subject, singular verb: "both estimates use" -> "the estimate uses".
+    .replace(
+      /\b(?:both|the two|either)\s+estimates\s+(are|were|have|do|[a-z]+)\b/gi,
+      (_whole, verb: string) => `the estimate ${singularVerb(verb)}`
+    )
     .replace(/\b(?:both|the two|either)\s+estimates\b/gi, "the estimate")
     // Comparison residue against the (only) estimate, however it is named.
     .replace(/\bcompared (?:to|with|against) the (?:shop |insurance |insurer'?s? |carrier )?estimate\b/gi, "in the reviewed file")

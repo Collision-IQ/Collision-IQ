@@ -480,6 +480,9 @@ model ExportResearchAuditSnapshot {
   @@map("ExportResearchAuditSnapshot")
 }
 
+/// Drive RAG chunks, written and read only through raw SQL (src/lib/rag and
+/// /api/drive/ingest). This is production's shape; src/lib/rag also accepts an
+/// optional "source_type" or "source" column where a database has one.
 model document_chunks {
   id        Int                    @id @default(autoincrement())
   content   String?

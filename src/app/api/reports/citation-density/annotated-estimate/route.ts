@@ -6,7 +6,9 @@ import {
 import {
   getAnalysisReport,
   getLatestActiveAnalysisReport,
+  saveCounterpartAnswer,
 } from "@/lib/analysisReportStore";
+import { resolveSavedCounterpartAnswer } from "@/lib/reports/counterpartChoice";
 import { getUploadedAttachments, type StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
@@ -64,6 +66,8 @@ type RequestBody = {
   includeSummaryPage?: unknown;
   includeUnanchoredAppendix?: unknown;
   redactSensitive?: unknown;
+  /** The comparison the user named as the insurer's estimate, answering counterpartChoice. */
+  comparisonDocumentId?: unknown;
 };
 
 const VALID_TARGET_ESTIMATES = new Set(["carrier", "shop", "selected", "both", "auto"]);
@@ -114,6 +118,7 @@ export async function POST(request: Request) {
     const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
     const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
+    const comparisonDocumentId = coerceString(body.comparisonDocumentId);
 
     const report = caseId
       ? await getAnalysisReport(caseId, { ownerUserId: user.id })
@@ -404,6 +409,49 @@ export async function POST(request: Request) {
           );
         }
       }
+      // The user's answer to "which upload is the insurer's estimate?" must
+      // name one of this case's comparison estimates; anything else is
+      // refused, never silently ignored or guessed around. Annotating both
+      // estimates, the answer is the other run's own estimate: it applies to
+      // the run it is a comparison for.
+      const answersThisRun = Boolean(
+        comparisonDocumentId && sourceDocuments.some((document) => document.id === comparisonDocumentId && isDistinctComparison(document))
+      );
+      if (comparisonDocumentId && !answersThisRun && resolvedSelections.length === 1) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `comparisonDocumentId ${comparisonDocumentId} is not a comparison estimate on this case.`,
+            userMessage:
+              "The estimate chosen as the insurer's is not one of this case's other estimates (it may be the estimate being annotated, a copy of it, or no longer on the case). Choose the insurer's estimate again.",
+            reportType: "citation-density",
+            routeName: "citation-density",
+            comparisonDocumentId,
+            selectedSourceDocumentId: selection.selectedSourceDocumentId,
+          },
+          { status: 400 }
+        );
+      }
+      // Without an answer on the request, the one saved with the case for this
+      // annotated estimate applies when it was given among exactly these
+      // comparisons. Among others (an upload added or removed since) it was an
+      // answer to a different question, so it is not used, and the run says so.
+      const candidateIds = sourceDocuments.filter(isDistinctComparison).map((document) => document.id);
+      const savedAnswer = answersThisRun
+        ? null
+        : resolveSavedCounterpartAnswer(activeReport.report.counterpartAnswers?.[selection.selectedSourceDocumentId], candidateIds);
+      if (savedAnswer && "stale" in savedAnswer) {
+        const savedName =
+          sourceDocuments.find((document) => document.id === savedAnswer.stale.insurerDocumentId)?.filename ?? "an estimate no longer on the case";
+        aggregateWarnings.add(
+          `The insurer's estimate saved with this case (${savedName}) was chosen among different uploads than this run's, so it was not used.`
+        );
+      }
+      const confirmedCounterpartDocumentId = answersThisRun
+        ? comparisonDocumentId
+        : savedAnswer && "apply" in savedAnswer
+          ? savedAnswer.apply.insurerDocumentId
+          : null;
       const comparisonEstimateTexts = sourceDocuments
         .filter(isDistinctComparison)
         .map((document) => ({
@@ -438,22 +486,33 @@ export async function POST(request: Request) {
             return [];
           }
         });
-      // Retrieval is a network lane and must never be able to fail the report:
-      // an unavailable Drive/Serper lane degrades to the RIR snapshot alone,
-      // exactly as before this wiring existed.
+      // Retrieval is a network lane and must never be able to fail the report,
+      // or stall it: an unavailable or slow Drive/Serper lane degrades to the
+      // RIR snapshot alone, exactly as before this wiring existed. Its calls
+      // carry no timeout of their own, so the wait for them is bounded here.
       let authorityTrace = null;
+      const retrievalStarted = Date.now();
       try {
-        authorityTrace = await buildOemAuthorityTrace({
-          selection,
-          sourceDocument,
-          sourceDocuments,
-          comparisonEstimateTexts,
-        });
+        authorityTrace = await withTimeout(
+          buildOemAuthorityTrace({
+            selection,
+            sourceDocument,
+            sourceDocuments,
+            comparisonEstimateTexts,
+          }),
+          authorityRetrievalTimeoutMs(),
+          "authority retrieval"
+        );
       } catch (error) {
         console.warn("[citation-density] authority retrieval failed; continuing with snapshot authorities only", {
           reason: error instanceof Error ? error.message : "unknown",
+          ms: Date.now() - retrievalStarted,
         });
       }
+      console.info("[citation-density.annotated-estimate] authority retrieval", {
+        ms: Date.now() - retrievalStarted,
+        retrieved: authorityTrace !== null,
+      });
       const retrievedAuthorities = mapAuthorityTraceToResolvedAuthorities(authorityTrace).filter((source) => {
         const key = source.sourceTitle.toLowerCase();
         if (seenAuthorityTitles.has(key)) return false;
@@ -462,6 +521,7 @@ export async function POST(request: Request) {
       });
       const resolvedAuthorities = [...snapshotAuthorities, ...retrievedAuthorities];
 
+      const buildStarted = Date.now();
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -479,6 +539,8 @@ export async function POST(request: Request) {
         vehicleMake,
         jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
+        confirmedCounterpartDocumentId,
+        confirmedCounterpartSaved: !answersThisRun && confirmedCounterpartDocumentId !== null,
         // The forensic report's header block. The decoded vehicle identity is
         // authoritative here — it survives a header the estimate prints across
         // two lines — and the annotator falls back to reading the document
@@ -521,7 +583,28 @@ export async function POST(request: Request) {
       const plainSummaryUrl = plainSummaryArtifactId
         ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
         : undefined;
+      console.info("[citation-density.annotated-estimate] report build", { ms: Date.now() - buildStarted });
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
+      // An answer the run took is saved with the case, so a later run (another
+      // session, a reloaded case) uses it without asking. A failed save never
+      // fails the run: the answer still applied here, and the run says so.
+      let counterpartChoice = result.counterpartChoice;
+      if (answersThisRun && counterpartChoice?.confirmedByUser && !counterpartChoice.required) {
+        const notSaved = "Your choice of the insurer's estimate applies to this run but could not be saved with the case.";
+        try {
+          const saved = await saveCounterpartAnswer({
+            reportId: activeReport.id,
+            ownerUserId: user.id,
+            annotatedDocumentId: selection.selectedSourceDocumentId,
+            answer: { insurerDocumentId: comparisonDocumentId, candidateIds, answeredAt: new Date().toISOString() },
+          });
+          if (saved) counterpartChoice = { ...counterpartChoice, savedWithCase: true };
+          else aggregateWarnings.add(notSaved);
+        } catch (error) {
+          console.warn("[citation-density] counterpart answer not saved", { reason: error instanceof Error ? error.message : "unknown" });
+          aggregateWarnings.add(notSaved);
+        }
+      }
       annotatedFindingCount += citationCopy?.badgeCount ?? result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
       outputs.push({
@@ -545,6 +628,7 @@ export async function POST(request: Request) {
           ? Buffer.from(result.plainSummaryBytes).toString("base64")
           : undefined,
         plainSummaryPageCount: result.plainSummaryPageCount,
+        counterpartChoice,
         annotatedFindingCount: citationCopy?.badgeCount ?? result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
@@ -571,7 +655,22 @@ export async function POST(request: Request) {
       outputCount: outputs.length,
     });
 
-    return NextResponse.json({
+    // ONE COPY OF EACH PDF. Vercel refuses a serverless response over 4.5 MB,
+    // and the run fails with no document at all. The primary output's PDFs,
+    // debug trace and annotation metadata ride at the top level, where the
+    // client reads them; repeating them in outputs[0] doubled the payload
+    // (RO 22279: 4.19 MB of the 4.5 MB). Every other output keeps its own.
+    const responseOutputs = outputs.map((output, index) => {
+      if (index !== 0) return output;
+      const { pdfBase64, findingsReportPdfBase64, plainSummaryPdfBase64, debugTrace, annotationMetadata, ...rest } = output;
+      void pdfBase64;
+      void findingsReportPdfBase64;
+      void plainSummaryPdfBase64;
+      void debugTrace;
+      void annotationMetadata;
+      return rest;
+    });
+    const responseBody = {
       ok: true,
       artifactId: primaryOutput?.artifactId ?? "",
       exportId: primaryOutput?.artifactId ?? "",
@@ -589,7 +688,11 @@ export async function POST(request: Request) {
       plainSummaryUrl: primaryOutput?.plainSummaryUrl,
       plainSummaryPdfBase64: primaryOutput?.plainSummaryPdfBase64,
       plainSummaryPageCount: primaryOutput?.plainSummaryPageCount,
-      outputs,
+      // Present when the dispute report asks which upload is the insurer's
+      // estimate (required) or lets the user change it; answer with
+      // comparisonDocumentId on the next request.
+      counterpartChoice: primaryOutput?.counterpartChoice,
+      outputs: responseOutputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,
       unresolvedAnchorCount,
@@ -620,7 +723,15 @@ export async function POST(request: Request) {
       artifactReportType: outputs[0]?.debugTrace?.artifactReportType,
       findingIdPrefixCheckPassed: outputs[0]?.debugTrace?.findingIdPrefixCheckPassed,
       ...sourceDiagnostics,
+    };
+    // The size the platform limit is measured against, logged so a run the
+    // platform refuses can be read from the logs.
+    const responseText = JSON.stringify(responseBody);
+    console.info("[citation-density.annotated-estimate] response size", {
+      bytes: Buffer.byteLength(responseText),
+      outputCount: outputs.length,
     });
+    return new NextResponse(responseText, { headers: { "Content-Type": "application/json" } });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -891,4 +1002,22 @@ function getFindingReportType(finding: CitationDensityFinding): string | undefin
 function hasWrongFindingIdentity(routeName: "citation-density", finding: CitationDensityFinding) {
   const reportType = getFindingReportType(finding);
   return reportType === "oem-citation-density" || /^oem-citation-density-/i.test(finding.id);
+}
+
+/**
+ * How long the report waits for the authority retrieval lane before going on
+ * without it. CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS overrides the default.
+ */
+function authorityRetrievalTimeoutMs() {
+  const configured = Number(process.env.CITATION_DENSITY_RETRIEVAL_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 25_000;
+}
+
+/** Settles with the promise, or rejects once `ms` pass; the timer never outlives it. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

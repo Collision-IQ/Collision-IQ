@@ -2440,10 +2440,34 @@ function stripVehicleRoleNoise(value: string): string {
 export function resolveCanonicalVehicleLabel(
   exportModel: Pick<ExportModel, "vehicle" | "reportFields">
 ): string | undefined {
-  return preferCanonicalField(
+  return preferStrongVehicleLabel(
     exportModel.reportFields.vehicleLabel,
     buildPreferredVehicleIdentityLabel(exportModel.vehicle)
   );
+}
+
+/** The vehicle named in a rebuttal's subject line (PDF and email template). */
+export function resolveRebuttalSubjectVehicle(
+  exportModel: Pick<ExportModel, "vehicle" | "reportFields">
+): string {
+  return (
+    preferStrongVehicleLabel(
+      exportModel.reportFields.vehicleLabel,
+      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
+    ) ?? "Current repair file"
+  );
+}
+
+// A year-and-make label ("2021 GMC") is the partial identity the identity
+// helpers reject for the VIN tail; preferring the report field over them
+// skipped that rule, so a weak report label only fills in when they have none.
+function preferStrongVehicleLabel(
+  reportLabel: string | null | undefined,
+  identityLabel: string | null | undefined
+): string | undefined {
+  return looksLikeWeakVehicleIdentityLabel(reportLabel)
+    ? preferCanonicalField(identityLabel, reportLabel)
+    : preferCanonicalField(reportLabel, identityLabel);
 }
 
 export function resolveCanonicalVin(

@@ -21,7 +21,11 @@ export async function upsertChunks(params: {
   }[];
 }) {
 
-  const { sourceType, driveFileId, drivePath, modifiedTime, chunks } = params;
+  // drivePath, modifiedTime and the per-chunk metadata (chunkIndex, system,
+  // component, procedure, docType, authority) are accepted but not stored:
+  // production's document_chunks has only id (serial), content, embedding and
+  // file_id, plus an optional source column, and nothing reads the rest.
+  const { sourceType, driveFileId, chunks } = params;
   const sourceColumn = await getChunkSourceColumn();
 
   /*
@@ -37,136 +41,32 @@ export async function upsertChunks(params: {
 
   if (!chunks.length) return;
 
-  /*
-  ----------------------------------------
-  Build values list
-  ----------------------------------------
-  */
+  // The embedding is passed as "[x,y,...]" text; Postgres will not assign text
+  // to a vector column without the explicit ::vector cast.
+  for (const c of chunks) {
+    const embedding = Array.isArray(c.embedding[0])
+      ? (c.embedding as number[][])[0]
+      : (c.embedding as number[]);
+    const vec = `[${embedding.map((n) => (Number.isFinite(n) ? n : 0)).join(",")}]`;
 
-  const values = chunks.map((c) => {
-
-    const id = `${driveFileId}:${c.chunkIndex}:${modifiedTime}`;
-
-    const embedding =
-      Array.isArray(c.embedding[0])
-        ? (c.embedding as number[][])[0]
-        : (c.embedding as number[]);
-
-    const vec = `[${embedding
-      .map((n) => (Number.isFinite(n) ? n : 0))
-      .join(",")}]`;
-
-    const authority = c.authority ?? 50;
-
-    return {
-      id,
-      source: sourceType,
-      file_id: driveFileId,
-      chunk_index: c.chunkIndex,
-      content: c.content,
-      embedding: vec,
-      system: c.system ?? null,
-      component: c.component ?? null,
-      procedure: c.procedure ?? null,
-      doc_type: c.docType ?? null,
-      authority,
-    };
-
-  });
-
-  /*
-  ----------------------------------------
-  Insert rows
-  ----------------------------------------
-  */
-
-  for (const v of values) {
     if (sourceColumn) {
-      await prisma.$executeRawUnsafe(`
-        INSERT INTO document_chunks
-        (
-          id,
-          ${sourceColumn},
-          file_id,
-          chunk_index,
-          content,
-          embedding,
-          updated_at,
-          system,
-          component,
-          procedure,
-          doc_type,
-          authority
-        )
-        VALUES
-        (
-          $1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10,$11
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          content = EXCLUDED.content,
-          embedding = EXCLUDED.embedding,
-          updated_at = NOW(),
-          system = EXCLUDED.system,
-          component = EXCLUDED.component,
-          procedure = EXCLUDED.procedure,
-          doc_type = EXCLUDED.doc_type,
-          authority = EXCLUDED.authority
-      `,
-        v.id,
-        v.source,
-        v.file_id,
-        v.chunk_index,
-        v.content,
-        v.embedding,
-        v.system,
-        v.component,
-        v.procedure,
-        v.doc_type,
-        v.authority
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO document_chunks (${sourceColumn}, file_id, content, embedding)
+         VALUES ($1, $2, $3, $4::vector)`,
+        sourceType,
+        driveFileId,
+        c.content,
+        vec
       );
       continue;
     }
 
-    await prisma.$executeRawUnsafe(`
-      INSERT INTO document_chunks
-      (
-        id,
-        file_id,
-        chunk_index,
-        content,
-        embedding,
-        updated_at,
-        system,
-        component,
-        procedure,
-        doc_type,
-        authority
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        content = EXCLUDED.content,
-        embedding = EXCLUDED.embedding,
-        updated_at = NOW(),
-        system = EXCLUDED.system,
-        component = EXCLUDED.component,
-        procedure = EXCLUDED.procedure,
-        doc_type = EXCLUDED.doc_type,
-        authority = EXCLUDED.authority
-    `,
-      v.id,
-      v.file_id,
-      v.chunk_index,
-      v.content,
-      v.embedding,
-      v.system,
-      v.component,
-      v.procedure,
-      v.doc_type,
-      v.authority
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO document_chunks (file_id, content, embedding)
+       VALUES ($1, $2, $3::vector)`,
+      driveFileId,
+      c.content,
+      vec
     );
-
   }
 }

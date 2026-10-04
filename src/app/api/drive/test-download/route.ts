@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
+import { getDriveAuth } from "@/lib/drive/auth";
 import { embedTexts } from "@/lib/rag/embed";
 import { upsertChunks } from "@/lib/rag/upsert";
 import {
@@ -7,6 +8,7 @@ import {
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
 import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
+import { requirePlatformAdminResponse } from "@/lib/auth/requirePlatformAdminResponse";
 
 function chunkText(text: string, size = 500) {
   const chunks: string[] = [];
@@ -19,19 +21,17 @@ function chunkText(text: string, size = 500) {
 }
 
 export async function GET() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-    );
+    // The service account (domain-wide delegation) every other Drive path uses;
+    // the old personal OAuth refresh token (GOOGLE_REFRESH_TOKEN) is revoked.
+    const driveAuth = await getDriveAuth();
 
-    oauth2Client.setCredentials({
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-    });
-
-    const drive = google.drive({
+const drive = google.drive({
       version: "v3",
-      auth: oauth2Client,
+      auth: driveAuth,
     });
     const fileId = "1xoFF0VuqR_mCXgH9QkcI5xifWlTCmY7N";
     const metadata = await drive.files.get({

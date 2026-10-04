@@ -533,8 +533,10 @@ function parseVehicleLine(line: string): {
       // Drivetrain tokens cut the tail only when MORE descriptors follow
       // ("...4WD 4D SUV 8-6.4L..." → cut) — a TERMINAL drivetrain token is
       // part of the trim ("Model S 75D AWD" keeps "75D AWD").
+      // A "VIN" label ends the description: "2021 GMC Acadia VIN 1GKK…" is
+      // model "Acadia", not "Acadia VIN" with the VIN as its trim.
       const displayTail = rawTail
-        .split(/\s+(?:w\/|w\s|\d(?:[\d.]*)?\s*l\b|turbo(?:charged)?|gasoline|diesel|hybrid|electric|\d[dr]\b|cpe|sdn|(?:awd|fwd|rwd|4wd)(?=\s+\S))/i)[0]
+        .split(/\s+(?:vin\b|w\/|w\s|\d(?:[\d.]*)?\s*l\b|turbo(?:charged)?|gasoline|diesel|hybrid|electric|\d[dr]\b|cpe|sdn|(?:awd|fwd|rwd|4wd)(?=\s+\S))/i)[0]
         .trim();
       const tokens = (displayTail || rawTail).split(/\s+/).filter(Boolean);
       model = tokens.slice(0, 2).join(" ").trim() || undefined;

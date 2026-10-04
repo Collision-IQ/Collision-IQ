@@ -2,6 +2,7 @@ import type { EvidenceRecord } from "./evidence";
 import type { EstimateOperation } from "../extractors/estimateExtractor";
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
+import type { CounterpartAnswer } from "@/lib/reports/counterpartChoice";
 import type {
   ExcludedFromReviewFileDiagnostic,
   ExcludedFromReviewReason,
@@ -536,6 +537,13 @@ export type RepairIntelligenceReport = {
   estimateFacts?: EstimateFacts;
   linkedEvidence?: LinkedEvidence[];
   evidenceRegistry?: CaseEvidenceRegistryItem[];
+  /**
+   * The user's answers to the Appraisal Dispute Report's question — which
+   * comparison upload is the insurer's estimate — keyed by the annotated
+   * estimate's attachment id. Written only by saveCounterpartAnswer (an
+   * atomic update of this key); a full rewrite of the report keeps it.
+   */
+  counterpartAnswers?: Record<string, CounterpartAnswer>;
   factualCore?: SharedFactualCore;
   reassessmentDelta?: ReassessmentDelta;
   artifactRefreshPolicy?: ArtifactRefreshPolicy;

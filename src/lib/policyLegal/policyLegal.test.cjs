@@ -1303,6 +1303,11 @@ run("malformed regulation record is ignored and review remains valid", () => {
   assert.equal(review.line_item_reviews[0].regulatory_support, "No");
 });
 
+// Jurisdiction is supplied explicitly (claimState) in the "mixed-jurisdiction",
+// "authority tiers" and "doi packet" tests: since 9a00bf2 ("Resolve jurisdiction
+// from owner and shop ZIP evidence") the shared resolver never infers a state
+// from source titles or narrative text, so the legal-source guards are
+// exercised against a confirmed jurisdiction.
 run("policy rights review rejects mixed-jurisdiction and weak legal sources", () => {
   const review = buildPolicyRightsReviewModel(
     {
@@ -1340,7 +1345,7 @@ run("policy rights review rejects mixed-jurisdiction and weak legal sources", ()
           ],
         },
       }),
-      report: makeReport(),
+      report: makeReport({ claimState: "IN" }),
       analysis: null,
       panel: null,
       assistantAnalysis: "Indiana claim with complaint-process questions.",
@@ -1459,7 +1464,7 @@ run("legal citation authority tiers reject social repairer attorney news and tra
   const review = buildPolicyRightsReviewModel(
     {
       renderModel,
-      report: makeReport(),
+      report: makeReport({ claimState: "PA" }),
       analysis: null,
       panel: null,
       assistantAnalysis: "Pennsylvania claim handling dispute review.",
@@ -1544,9 +1549,13 @@ run("uploaded Pennsylvania policy package establishes jurisdiction before web so
     renderModel
   );
 
-  assert.equal(review.jurisdiction.state, "PA");
+  // 9a00bf2 moved jurisdiction to the shared resolver: the label renders as
+  // "<Name> (<code>)" and the policy clause is reported via source/basis.
+  assert.equal(review.jurisdiction.state, "Pennsylvania (PA)");
+  assert.equal(review.jurisdiction.stateCode, "PA");
   assert.equal(review.jurisdiction.confidence, "high");
-  assert.match(review.jurisdiction.basis, /policy governing-law clause/);
+  assert.equal(review.jurisdiction.source, "policy_governing_law");
+  assert.match(review.jurisdiction.basis, /governing-law state from uploaded policy evidence/);
   assert.equal(review.verifiedRegulations.length, 0);
 });
 
@@ -1588,7 +1597,7 @@ run("doi packet omits weak legal sources from verified support sections", () => 
 
   const document = buildDoiComplaintPacketPdf({
     renderModel,
-    report: makeReport(),
+    report: makeReport({ claimState: "IN" }),
     analysis: null,
     panel: null,
     assistantAnalysis: "Indiana claim with complaint-process questions.",

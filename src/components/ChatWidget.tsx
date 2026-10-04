@@ -113,6 +113,8 @@ import {
   scoreEstimateRoleSignals,
 } from "@/lib/reports/estimateTriageClassifier";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
+import { describeCounterpartCandidate, parseCounterpartChoice } from "@/lib/reports/counterpartChoice";
+import type { CaseAnalysisStart } from "@/lib/reports/caseForReports";
 import {
   FalVisionClientError,
   getFalVisionResult,
@@ -242,7 +244,17 @@ type ChatSessionControls = {
   focusComposer: () => void;
   resetSession: () => void;
   sendPrompt: (prompt: string) => Promise<void>;
+  /**
+   * Starts the full case analysis on the uploaded estimates, whatever the
+   * Researched Answer toggle says: the report cards build from the case it
+   * creates. "busy" while a turn or an upload is in flight; "no_uploads"
+   * with nothing to analyse.
+   */
+  runCaseAnalysis: () => CaseAnalysisStart;
 };
+
+/** The turn the report card sends when it needs the case analysis. */
+const CASE_ANALYSIS_FOR_REPORTS_PROMPT = "Run the full case analysis on these estimates so the reports can be built.";
 
 export type ReviewProgress = {
   uploaded: number;
@@ -1125,7 +1137,8 @@ export default function ChatWidget({
   const audioUrlRef = useRef<string | null>(null);
   const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const handleSendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => {});
+  const handleSendRef = useRef<(promptOverride?: string, options?: { forceCaseAnalysis?: boolean }) => Promise<void>>(async () => {});
+  const startCaseAnalysisRef = useRef<() => CaseAnalysisStart>(() => "unavailable");
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const reviewProgressTimerRefs = useRef<number[]>([]);
@@ -1423,6 +1436,7 @@ export default function ChatWidget({
   // entitlement on every request, so the client flag is UX only.
   const researchAllowed = canAccessFeature(productPlan, "researched_answers");
   const [researchMode, setResearchMode] = useState(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- restores the stored toggle after mount; reading storage during render would mismatch the server HTML */
   useEffect(() => {
     try {
       setResearchMode(window.localStorage.getItem("ciq_researched_answers") === "1");
@@ -1430,6 +1444,7 @@ export default function ChatWidget({
       // localStorage unavailable (private mode) — stay on Quick.
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const researchModeEffective = researchMode && researchAllowed;
   const toggleResearchMode = () => {
     if (!researchAllowed) {
@@ -2709,16 +2724,30 @@ export default function ChatWidget({
   }, []);
 
   handleSendRef.current = handleSend;
+  startCaseAnalysisRef.current = startCaseAnalysisForReports;
 
   useEffect(() => {
     onSessionControlsReady?.({
       focusComposer: () => textareaRef.current?.focus(),
       resetSession: handleEndChat,
       sendPrompt: (prompt) => handleSendRef.current(prompt),
+      runCaseAnalysis: () => startCaseAnalysisRef.current(),
     });
   }, [onSessionControlsReady, handleEndChat]);
 
-  async function handleSend(promptOverride?: string) {
+  // The report card's request for the case its reports are built from. It
+  // starts only a turn that will run the case pipeline: never over a turn or
+  // an upload in flight, and never without estimates to analyse.
+  function startCaseAnalysisForReports(): CaseAnalysisStart {
+    if (disabled) return "unavailable";
+    if (loading || isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) return "busy";
+    const eligible = attachments.filter((attachment) => !attachment.usedInAnalysis && !isVideoAttachment(attachment));
+    if (!eligible.length) return "no_uploads";
+    void handleSend(CASE_ANALYSIS_FOR_REPORTS_PROMPT, { forceCaseAnalysis: true });
+    return "started";
+  }
+
+  async function handleSend(promptOverride?: string, options: { forceCaseAnalysis?: boolean } = {}) {
     if (disabled) return;
     const promptText = (promptOverride ?? input).trim();
 
@@ -2833,11 +2862,12 @@ export default function ChatWidget({
     );
     const trimmedInput = promptText;
     // Chat-first gating: the full case pipeline runs only when the Researched
-    // Answer toggle is on (paid plans) or when merging evidence into an
-    // already-open case. Quick mode uploads get a fast conversational review.
+    // Answer toggle is on (paid plans), when merging evidence into an
+    // already-open case, or when a report card needs the case to build from.
+    // Quick mode uploads get a fast conversational review.
     const runFullAnalysisThisTurn =
       fullAnalysisEligibleAttachments.length > 0 &&
-      (Boolean(analysisReportIdRef.current) || researchModeEffective);
+      (Boolean(analysisReportIdRef.current) || researchModeEffective || options.forceCaseAnalysis === true);
     // Asking for a full analysis while on Quick gets a pointer to the toggle
     // instead of a silent depth upgrade (and an upgrade note on free plans).
     if (
@@ -3000,7 +3030,16 @@ export default function ChatWidget({
             annotatedFindingCount?: number;
             unresolvedAnchorCount?: number;
             warnings?: string[];
+            counterpartChoice?: unknown;
           };
+          // A chat reply cannot carry the picker: name the candidates and
+          // where to answer.
+          const counterpartChoice = parseCounterpartChoice(data.counterpartChoice);
+          const questionText = counterpartChoice?.required
+            ? `\n\n**Which upload is the insurer's estimate?** Nothing printed on these estimates settles it, so the Appraisal Dispute Report was not produced. Run the Citation Density Report from the Reports panel and choose it there:\n${counterpartChoice.candidates
+                .map((candidate) => `- ${candidate.fileName} (${describeCounterpartCandidate(candidate)})`)
+                .join("\n")}`
+            : "";
           const unanchoredText =
             (data.unresolvedAnchorCount ?? 0) > 0
               ? " Unanchored items were placed in the appendix."
@@ -3014,8 +3053,8 @@ export default function ChatWidget({
             : `[Download Citation Density Report](${data.downloadUrl ?? "#"})`;
           const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
           const reply = allUnanchored
-            ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`
-            : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}`;
+            ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}${questionText}`
+            : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}${questionText}`;
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();

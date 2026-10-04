@@ -3,8 +3,12 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getDriveAuth } from "@/lib/drive/auth";
+import { requirePlatformAdminResponse } from "@/lib/auth/requirePlatformAdminResponse";
 
 export async function GET() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   try {
     const driveId = process.env.GOOGLE_SHARED_DRIVE_ID;
     if (!driveId) {

@@ -202,13 +202,7 @@ export function buildAnnotatedEstimateReviewPdf(
       },
       {
         title: "8. Source Boundary",
-        bullets: buildSourceBoundaryBullets(
-          model.citationDensityFindings.some((finding) =>
-            /\bccc\s+secure\s+share|secure\s+share|workfile\s+(?:id|data)\b/i.test(
-              `${finding.currentSupportSummary ?? ""} ${finding.missingProofSummary ?? ""}`
-            )
-          )
-        ),
+        bullets: buildSourceBoundaryBullets(hasCccSecureShareSignal(params, model.citationDensityFindings)),
       },
     ],
     redCount,
@@ -2063,6 +2057,25 @@ function buildWeakDoNotLeadBullets(findings: CitationDensityFinding[]): string[]
     : ["No weak or distracting lead items were isolated from the current estimate review."];
 }
 
+/**
+ * The Secure Share / workfile-artifact signal that licenses the CCC
+ * structured-data sentence. A finding's summaries never carry the artifact's
+ * name, so the file set's own evidence records (title and source, never the
+ * free-text snippet) are read as well; a Secure Share workfile on file was
+ * otherwise suppressed. Bare "CCC" still does not qualify: an estimate
+ * AUTHORED in CCC ONE is not a retrieved Secure Share workfile.
+ */
+function hasCccSecureShareSignal(
+  params: ExportBuilderInput,
+  findings: CitationDensityFinding[]
+): boolean {
+  const pattern = /\bccc\s+secure\s+share|secure\s+share|workfile\s+(?:id|data)\b/i;
+  return [
+    ...findings.map((finding) => `${finding.currentSupportSummary ?? ""} ${finding.missingProofSummary ?? ""}`),
+    ...(params.report?.evidence ?? []).map((record) => `${record.title ?? ""} ${record.source ?? ""}`),
+  ].some((value) => pattern.test(value));
+}
+
 function buildSourceBoundaryBullets(hasCccWorkfileData: boolean): string[] {
   return [
     "This report separates estimate gaps from citation support. A line-item difference may be real, but it is not supplement-ready until the file shows the authority or documentation needed to defend it.",
@@ -2535,12 +2548,15 @@ function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
 function buildEstimateDeltaSummary(
   model: AnnotatedEstimateReviewModel
 ): CarrierReportDocument["summary"] {
-  const rows = model.comparisonRows.filter((row) => !isEstimateDeltaExcludedRow(row));
-  const mode = detectEstimateDeltaMode(rows);
-  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed", mode)).length;
-  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_first", mode)).length;
-  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_second", mode)).length;
-  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap", mode)).length;
+  // Count what each section lists (same mode, same duplicate-label removal),
+  // so a header count never disagrees with the bullets under it.
+  const mode = detectEstimateDeltaMode(model.comparisonRows);
+  const countOf = (bucket: EstimateDeltaBucket) =>
+    buildEstimateDeltaBullets(model.comparisonRows, bucket, mode).totalCount;
+  const changedCount = countOf("changed");
+  const addedCount = countOf("only_first");
+  const missingCount = countOf("only_second");
+  const gapCount = countOf("gap");
 
   return [
     { label: "Vehicle", value: model.vehicleIdentity },

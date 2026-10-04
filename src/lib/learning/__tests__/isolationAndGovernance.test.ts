@@ -117,22 +117,22 @@ describe("production isolation", () => {
   ];
 
   it("learning modules never import chat, prompt, entitlement, or report-memory internals", () => {
-    for (const module of learningModules) {
-      const source = read(module);
-      expect(source, module).not.toMatch(/from ["']@\/app\/api\/chat/);
-      expect(source, module).not.toMatch(/systemPrompt|productionPrompt/i);
-      expect(source, module).not.toMatch(/from ["']@\/lib\/billing\/entitlements/);
-      expect(source, module).not.toMatch(/analysisReportStore|reportHistory/i);
-      expect(source, module).not.toMatch(/from ["']@\/lib\/context\/activeContext/);
+    for (const modulePath of learningModules) {
+      const source = read(modulePath);
+      expect(source, modulePath).not.toMatch(/from ["']@\/app\/api\/chat/);
+      expect(source, modulePath).not.toMatch(/systemPrompt|productionPrompt/i);
+      expect(source, modulePath).not.toMatch(/from ["']@\/lib\/billing\/entitlements/);
+      expect(source, modulePath).not.toMatch(/analysisReportStore|reportHistory/i);
+      expect(source, modulePath).not.toMatch(/from ["']@\/lib\/context\/activeContext/);
     }
   });
 
   it("no learning module writes to non-learning tables", () => {
-    for (const module of learningModules) {
-      const source = read(module);
+    for (const modulePath of learningModules) {
+      const source = read(modulePath);
       const writes = source.match(/prisma\.(\w+)\.(?:create|update|upsert|delete|updateMany|deleteMany|createMany)/g) ?? [];
       for (const write of writes) {
-        expect(write, `${module}: ${write}`).toMatch(/prisma\.(collisionLearning|collisionBenchmark)/);
+        expect(write, `${modulePath}: ${write}`).toMatch(/prisma\.(collisionLearning|collisionBenchmark)/);
       }
     }
   });

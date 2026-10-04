@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getDriveAuth } from "@/lib/drive/auth";
 import { prisma } from "@/lib/prisma";
+import { requirePlatformAdminResponse } from "@/lib/auth/requirePlatformAdminResponse";
 
 async function initializeDrive() {
   const auth = await getDriveAuth();
@@ -28,6 +29,9 @@ async function initializeDrive() {
 }
 
 export async function POST() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   try {
     return await initializeDrive();
   } catch (error) {
@@ -37,6 +41,9 @@ export async function POST() {
 }
 
 export async function GET() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   return NextResponse.json({
     ok: true,
     message: "Use POST to initialize the Drive start page token."

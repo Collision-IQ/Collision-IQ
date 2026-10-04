@@ -260,8 +260,13 @@ run("legacy dispute intelligence fixture renders unified Repair Intelligence rep
   assert.ok(document.sections.length >= 4);
   assert.ok(total > layout.usableHeight);
   assert.ok((topDrivers?.bullets ?? []).length >= 4);
+  // The missing-verification section (buildMissingVerificationBullets) was
+  // retitled "Open Verification Evidence" in 7834ed1 and "Open Verification
+  // Items" in ca8830c ("Improve report diagnostics and export trust").
   assert.equal(
-    document.sections.some((section) => section.title === "Missing Verification Evidence"),
+    document.sections.some(
+      (section) => section.title === "Open Verification Items" && (section.bullets ?? []).length > 0
+    ),
     true
   );
 });

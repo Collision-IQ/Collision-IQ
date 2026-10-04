@@ -23,7 +23,7 @@
  */
 import { hoursReconcile } from "../deltaEngine/rowCluster";
 import { lineReconciliation, nonLaborBuckets, unreadLineDollars, type LineReconciliation } from "./nonLaborBuckets";
-import { round2, type Estimate, type LaborCat, type LaborTotal } from "./types";
+import { round2, type Estimate, type EstimateLine, type LaborCat, type LaborTotal } from "./types";
 
 type Family = "body" | "paint" | "mech" | "struct" | "other";
 
@@ -47,6 +47,22 @@ function familyRate(totals: LaborTotal[], family: Family): number | undefined {
  *  the shop prints no category in that family. */
 export function shopRateFor(shop: Estimate, cat: LaborCat, fallback: number): number {
   return familyRate(shop.totals.labor, LABOR_FAMILY[cat]) ?? fallback;
+}
+
+const labelKey = (label: string) => label.toLowerCase().replace(/[^a-z]+/g, "");
+
+/**
+ * The shop's rate for one line's hours: the line's own printed category when
+ * the shop prints one of that name, else its family's rate. RO 21548 bills
+ * Electrical and Calibration/Reset, both outside the body/paint/mechanical/
+ * structural families; by family alone every such hour took the first one's rate.
+ */
+export function shopLineRate(shop: Estimate, line: Pick<EstimateLine, "laborCat" | "laborLabel">, fallback = 0): number {
+  if (line.laborLabel) {
+    const own = shop.totals.labor.find((total) => total.hours > 0 && labelKey(total.label) === labelKey(line.laborLabel!));
+    if (own) return own.rate;
+  }
+  return shopRateFor(shop, line.laborCat ?? "body", fallback);
 }
 
 export interface OpenRateItem {

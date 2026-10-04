@@ -22,7 +22,7 @@
  * re-pairs lines. It only removes what the equivalence groups already
  * explained and what the integrity pass sends to "clean up our own sheet".
  */
-import { shopRateFor } from "./gapLedger";
+import { shopLineRate, shopRateFor } from "./gapLedger";
 import type { Flag } from "./integrityChecks";
 import type { GroupDelta } from "./operationEquivalence";
 import { round2, type Estimate, type EstimateLine } from "./types";
@@ -31,9 +31,12 @@ export type Strength = "Strong" | "Needs proof" | "Weak";
 
 /** A difference the delta matcher found, by line number. */
 export interface MatcherPair {
-  kind: "missing" | "reduced";
+  /** "matched": paired at equal values — it locates a line, it is never argued. */
+  kind: "missing" | "reduced" | "matched";
   shopLines: number[];
   carrierLine?: number;
+  /** The carrier line's own note says it includes the work on these shop lines. */
+  coveredByCarrierNote?: boolean;
 }
 
 export interface ArgueItem {
@@ -48,11 +51,19 @@ export interface ArgueItem {
 }
 
 /** A child part the carrier leaves off while paying its parent. */
-const PARENT_PARTS: Array<{ child: RegExp; exclude: RegExp; parent: RegExp; companion: RegExp; label: string }> = [
+const PARENT_PARTS: Array<{ child: RegExp; exclude: RegExp; parent: RegExp; parentExclude: RegExp; companion: RegExp; label: string }> = [
   {
-    child: /\b(tires?|pirelli|michelin|goodyear|continental|bridgestone)\b/i,
+    // A tire line names the tire, a brand, or only the tire size: RO 21548's
+    // carrier wrote "Rt Frnt Westlake SA07 Sport 255/45r19 100v +25%", with
+    // no word "tire" and a brand off the list, and the report told the shop
+    // they pay no tire.
+    child: /\b(tires?|tyres?|pirelli|michelin|goodyear|continental|bridgestone)\b|\bP?\d{3}\/\d{2}\s*Z?R\s*\d{2}\b/i,
     exclude: /disposal|balance|mount/i,
     parent: /\bwheel\b/i,
+    // Parts named after the wheel that no tire mounts on. RO 21548 cited the
+    // carrier's wheel opening moldings and wheel cover as "the parts the
+    // tires mount on".
+    parentExclude: /\b(opng|opening|mldgs?|moldings?|mouldings?|flares?|liners?|covers?|caps?|arch|well|housing|alignment|align|locks?|lugs?|nuts?|bolts?|studs?|sensors?|bearings?|hubs?|speed|weights?)\b/i,
     // Work that exists only because the child part is replaced: it rides with
     // the child, net of whatever the carrier already pays for it.
     companion: /\b(balance|tire\s+disposal)\b/i,
@@ -87,7 +98,7 @@ export function argueItems(params: {
   const carrierLine = new Map(carrier.lines.map((l) => [l.line, l]));
   const paintRate = shopRateFor(shop, "paint", 0);
   const laborValue = (l: EstimateLine | undefined) =>
-    l ? (l.hours ?? 0) * shopRateFor(shop, l.laborCat ?? "body", 0) + (l.paintHours ?? 0) * paintRate : 0;
+    l ? (l.hours ?? 0) * shopLineRate(shop, l) + (l.paintHours ?? 0) * paintRate : 0;
   const hoursOf = (l: EstimateLine | undefined) => (l ? (l.hours ?? 0) + (l.paintHours ?? 0) : 0);
 
   const items: ArgueItem[] = [];
@@ -159,7 +170,9 @@ export function argueItems(params: {
   for (const rule of PARENT_PARTS) {
     const children = shop.lines.filter((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc) && (l.price ?? 0) > 0);
     const carrierHasChild = carrier.lines.some((l) => rule.child.test(l.desc) && !rule.exclude.test(l.desc));
-    const parents = carrier.lines.filter((l) => rule.parent.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0);
+    const parents = carrier.lines.filter(
+      (l) => rule.parent.test(l.desc) && !rule.parentExclude.test(l.desc) && l.oper === "Repl" && (l.price ?? 0) > 0
+    );
     if (!children.length || carrierHasChild || !parents.length) continue;
     const ourCompanions = shop.lines.filter((l) => rule.companion.test(l.desc) && !claimed.has(l.line) && (l.price ?? 0) > 0);
     const theirCompanions = carrier.lines.filter((l) => rule.companion.test(l.desc) && (l.price ?? 0) > 0);
@@ -187,6 +200,7 @@ export function argueItems(params: {
 
   // Needs proof / Weak — the matcher's own differences, minus everything above.
   for (const pair of pairs) {
+    if (pair.kind === "matched") continue;
     const lines = pair.shopLines.map((n) => shopLine.get(n)).filter((l): l is EstimateLine => Boolean(l));
     if (!lines.length || lines.some((l) => claimed.has(l.line))) continue;
     const theirs = pair.carrierLine !== undefined ? carrierLine.get(pair.carrierLine) : undefined;
@@ -206,12 +220,18 @@ export function argueItems(params: {
         )
       : undefined;
     const lineRefs = lines.map((l) => `L${l.line}`).join(", ");
+    // Their one line covers several of ours by its own note: the item is THEIR
+    // line, and the note is quoted (RO 21548: one diagnostic line "includes pre
+    // and post and 1 Calibration and Service Mode" against eight of ours).
+    const coveredNote = pair.coveredByCarrierNote && theirs ? theirs.note?.replace(/^[(\s]+|[)\s]+$/g, "") : undefined;
     items.push({
       strength: "Needs proof",
-      title: `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
+      title: coveredNote && theirs ? `${theirs.desc}: the work its note includes` : `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
       detail: pPage
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
-        : theirs
+        : coveredNote && theirs
+          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}), whose note reads "${coveredNote}".`
+          : theirs
           ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
           : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,

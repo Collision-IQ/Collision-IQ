@@ -35,6 +35,7 @@ import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermin
 import { canAccessFeature, toolboxSlotLimit } from "@/lib/featureAccess";
 import ToolboxEvictionOverlay from "@/components/workspace/ToolboxEvictionOverlay";
 import { useToolboxSave } from "@/components/workspace/useToolboxSave";
+import { InsurerEstimatePicker } from "@/components/workspace/InsurerEstimatePicker";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import {
   buildExportModel,
@@ -78,6 +79,8 @@ import {
 } from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { planReports } from "@/lib/reports/forensicSingle/reportPlan";
+import { counterpartChoiceKey, parseCounterpartChoice, type CounterpartChoice } from "@/lib/reports/counterpartChoice";
+import { createCaseForReports, type CaseAnalysisStart, type CaseForReports } from "@/lib/reports/caseForReports";
 import { selectAcademyServiceCta, type AcademyServiceCta } from "@/lib/academy/serviceCta";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -138,6 +141,9 @@ type AnnotatedEstimateExportResult = {
   plainSummaryUrl?: string;
   plainSummaryPdfBase64?: string;
   plainSummaryFilename?: string;
+  // The dispute report's question: which comparison upload is the insurer's
+  // estimate. Delta flavor only; null when there is nothing to ask.
+  counterpartChoice?: CounterpartChoice | null;
 };
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
@@ -459,6 +465,7 @@ export function ChatbotWorkspacePage({
     focusComposer: () => void;
     resetSession: () => void;
     sendPrompt: (prompt: string) => Promise<void>;
+    runCaseAnalysis: () => CaseAnalysisStart;
   } | null>(null);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [attachmentsState, setAttachmentsState] = useState<AttachmentTrayItem[]>([]);
@@ -514,6 +521,40 @@ export function ChatbotWorkspacePage({
     useState<CitationDensityTargetEstimate>("auto");
   const [citationDensitySelectedSourceDocumentId, setCitationDensitySelectedSourceDocumentId] =
     useState<string>("");
+  // The user's answer to the Appraisal Dispute Report's question (which
+  // comparison upload is the insurer's estimate) and the question itself.
+  // Both belong to one case and one annotated estimate: each is kept with
+  // that scope and reads as unset under any other.
+  const citationDensityAnswerScope = `${analysisReportId ?? ""}|${citationDensitySelectedSourceDocumentId}`;
+  const [insurerEstimateAnswer, setInsurerEstimateAnswer] = useState<{ scope: string; documentId: string } | null>(null);
+  const [counterpartQuestion, setCounterpartQuestion] = useState<{ scope: string; choice: CounterpartChoice | null } | null>(null);
+  const citationDensityInsurerEstimateId =
+    insurerEstimateAnswer?.scope === citationDensityAnswerScope ? insurerEstimateAnswer.documentId : "";
+  const citationDensityCounterpartChoice =
+    counterpartQuestion?.scope === citationDensityAnswerScope ? counterpartQuestion.choice : null;
+  // Stored under the scope current when the answer or question arrives: a
+  // report that waited for its case analysis lands under the new case.
+  const answerScopeRef = useRef(citationDensityAnswerScope);
+  useEffect(() => {
+    answerScopeRef.current = citationDensityAnswerScope;
+  }, [citationDensityAnswerScope]);
+  const setCitationDensityInsurerEstimateId = useCallback(
+    (documentId: string) => setInsurerEstimateAnswer({ scope: answerScopeRef.current, documentId }),
+    []
+  );
+  const setCitationDensityCounterpartChoice = useCallback(
+    (choice: CounterpartChoice | null) => setCounterpartQuestion({ scope: answerScopeRef.current, choice }),
+    []
+  );
+  // REPORTS BUILD FROM THE CASE. Asked for before there is one (Quick answer
+  // mode, or a case analysis still running), a report waits for it, starting
+  // the analysis on the uploads when none is running, instead of stopping in
+  // the browser with "needs an active case".
+  const [caseForReports] = useState(createCaseForReports);
+  useEffect(() => {
+    caseForReports.setCaseId(analysisReportId);
+  }, [caseForReports, analysisReportId]);
+  const ensureCaseForReports = useCallback((): Promise<CaseForReports> => caseForReports.ensure(), [caseForReports]);
   const bottomReportObjectUrlRef = useRef<string | null>(null);
   const immersiveHeaderExpandedRef = useRef(true);
 
@@ -559,9 +600,11 @@ export function ChatbotWorkspacePage({
     };
   }, [revokeBottomReportObjectUrl]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- closing also revokes the viewer's object URL, a side effect, when the report changes */
   useEffect(() => {
     closeBottomReportViewer();
   }, [analysisReportId, closeBottomReportViewer]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     return () => {
@@ -1345,6 +1388,11 @@ export function ChatbotWorkspacePage({
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
             onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
+            citationDensityInsurerEstimateId={citationDensityInsurerEstimateId}
+            onCitationDensityInsurerEstimateIdChange={setCitationDensityInsurerEstimateId}
+            citationDensityCounterpartChoice={citationDensityCounterpartChoice}
+            onCitationDensityCounterpartChoiceChange={setCitationDensityCounterpartChoice}
+            ensureCaseForReports={ensureCaseForReports}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1726,6 +1774,7 @@ export function ChatbotWorkspacePage({
                           onAnalysisChange={setAnalysisText}
                           onPrimaryAnalysisChange={setPrimaryAnalysis}
                           onAnalysisReportIdChange={(reportId) => {
+                            caseForReports.setCaseId(reportId);
                             if (reportId !== analysisReportId) {
                               setAnalysisReportId(reportId);
                             }
@@ -1735,6 +1784,8 @@ export function ChatbotWorkspacePage({
                           onAnalysisPanelChange={setAnalysisPanel}
                           onAnalysisLoadingChange={setAnalysisLoading}
                           onAnalysisStatusChange={(status, detail) => {
+                            // A report waiting on the case analysis goes on when it ends.
+                            caseForReports.setStatus(status);
                             setAnalysisStatus(status);
                             setAnalysisStatusDetail(detail ?? null);
                           }}
@@ -1745,6 +1796,7 @@ export function ChatbotWorkspacePage({
                           onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
                           onSessionControlsReady={(controls) => {
                             chatSessionControlsRef.current = controls;
+                            caseForReports.setStart(controls.runCaseAnalysis);
                           }}
                           onCaseIntentChange={setCaseIntent}
                           onReviewProgressChange={setReviewProgress}
@@ -1816,6 +1868,11 @@ export function ChatbotWorkspacePage({
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
             onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
+            citationDensityInsurerEstimateId={citationDensityInsurerEstimateId}
+            onCitationDensityInsurerEstimateIdChange={setCitationDensityInsurerEstimateId}
+            citationDensityCounterpartChoice={citationDensityCounterpartChoice}
+            onCitationDensityCounterpartChoiceChange={setCitationDensityCounterpartChoice}
+            ensureCaseForReports={ensureCaseForReports}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -2203,6 +2260,11 @@ function RailContent({
   onCitationDensityTargetEstimateChange,
   citationDensitySelectedSourceDocumentId,
   onCitationDensitySelectedSourceDocumentIdChange,
+  citationDensityInsurerEstimateId,
+  onCitationDensityInsurerEstimateIdChange,
+  citationDensityCounterpartChoice,
+  onCitationDensityCounterpartChoiceChange,
+  ensureCaseForReports,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -2248,6 +2310,12 @@ function RailContent({
   onCitationDensityTargetEstimateChange: (target: CitationDensityTargetEstimate) => void;
   citationDensitySelectedSourceDocumentId: string;
   onCitationDensitySelectedSourceDocumentIdChange: (documentId: string) => void;
+  citationDensityInsurerEstimateId: string;
+  onCitationDensityInsurerEstimateIdChange: (documentId: string) => void;
+  citationDensityCounterpartChoice: CounterpartChoice | null;
+  onCitationDensityCounterpartChoiceChange: (choice: CounterpartChoice | null) => void;
+  /** The case the reports build from, running or waiting for the case analysis when there is none yet. */
+  ensureCaseForReports: () => Promise<CaseForReports>;
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -2285,6 +2353,7 @@ function RailContent({
   const [reportSending, setReportSending] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [reportSendStatus, setReportSendStatus] = useState<string | null>(null);
+  const [insurerEstimateRunPending, setInsurerEstimateRunPending] = useState(false);
   const [reportReviewed, setReportReviewed] = useState(false);
   const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
@@ -2725,26 +2794,32 @@ function RailContent({
     );
   }
 
-  async function downloadReportDocument(reportType: ReportKind) {
+  async function downloadReportDocument(reportType: ReportKind, options: { comparisonDocumentId?: string } = {}) {
     if (reportType === "estimate_scrubber" || reportType === "forensic_estimate_review") {
       try {
+        const caseForReports = await resolveCaseForReports();
+        if ("reason" in caseForReports) {
+          setReportSendStatus(caseForReports.reason);
+          return;
+        }
         if (forensicSingleMode) {
-          const forensicResult = await generateForensicEstimateReview();
+          const forensicResult = await generateForensicEstimateReview(caseForReports.caseId);
           if (forensicResult) {
             downloadBlob(forensicResult.blob, forensicResult.filename);
             setReportSendStatus(buildForensicEstimateReviewStatus(forensicResult));
             return;
           }
         }
-        const exportResult = await generateAnnotatedCitationDensityEstimate();
+        const exportResult = await generateAnnotatedCitationDensityEstimate(options.comparisonDocumentId, caseForReports.caseId);
         downloadBlob(exportResult.blob, exportResult.filename);
         await downloadCitationDensityFindingsReport(exportResult);
         await downloadPlainLanguageSummary(exportResult);
         onCitationDensityReportReady({
           reportFlavor: "delta",
           result: exportResult,
+          // Regenerating keeps this run's answer to which estimate is the insurer's.
           onRegenerate: () => {
-            void downloadReportDocument("estimate_scrubber");
+            void downloadReportDocument("estimate_scrubber", options);
           },
         });
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
@@ -2843,8 +2918,9 @@ function RailContent({
    * with the two-estimate Citation Density flow, which is the right report
    * for a pair.
    */
-  async function generateForensicEstimateReview(): Promise<ForensicEstimateReviewResult | null> {
-    if (!analysisReportId) {
+  async function generateForensicEstimateReview(caseIdOverride?: string): Promise<ForensicEstimateReviewResult | null> {
+    const caseId = caseIdOverride ?? analysisReportId;
+    if (!caseId) {
       throw new Error("The Forensic Estimate Review needs an active case.");
     }
     setReportSendStatus("Generating Forensic Estimate Review...");
@@ -2853,7 +2929,7 @@ function RailContent({
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        caseId: analysisReportId,
+        caseId,
         selectedSourceDocumentId: citationDensitySelectedSourceDocumentId || undefined,
         redactSensitive: true,
       }),
@@ -2889,8 +2965,34 @@ function RailContent({
     };
   }
 
-  async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
-    if (!analysisReportId) {
+  /** The case to build reports from: the open one, or the one the case analysis is creating. */
+  async function resolveCaseForReports(): Promise<CaseForReports> {
+    if (analysisReportId && !analysisLoading) return { caseId: analysisReportId };
+    setReportSendStatus(
+      analysisReportId || analysisLoading
+        ? "Waiting for the case analysis to finish. The reports follow."
+        : "Running the full case analysis on your estimates first. The reports follow when it finishes."
+    );
+    return ensureCaseForReports();
+  }
+
+  /** Runs the user's answer to which comparison is the insurer's estimate, then reruns the report with it. */
+  async function runWithInsurerEstimate(documentId: string) {
+    onCitationDensityInsurerEstimateIdChange(documentId);
+    setInsurerEstimateRunPending(true);
+    try {
+      await downloadReportDocument("estimate_scrubber", { comparisonDocumentId: documentId });
+    } finally {
+      setInsurerEstimateRunPending(false);
+    }
+  }
+
+  async function generateAnnotatedCitationDensityEstimate(
+    comparisonDocumentIdOverride?: string,
+    caseIdOverride?: string
+  ): Promise<AnnotatedEstimateExportResult> {
+    const caseId = caseIdOverride ?? analysisReportId;
+    if (!caseId) {
       throw new Error("Citation Density annotated export needs an active case.");
     }
 
@@ -2909,8 +3011,8 @@ function RailContent({
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        caseId: analysisReportId,
-        activeCaseId: analysisReportId,
+        caseId,
+        activeCaseId: caseId,
         artifactIds: attachmentIds,
         ...selectionPayload,
         targetEstimate: citationDensityTargetEstimate,
@@ -2918,6 +3020,8 @@ function RailContent({
         includeLegend: true,
         includeSummaryPage: false,
         redactSensitive: true,
+        // The user's answer to "which upload is the insurer's estimate?".
+        comparisonDocumentId: (comparisonDocumentIdOverride ?? citationDensityInsurerEstimateId) || undefined,
       }),
     });
 
@@ -2931,6 +3035,8 @@ function RailContent({
       findingsReportPdfBase64?: unknown;
       plainSummaryUrl?: unknown;
       plainSummaryPdfBase64?: unknown;
+      counterpartChoice?: unknown;
+      comparisonDocumentId?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2942,9 +3048,14 @@ function RailContent({
     } | null;
 
     if (!response.ok || typeof data?.downloadUrl !== "string") {
+      // The answer named an estimate that is no longer a comparison on the
+      // case: drop it, so the next run asks again instead of failing again.
+      if (typeof data?.comparisonDocumentId === "string") onCitationDensityInsurerEstimateIdChange("");
       throw new Error(formatAnnotatedExportError(data, "Annotated estimate export failed."));
     }
 
+    const counterpartChoice = parseCounterpartChoice(data.counterpartChoice);
+    onCitationDensityCounterpartChoiceChange(counterpartChoice);
     const pdfBase64 = typeof data.pdfBase64 === "string" ? data.pdfBase64 : undefined;
     let artifactFallbackUsed = false;
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl, pdfBase64, () => {
@@ -2961,6 +3072,7 @@ function RailContent({
       plainSummaryPdfBase64:
         typeof data.plainSummaryPdfBase64 === "string" ? data.plainSummaryPdfBase64 : undefined,
       plainSummaryFilename: "appraisal-dispute-report.pdf",
+      counterpartChoice,
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -3176,8 +3288,18 @@ function RailContent({
     setCustomerReportError(null);
 
     try {
+      // The estimate reports build from the case: run or wait for its analysis first.
+      let emailCaseId: string | undefined;
+      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "forensic_estimate_review") {
+        const caseForReports = await resolveCaseForReports();
+        if ("reason" in caseForReports) {
+          setReportSendStatus(caseForReports.reason);
+          return;
+        }
+        emailCaseId = caseForReports.caseId;
+      }
       if (activeReportToSend === "forensic_estimate_review") {
-        const forensicResult = await generateForensicEstimateReview();
+        const forensicResult = await generateForensicEstimateReview(emailCaseId);
         if (forensicResult) {
           const pdfBase64 = await blobToBase64(forensicResult.blob);
           const response = await fetch("/api/reports/send", {
@@ -3193,7 +3315,7 @@ function RailContent({
               pdfBase64,
               filename: forensicResult.filename,
               metadata: {
-                caseId: analysisReportId ?? undefined,
+                caseId: emailCaseId ?? analysisReportId ?? undefined,
                 vehicle: vehicleIdentity ?? undefined,
                 vin: vehicleVin ?? undefined,
                 customerEmail: undefined,
@@ -3230,7 +3352,7 @@ function RailContent({
         const reportTypeForRegenerate: ReportKind = activeReportToSend === "forensic_estimate_review" ? "estimate_scrubber" : activeReportToSend;
         const exportResult = activeReportToSend === "oem_citation_density"
           ? await generateOemCitationDensityReport()
-          : await generateAnnotatedCitationDensityEstimate();
+          : await generateAnnotatedCitationDensityEstimate(undefined, emailCaseId);
         onCitationDensityReportReady({
           reportFlavor: activeReportToSend === "oem_citation_density" ? "oem" : "delta",
           result: exportResult,
@@ -3252,7 +3374,7 @@ function RailContent({
             pdfBase64,
             filename: exportResult.filename,
             metadata: {
-              caseId: analysisReportId ?? undefined,
+              caseId: emailCaseId ?? analysisReportId ?? undefined,
               vehicle: vehicleIdentity ?? undefined,
               vin: vehicleVin ?? undefined,
               customerEmail: undefined,
@@ -4222,6 +4344,14 @@ function RailContent({
                 {reportSendStatus}
               </div>
             ) : null}
+            {citationDensityCounterpartChoice ? (
+              <InsurerEstimatePicker
+                key={counterpartChoiceKey(citationDensityCounterpartChoice)}
+                choice={citationDensityCounterpartChoice}
+                busy={insurerEstimateRunPending}
+                onRun={(documentId) => void runWithInsurerEstimate(documentId)}
+              />
+            ) : null}
           </div>
         </section>
         </RailInsightSection>
@@ -4413,6 +4543,14 @@ function RailContent({
             <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
               {reportSendStatus}
             </div>
+          ) : null}
+          {citationDensityCounterpartChoice ? (
+            <InsurerEstimatePicker
+              key={counterpartChoiceKey(citationDensityCounterpartChoice)}
+              choice={citationDensityCounterpartChoice}
+              busy={insurerEstimateRunPending}
+              onRun={(documentId) => void runWithInsurerEstimate(documentId)}
+            />
           ) : null}
         </div>
       ) : null}

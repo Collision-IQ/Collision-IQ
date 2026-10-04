@@ -76,6 +76,14 @@ test("expands a few other CCC make truncations", () => {
   }
 });
 
+test("a VIN label ends the model: no 'Acadia VIN' model, no VIN as trim", () => {
+  const vehicle = extractVehicleIdentityFromText("2021 GMC Acadia VIN 1GKKNRLS7MZ123456. Pre-scan not shown.", "attachment");
+  assert.ok(vehicle);
+  assert.equal(vehicle.model, "Acadia");
+  assert.doesNotMatch(String(vehicle.trim ?? ""), /VIN|1GKK/i);
+  assert.equal(vehicle.vin, "1GKKNRLS7MZ123456");
+});
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   for (const { name, err } of failures) console.error(`\nFAILED: ${name}\n${err.stack || err.message}`);
