@@ -255,6 +255,8 @@ export type EstimateRowAnchor = {
   hPct: number;
   confidence: number;
   synthetic?: boolean;
+  /** The measured totals block this row prints in (see measureTotalsBlockRows). */
+  totalsBlock?: TotalsBlockKind;
 };
 
 type BuildOptions = {
@@ -1124,7 +1126,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // A valued row of a measured totals block is a totals row by position,
     // whatever section it runs under (see measureTotalsBlockRows).
     const totalsBlock = totalsBlockRows.get(line);
-    if (totalsBlock && totalsBlock !== "title" && /\d/.test(line.text)) type = "totals_row";
+    if (totalsBlock && !totalsBlock.title && /\d/.test(line.text)) type = "totals_row";
     if (!inRegion && (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")) {
       type = "guide_row";
     }
@@ -1190,7 +1192,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       // A TOTALS SUMMARY row carries its block as its section, whatever the
       // running section reads: it is how a totals finding tells the
       // supplement's own change amounts from the estimate's totals.
-      section: totalsBlock && totalsBlock !== "estimate totals" ? TOTALS_SUMMARY_SECTION : section,
+      section: totalsBlock?.block === "totals summary" ? TOTALS_SUMMARY_SECTION : section,
       rowText: line.text,
       normalizedRowText: line.normalizedText,
       anchorType: type,
@@ -1214,6 +1216,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       hPct: rect.hPct,
       confidence: type === "estimate_line" ? 0.96 : type === "line_note" || type === "embedded_link_row" ? 0.92 : 0.88,
       synthetic: line.synthetic,
+      ...(totalsBlock ? { totalsBlock: totalsBlock.block } : {}),
     };
     if (type === "supplier_row") {
       anchor.supplierText = line.text;
@@ -1747,13 +1750,13 @@ function isTotalsRow(normalized: string, currentSection: string, rawText = "") {
  * Page-local: a block never continues onto the next page. Measured lines only:
  * stored-text synthetic lines carry no geometry.
  */
-type TotalsBlockKind = "estimate totals" | "totals summary" | "title";
+export type TotalsBlockKind = "estimate totals" | "totals summary";
 
 /** The section a TOTALS SUMMARY row carries (see measureTotalsBlockRows). */
 export const TOTALS_SUMMARY_SECTION = "totals summary";
 
-function measureTotalsBlockRows(lines: PdfTextLine[]): Map<PdfTextLine, TotalsBlockKind> {
-  const rows = new Map<PdfTextLine, TotalsBlockKind>();
+function measureTotalsBlockRows(lines: PdfTextLine[]): Map<PdfTextLine, { block: TotalsBlockKind; title: boolean }> {
+  const rows = new Map<PdfTextLine, { block: TotalsBlockKind; title: boolean }>();
   const byPage = new Map<number, PdfTextLine[]>();
   for (const line of lines) {
     if (!line.words.length) continue;
@@ -1773,15 +1776,14 @@ function measureTotalsBlockRows(lines: PdfTextLine[]): Map<PdfTextLine, TotalsBl
       if (!kind) return;
       const header = pageLines[index + 1];
       if (!header || !/^Category\s*Basis\s*Rate/i.test(header.text)) return;
-      // The ESTIMATE TOTALS title keeps its own classification; a TOTALS
-      // SUMMARY title is tagged with its block (see the doc comment).
-      if (kind === "totals summary") rows.set(title, "title");
+      // A title keeps its own classification and is tagged with its block.
+      rows.set(title, { block: kind, title: true });
       const left = header.words[0].x;
       const maxGap = (header.y - title.y) * 1.5;
       let previous = header;
       for (const row of pageLines.slice(index + 2)) {
         if (Math.abs(row.words[0].x - left) > header.height || row.y - previous.y > maxGap) break;
-        rows.set(row, kind);
+        rows.set(row, { block: kind, title: false });
         previous = row;
       }
     });

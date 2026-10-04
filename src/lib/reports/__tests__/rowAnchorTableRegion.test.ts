@@ -383,6 +383,15 @@ describe("an ESTIMATE TOTALS block printed on the page after the SUBTOTALS rule"
     expect(typeOf(found, "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50")).toBeUndefined();
   });
 
+  it("tags each row with the block it prints in, and nothing outside a measured block", () => {
+    const found = anchorsOf(blockOnPage3(totalsBlock(3, 80.7), [at(3, 23, 292.4, DISCLAIMER, 9.9)]));
+    for (const text of ["ESTIMATE TOTALS", ...CATEGORY_ROWS]) {
+      expect(found.find((anchor) => anchor.rowText === text)?.totalsBlock, text).toBe("estimate totals");
+    }
+    // The SUBTOTALS rule above the block and the disclaimer below it are not in it.
+    expect(found.filter((anchor) => anchor.totalsBlock).map((anchor) => anchor.rowText)).toEqual(["ESTIMATE TOTALS", ...CATEGORY_ROWS]);
+  });
+
   // A supplement print follows ESTIMATE TOTALS with a TOTALS SUMMARY of the
   // supplement's own change amounts, in the same shape (RO 20766 SOR-3 page
   // 6). Only its rows with a totals word anchored, and the totals lane, which
@@ -483,7 +492,7 @@ describe("measured on the repo's ESTIMATE TOTALS blocks", () => {
       const onPage = found.filter((anchor) => anchor.pageNumber === pageNumber);
       for (const label of labels) {
         const rows = onPage.filter((anchor) => anchor.rowText.startsWith(`${label} `));
-        expect(rows.map((anchor) => anchor.anchorType), label).toEqual(["totals_row"]);
+        expect(rows.map((anchor) => [anchor.anchorType, anchor.totalsBlock]), label).toEqual([["totals_row", "estimate totals"]]);
       }
     });
   }
@@ -854,7 +863,9 @@ describe("measured on the repo's TOTALS SUMMARY blocks", () => {
       const onPage = found.filter((anchor) => anchor.pageNumber === pageNumber);
       for (const label of ["TOTALS SUMMARY", ...labels]) {
         const rows = onPage.filter((anchor) => anchor.rowText === label || anchor.rowText.startsWith(`${label} `));
-        expect(rows.map((anchor) => [anchor.anchorType, anchor.section]), label).toEqual([["totals_row", TOTALS_SUMMARY_SECTION]]);
+        expect(rows.map((anchor) => [anchor.anchorType, anchor.section, anchor.totalsBlock]), label).toEqual([
+          ["totals_row", TOTALS_SUMMARY_SECTION, "totals summary"],
+        ]);
       }
       // The block ends above CUMULATIVE EFFECTS; nothing else is tagged.
       expect(found.filter((anchor) => anchor.section === TOTALS_SUMMARY_SECTION)).toHaveLength(labels.length + 1);
