@@ -72,7 +72,9 @@ async function extractPdfText(bytes: Uint8Array) {
   return chunks.join(" ");
 }
 
-describe("RO21896 rendered Delta Citation Density contract", () => {
+// Each test renders the full annotated delta PDF: about 2 s alone, and the
+// first one hit vitest's 5 s default when the report suite ran under load.
+describe("RO21896 rendered Delta Citation Density contract", { timeout: 60_000 }, () => {
   it("renders canonical shop-to-shop deltas instead of legacy estimate-gap findings", async () => {
     const canonicalDeltaSet = buildRo21896CanonicalDeltaSet("test-rendered-ro21896");
     const result = await buildAnnotatedCitationDensityEstimatePdf({
