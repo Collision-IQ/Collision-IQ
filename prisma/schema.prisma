@@ -480,22 +480,14 @@ model ExportResearchAuditSnapshot {
   @@map("ExportResearchAuditSnapshot")
 }
 
-/// Drive RAG chunks, written and read only through raw SQL (src/lib/rag).
-/// The id is "<driveFileId>:<chunkIndex>:<modifiedTime>"; src/lib/rag also
-/// accepts a "source_type" column in place of "source" on older databases.
+/// Drive RAG chunks, written and read only through raw SQL (src/lib/rag and
+/// /api/drive/ingest). This is production's shape; src/lib/rag also accepts an
+/// optional "source_type" or "source" column where a database has one.
 model document_chunks {
-  id          String                 @id
-  source      String?
-  file_id     String?
-  chunk_index Int?
-  content     String?
-  embedding   Unsupported("vector")?
-  updated_at  DateTime?              @default(now()) @db.Timestamp(6)
-  system      String?
-  component   String?
-  procedure   String?
-  doc_type    String?
-  authority   Float?
+  id        Int                    @id @default(autoincrement())
+  content   String?
+  embedding Unsupported("vector")?
+  file_id   String?
 }
 
 model drive_watch_state {
