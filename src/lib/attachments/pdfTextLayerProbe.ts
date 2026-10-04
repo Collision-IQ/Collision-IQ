@@ -49,6 +49,17 @@ export function isSparsePdfText(text: string, pageCount?: number | null): boolea
   return words / pages < MIN_WORDS_FOR_TEXT_PAGE;
 }
 
+/**
+ * Pure: the document has at least one page whose content is an image: under
+ * MIN_WORDS_FOR_TEXT_PAGE words AND an image painted on it (a photo page, a
+ * scan, totals printed as a picture). A short page that is only text (a
+ * signature page) does not count, and neither does a CCC form whose rule
+ * lines are a raster under a full text layer.
+ */
+export function hasImageOnlyPage(pages: PdfPageTextProfile[]): boolean {
+  return pages.some((page) => page.words < MIN_WORDS_FOR_TEXT_PAGE && page.paintsImage);
+}
+
 /** Share of pages that must carry a text layer for the document to count as one. */
 export const TEXT_PAGE_SHARE = 0.6;
 
