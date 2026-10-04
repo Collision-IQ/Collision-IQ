@@ -9,6 +9,13 @@ import {
   saveCounterpartAnswer,
 } from "@/lib/analysisReportStore";
 import { resolveSavedCounterpartAnswer } from "@/lib/reports/counterpartChoice";
+import {
+  RESPONSE_BUDGET_BYTES,
+  inlinePdfsToDrop,
+  readReportExport,
+  safePdfFilename,
+  saveReportExports,
+} from "@/lib/reports/reportExportStore";
 import { getUploadedAttachments, type StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
@@ -83,6 +90,21 @@ export async function GET(request: Request) {
 
   const entry = getAnnotatedEstimateExport(artifactId);
   if (!entry) {
+    // Another instance built it, or this one recycled: serve the owner's
+    // stored copy (reportExportStore.ts). Never another user's.
+    if (url.searchParams.get("metadata") !== "1") {
+      const stored = await readOwnStoredExport(artifactId);
+      if (stored) {
+        return new Response(stored, {
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${safePdfFilename(url.searchParams.get("name"), "collision-iq-report.pdf")}"`,
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      }
+    }
     return NextResponse.json({
       error: "This export is no longer available. Regenerate Delta Citation Density Report.",
     }, { status: 404 });
@@ -108,6 +130,28 @@ export async function GET(request: Request) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+async function readOwnStoredExport(artifactId: string): Promise<ReadableStream<Uint8Array> | null> {
+  try {
+    const { user } = await requireCurrentUser();
+    return await readReportExport(user.id, artifactId);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) return null;
+    throw error;
+  }
+}
+
+/** CITATION_DENSITY_RESPONSE_BUDGET_BYTES overrides the budget (tests, and an operator lever). */
+function responseBudgetBytes(): number {
+  const configured = Number(process.env.CITATION_DENSITY_RESPONSE_BUDGET_BYTES);
+  return Number.isFinite(configured) && configured > 0 ? configured : RESPONSE_BUDGET_BYTES;
+}
+
+/** The link a built PDF downloads from; the name is only the download's file name. */
+function exportUrl(artifactId: string, filename: string | undefined): string {
+  const base = `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(artifactId)}`;
+  return filename ? `${base}&name=${encodeURIComponent(filename)}` : base;
 }
 
 export async function POST(request: Request) {
@@ -328,6 +372,7 @@ export async function POST(request: Request) {
       (researchSnapshot?.sourcesReviewed ?? []).find((source) => source.accepted && source.jurisdiction)?.jurisdiction ?? null;
 
     const outputs = [];
+    const exportsToStore: Array<{ exportId: string; bytes: Uint8Array }> = [];
     const aggregateWarnings = new Set<string>();
     let annotatedFindingCount = 0;
     let unresolvedAnchorCount = 0;
@@ -574,15 +619,24 @@ export async function POST(request: Request) {
       // the run) the annotated copy of the selected estimate stands in.
       const citationCopy = result.lowerEstimate;
       const artifactId = citationCopy?.exportId ?? result.exportId;
-      const downloadUrl = `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(artifactId)}`;
+      const nameOf = (id: string) => getAnnotatedEstimateExport(id)?.filename;
+      const downloadUrl = exportUrl(artifactId, nameOf(artifactId));
       const findingsReportArtifactId = result.findingsReportExportId;
       const findingsReportUrl = findingsReportArtifactId
-        ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(findingsReportArtifactId)}`
+        ? exportUrl(findingsReportArtifactId, nameOf(findingsReportArtifactId))
         : undefined;
       const plainSummaryArtifactId = result.plainSummaryExportId;
       const plainSummaryUrl = plainSummaryArtifactId
-        ? `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(plainSummaryArtifactId)}`
+        ? exportUrl(plainSummaryArtifactId, nameOf(plainSummaryArtifactId))
         : undefined;
+      // Every PDF of the run is stored where any instance can serve its link.
+      exportsToStore.push({ exportId: artifactId, bytes: citationCopy?.bytes ?? result.bytes });
+      if (findingsReportArtifactId && result.findingsReportBytes) {
+        exportsToStore.push({ exportId: findingsReportArtifactId, bytes: result.findingsReportBytes });
+      }
+      if (plainSummaryArtifactId && result.plainSummaryBytes) {
+        exportsToStore.push({ exportId: plainSummaryArtifactId, bytes: result.plainSummaryBytes });
+      }
       console.info("[citation-density.annotated-estimate] report build", { ms: Date.now() - buildStarted });
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
       // An answer the run took is saved with the case, so a later run (another
@@ -724,13 +778,51 @@ export async function POST(request: Request) {
       findingIdPrefixCheckPassed: outputs[0]?.debugTrace?.findingIdPrefixCheckPassed,
       ...sourceDiagnostics,
     };
+    // UNDER THE PLATFORM LIMIT. A response over the budget leaves out the
+    // PDFs the store holds, largest first: the client fetches those from their
+    // links, which any instance now serves. Under the budget nothing changes.
+    const stored = await saveReportExports(user.id, exportsToStore);
+    let responseText = JSON.stringify(responseBody);
+    const inline: Array<{ holder: Record<string, unknown>; field: string; id: string }> = [];
+    const holders: Array<[Record<string, unknown>, string | undefined, string | undefined, string | undefined]> = [
+      [responseBody, primaryOutput?.artifactId, primaryOutput?.findingsReportArtifactId, primaryOutput?.plainSummaryArtifactId],
+      ...responseOutputs
+        .slice(1)
+        .map((output): [Record<string, unknown>, string | undefined, string | undefined, string | undefined] => [
+          output as Record<string, unknown>,
+          output.artifactId,
+          output.findingsReportArtifactId,
+          output.plainSummaryArtifactId,
+        ]),
+    ];
+    for (const [holder, pdfId, findingsId, summaryId] of holders) {
+      for (const [field, id] of [["pdfBase64", pdfId], ["findingsReportPdfBase64", findingsId], ["plainSummaryPdfBase64", summaryId]] as const) {
+        if (id && typeof holder[field] === "string") inline.push({ holder, field, id });
+      }
+    }
+    const budget = responseBudgetBytes();
+    const drop = inlinePdfsToDrop({
+      responseBytes: Buffer.byteLength(responseText),
+      inline: inline.map((pdf) => ({ id: pdf.id, base64Length: (pdf.holder[pdf.field] as string).length })),
+      stored,
+      budget,
+    });
+    if (drop.size) {
+      for (const pdf of inline) if (drop.has(pdf.id)) delete pdf.holder[pdf.field];
+      responseText = JSON.stringify(responseBody);
+    }
     // The size the platform limit is measured against, logged so a run the
     // platform refuses can be read from the logs.
-    const responseText = JSON.stringify(responseBody);
+    const responseBytes = Buffer.byteLength(responseText);
     console.info("[citation-density.annotated-estimate] response size", {
-      bytes: Buffer.byteLength(responseText),
+      bytes: responseBytes,
       outputCount: outputs.length,
+      storedPdfs: stored.size,
+      pdfsServedByLink: drop.size,
     });
+    if (responseBytes > budget) {
+      console.warn("[citation-density.annotated-estimate] response over budget", { bytes: responseBytes, budget, storedPdfs: stored.size });
+    }
     return new NextResponse(responseText, { headers: { "Content-Type": "application/json" } });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
