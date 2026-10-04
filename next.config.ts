@@ -47,6 +47,9 @@ const nextConfig: NextConfig = {
     "/api/reports/citation-density/annotated-estimate": [
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
       "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      // Fonts pdf.js draws non-embedded print fonts with when it rasterizes the
+      // redacted copy (rasterRedactPdf); without them the pages render blank.
+      "./node_modules/pdfjs-dist/standard_fonts/**",
       // The forensic report masthead reads the wordmark from disk. Files under
       // public/ are served as static assets but are NOT traced into a function
       // bundle, so without this the deployed report falls back to the typeset
@@ -56,6 +59,7 @@ const nextConfig: NextConfig = {
     "/api/reports/oem-citation-density/annotated-estimate": [
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
       "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      "./node_modules/pdfjs-dist/standard_fonts/**",
       "./public/iq/iq_logo.png",
     ],
     "/api/upload": OCR_TRACE_INCLUDES,
