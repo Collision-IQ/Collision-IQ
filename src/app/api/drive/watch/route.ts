@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { ensureSingleWorker, getActivePrismaForBackgroundWork } from "@/lib/prisma";
 import { getDriveAuth } from "@/lib/drive/auth";
+import { requirePlatformAdminResponse } from "@/lib/auth/requirePlatformAdminResponse";
 
 export async function POST() {
+  const denied = await requirePlatformAdminResponse();
+  if (denied) return denied;
+
   const worker = ensureSingleWorker("drive-watch");
 
   if (!worker.started) {
