@@ -1,5 +1,6 @@
 import {
   collisionIqModels,
+  collisionIqProvider,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
 import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
@@ -17,6 +18,7 @@ import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
+  summarizePdfAttachment?: (attachment: StoredAttachment) => Promise<string>;
   downloadLinkedFile?: (fileIdOrUrl: string) => Promise<ArrayBuffer>;
 };
 
@@ -63,6 +65,17 @@ async function normalizeStoredAttachment(
 ): Promise<StoredAttachment> {
   if (attachment.type.startsWith("image/") && attachment.imageDataUrl) {
     const summary = await (deps?.summarizeImageAttachment ?? summarizeImageAttachment)(attachment);
+    return {
+      ...attachment,
+      text: mergeObservationText(attachment.text, summary),
+    };
+  }
+
+  // A PDF's text layer misses what it only shows: totals pages that print as
+  // images, photo and screenshot pages, scanned pages. The stored data URL
+  // (uploads up to MAX_REUSABLE_DATA_URL_BYTES) lets the model read them.
+  if (attachment.type === "application/pdf" && attachment.imageDataUrl) {
+    const summary = await (deps?.summarizePdfAttachment ?? summarizePdfAttachment)(attachment);
     return {
       ...attachment,
       text: mergeObservationText(attachment.text, summary),
@@ -209,6 +222,61 @@ If visible damage raises concern for related verification, phrase it as an open 
     return response.output_text?.trim() ?? "";
   } catch (error) {
     console.warn("[analysis-attachments] image normalization failed", {
+      filename: attachment.filename,
+      mimeType: attachment.type || "unknown",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return "";
+  }
+}
+
+async function summarizePdfAttachment(attachment: StoredAttachment) {
+  if (!attachment.imageDataUrl || attachment.type !== "application/pdf") {
+    return "";
+  }
+  // OpenClaw receives its input as JSON text, so a PDF would arrive as a
+  // base64 string rather than a document; only Claude reads it natively.
+  if (collisionIqProvider.primary === "openclaw") {
+    return "";
+  }
+
+  try {
+    const response = await generatePrimaryText({
+      stage: "analysis_pdf_attachment_summary",
+      effort: "medium",
+      input: [
+        {
+          role: "user" as const,
+          content: [
+            {
+              type: "input_text" as const,
+              text: `Review this PDF as a collision-repair source document.
+
+Focus on the first page, totals page, photo/screenshot-heavy pages, and any low-text pages that still carry meaningful visual information.
+
+Return concise plain text only with these labels:
+- Document type:
+- Key visible estimate facts:
+- Visible damage/photo observations:
+- Comparison or screenshot cues:
+- Structural cues:
+- Readable totals/support:
+
+Only include grounded observations from the PDF. Do not claim hidden damage from photos alone; phrase it as an open verification concern.`,
+            },
+            {
+              type: "input_file" as const,
+              filename: attachment.filename,
+              file_data: attachment.imageDataUrl,
+            },
+          ],
+        },
+      ],
+    });
+
+    return response.output_text?.trim() ?? "";
+  } catch (error) {
+    console.warn("[analysis-attachments] pdf vision normalization failed", {
       filename: attachment.filename,
       mimeType: attachment.type || "unknown",
       message: error instanceof Error ? error.message : String(error),
