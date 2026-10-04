@@ -37,6 +37,18 @@ export interface PdfTextLayerClassification {
  * Mitchell pages run 60–600 words; a true scan with no OCR layer runs 0–5.
  */
 export const MIN_WORDS_FOR_TEXT_PAGE = 40;
+/**
+ * Pure: a PDF whose extracted text averages fewer than MIN_WORDS_FOR_TEXT_PAGE
+ * words per page carries most of its content as images (scans, photo pages,
+ * totals printed as pictures). Only such a document is worth a vision read;
+ * a normal CCC / Mitchell estimate (60–600 words a page) is not.
+ */
+export function isSparsePdfText(text: string, pageCount?: number | null): boolean {
+  const words = (text || "").split(/\s+/).filter(Boolean).length;
+  const pages = pageCount && pageCount > 0 ? pageCount : 1;
+  return words / pages < MIN_WORDS_FOR_TEXT_PAGE;
+}
+
 /** Share of pages that must carry a text layer for the document to count as one. */
 export const TEXT_PAGE_SHARE = 0.6;
 

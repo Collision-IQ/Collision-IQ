@@ -6,16 +6,36 @@
  * probe is run against real PDFs built here: text over a full-page image
  * (hybrid), image only (scan), text only (text).
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import {
   MIN_WORDS_FOR_TEXT_PAGE,
   classifyPdfTextLayer,
+  isSparsePdfText,
   probePdfTextLayer,
   type PdfPageTextProfile,
 } from "../pdfTextLayerProbe";
 
 const profile = (page: number, words: number, paintsImage: boolean): PdfPageTextProfile => ({ page, words, paintsImage });
+
+describe("isSparsePdfText", () => {
+  const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index}`).join(" ");
+
+  it("averages words over pages against MIN_WORDS_FOR_TEXT_PAGE", () => {
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE * 3 - 1), 3)).toBe(true);
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE * 3), 3)).toBe(false);
+    expect(isSparsePdfText("", 4)).toBe(true);
+    // No page count reads as one page.
+    expect(isSparsePdfText(words(MIN_WORDS_FOR_TEXT_PAGE), undefined)).toBe(false);
+  });
+
+  it("a real CCC shop estimate is not sparse (RO 20766, 7 pages)", () => {
+    const text = fs.readFileSync(path.join(__dirname, "../../../../tests/fixtures/20766/shop_text.txt"), "utf8");
+    expect(isSparsePdfText(text, 7)).toBe(false);
+  });
+});
 
 describe("classifyPdfTextLayer", () => {
   it("text on every page with a raster underneath is hybrid, never a scan", () => {

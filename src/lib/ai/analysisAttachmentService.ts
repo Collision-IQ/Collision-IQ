@@ -15,6 +15,7 @@ import {
   isDriveEnabled,
 } from "@/lib/drive/download";
 import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
+import { isSparsePdfText } from "@/lib/attachments/pdfTextLayerProbe";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
@@ -73,8 +74,14 @@ async function normalizeStoredAttachment(
 
   // A PDF's text layer misses what it only shows: totals pages that print as
   // images, photo and screenshot pages, scanned pages. The stored data URL
-  // (uploads up to MAX_REUSABLE_DATA_URL_BYTES) lets the model read them.
-  if (attachment.type === "application/pdf" && attachment.imageDataUrl) {
+  // (uploads up to MAX_REUSABLE_DATA_URL_BYTES) lets the model read them, but
+  // only a PDF whose text is sparse gets that read: a normal estimate's text
+  // layer already carries its content, and the summary is one model call.
+  if (
+    attachment.type === "application/pdf" &&
+    attachment.imageDataUrl &&
+    isSparsePdfText(attachment.text, attachment.pageCount)
+  ) {
     const summary = await (deps?.summarizePdfAttachment ?? summarizePdfAttachment)(attachment);
     return {
       ...attachment,

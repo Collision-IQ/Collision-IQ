@@ -319,6 +319,33 @@ runAsync("PDF vision observations contribute when the PDF file payload is availa
   assert.equal(attachments[0].pageCount, 4);
 });
 
+runAsync("a PDF whose text layer carries its content is never summarized", async () => {
+  // 2 pages x 60 words: above MIN_WORDS_FOR_TEXT_PAGE (40) per page.
+  const denseText = Array.from({ length: 120 }, (_, index) => `word${index}`).join(" ");
+  let called = false;
+  const attachments = await enrichAnalysisAttachments({
+    attachments: [
+      {
+        id: "pdf3",
+        filename: "estimate-text.pdf",
+        type: "application/pdf",
+        text: denseText,
+        imageDataUrl: "data:application/pdf;base64,JVBERi0xLjQK",
+        pageCount: 2,
+      },
+    ],
+    deps: {
+      summarizePdfAttachment: async () => {
+        called = true;
+        return "should not appear";
+      },
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(attachments[0].text, denseText);
+});
+
 runAsync("a PDF without its file payload keeps its extracted text and is never summarized", async () => {
   let called = false;
   const attachments = await enrichAnalysisAttachments({
