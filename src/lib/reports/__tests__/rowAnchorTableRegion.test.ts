@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  TOTALS_SUMMARY_SECTION,
   buildEstimateRowAnchorsFromLines,
   buildPdfTextLines,
   type EstimateRowAnchor,
@@ -380,6 +381,52 @@ describe("an ESTIMATE TOTALS block printed on the page after the SUBTOTALS rule"
     );
     expect(typeOf(found, "Parts 3,180.20")).toBeUndefined();
     expect(typeOf(found, "Mechanical Labor 7.7 hrs @ $ 175.00 /hr 1,347.50")).toBeUndefined();
+  });
+
+  // A supplement print follows ESTIMATE TOTALS with a TOTALS SUMMARY of the
+  // supplement's own change amounts, in the same shape (RO 20766 SOR-3 page
+  // 6). Only its rows with a totals word anchored, and the totals lane, which
+  // searches its anchors from the end, put a Body Labor finding computed from
+  // ESTIMATE TOTALS on the supplement's change row.
+  const SUMMARY_ROWS = [
+    "Parts 370.00",
+    "Body Labor 0.5 hrs @ $ 95.00 /hr 47.50",
+    "Additional Supplement Labor -185.00",
+    "Subtotal 232.50",
+    "Sales Tax $ 232.50 @ 6.0000 % 13.95",
+    "Total Supplement Amount 246.45",
+    "NET COST OF SUPPLEMENT 246.45",
+  ];
+
+  it("tags every row of a TOTALS SUMMARY block with its block, title included, and anchors each one", () => {
+    const summaryTop = 80.7 + 28.6 + CATEGORY_ROWS.length * PITCH + 40;
+    const found = anchorsOf(
+      blockOnPage3(totalsBlock(3, 80.7), [
+        ...totalsBlock(3, summaryTop, { title: "TOTALS SUMMARY", categories: SUMMARY_ROWS }),
+        at(3, 147, summaryTop + 28.6 + SUMMARY_ROWS.length * PITCH + 40, "Workfile Total: $ 7,781.92"),
+      ])
+    );
+    const sectionOf = (text: string) => found.find((anchor) => anchor.rowText === text)?.section;
+    for (const text of ["TOTALS SUMMARY", ...SUMMARY_ROWS]) {
+      expect(typeOf(found, text), text).toBe("totals_row");
+      expect(sectionOf(text), text).toBe(TOTALS_SUMMARY_SECTION);
+    }
+    // The estimate's own block and the cumulative table below keep theirs.
+    for (const text of ["ESTIMATE TOTALS", ...CATEGORY_ROWS, "Workfile Total: $ 7,781.92"]) {
+      expect(sectionOf(text), text).not.toBe(TOTALS_SUMMARY_SECTION);
+    }
+  });
+
+  it("reads a category the totals list does not name by its printed hrs @ basis", () => {
+    // No column header, so the block is not measured and the running section
+    // decides. normalizeMatchText strips "@", so this test once ran on text
+    // that could never match it.
+    const found = anchorsOf([
+      ...lineItemPages(),
+      at(2, 144, 132.7, "ESTIMATE TOTALS", 9.9),
+      at(2, 143, 147.8, "Calibration/Reset 3.0 hrs @ $ 185.00 /hr 555.00"),
+    ]);
+    expect(typeOf(found, "Calibration/Reset 3.0 hrs @ $ 185.00 /hr 555.00")).toBe("totals_row");
   });
 });
 
@@ -784,4 +831,36 @@ describe("measured on the repo's supplement-with-summary prints", () => {
     expect(linesOn(found, 10).slice(0, 3)).toEqual(["14", "15", "16"]);
     expect(operationAnchorsOn(found, [12, 13, 14, 15])).toEqual([]);
   });
+});
+
+describe("measured on the repo's TOTALS SUMMARY blocks", () => {
+  const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures");
+  // [fixture, summary page, its rows by label, the page of its ESTIMATE TOTALS]
+  const SUMMARIES: Array<[string, number, string[], number]> = [
+    ["20766/sor3_words.json", 6, ["Parts", "Body Labor", "Additional Supplement Labor", "Subtotal", "Sales Tax", "Total Supplement Amount", "NET COST OF SUPPLEMENT"], 4],
+    ["22084/sor5_words.json", 8, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Paint Supplies", "Subtotal", "Sales Tax", "Total Supplement Amount", "NET COST OF SUPPLEMENT"], 6],
+    ["21995/sor3_words.json", 12, ["Parts", "Body Labor", "Paint Labor", "Mechanical Labor", "Frame Labor", "ALUM", "Paint Supplies", "Subtotal", "Sales Tax", "Total Supplement Amount", "NET COST OF SUPPLEMENT"], 8],
+  ];
+
+  for (const [relativePath, pageNumber, labels, estimateTotalsPage] of SUMMARIES) {
+    it(`${relativePath} page ${pageNumber}: every row anchors as a TOTALS SUMMARY totals_row; ESTIMATE TOTALS does not`, () => {
+      const words: PdfWord[] = JSON.parse(readFileSync(path.join(FIXTURE_DIR, relativePath), "utf8")).map(
+        (word: Omit<PdfWord, "normalizedText">) => ({ ...word, normalizedText: word.text.toLowerCase() })
+      );
+      const found = buildEstimateRowAnchorsFromLines(buildPdfTextLines(words), {
+        sourceDocumentRole: "carrier",
+        sourceDocumentId: relativePath,
+      });
+      const onPage = found.filter((anchor) => anchor.pageNumber === pageNumber);
+      for (const label of ["TOTALS SUMMARY", ...labels]) {
+        const rows = onPage.filter((anchor) => anchor.rowText === label || anchor.rowText.startsWith(`${label} `));
+        expect(rows.map((anchor) => [anchor.anchorType, anchor.section]), label).toEqual([["totals_row", TOTALS_SUMMARY_SECTION]]);
+      }
+      // The block ends above CUMULATIVE EFFECTS; nothing else is tagged.
+      expect(found.filter((anchor) => anchor.section === TOTALS_SUMMARY_SECTION)).toHaveLength(labels.length + 1);
+      expect(
+        found.filter((anchor) => anchor.pageNumber === estimateTotalsPage && anchor.anchorType === "totals_row").length
+      ).toBeGreaterThan(5);
+    });
+  }
 });

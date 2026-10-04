@@ -93,6 +93,7 @@ import {
   ensurePdfJsNodePolyfills,
   extractPdfWordsWithDiagnostics,
   findBestEstimateRowAnchorForFinding,
+  TOTALS_SUMMARY_SECTION,
   type PdfTextExtractionMethod,
   type PdfTextLine,
   type PdfWord,
@@ -5728,7 +5729,11 @@ function matchStructuredLineItemDeltas(
     lower: lowerTotals,
   });
   if (categoryGapCheck.notes.length > 0) contradictionNotes.push(...categoryGapCheck.notes);
-  const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
+  // The totals deltas compare the ESTIMATE TOTALS blocks, so a TOTALS SUMMARY
+  // row (the supplement's own change amounts) is never where one is visible.
+  const totalsAnchors = context.anchors.filter(
+    (anchor) => anchor.anchorType === "totals_row" && anchor.section !== TOTALS_SUMMARY_SECTION
+  );
 
   // Arbitrary materials cap (runbook Step 6): lower estimate pays a materials
   // category flat with no hrs@rate basis while this estimate computes one.

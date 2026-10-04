@@ -1075,7 +1075,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   /** Where the next digit-led wrap goes in an anchor's rowText, so a second
    * one lands after the first instead of ahead of it. */
   const wrapInsertOffsets = new Map<EstimateRowAnchor, number>();
-  const estimateTotalsRows = measureEstimateTotalsRows(lines);
+  const totalsBlockRows = measureTotalsBlockRows(lines);
   /** Ids already given to anchors with no line number (see buildRowAnchorId). */
   const unnumberedAnchorIds = new Set<string>();
 
@@ -1121,9 +1121,10 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       // the unanchored appendix.
       if (tableRegions.size === 0 || tableRegions.has(line.pageNumber)) section = sectionName;
     }
-    // A valued row of the ESTIMATE TOTALS block is a totals row by position,
-    // whatever section it runs under (see measureEstimateTotalsRows).
-    if (estimateTotalsRows.has(line) && /\d/.test(line.text)) type = "totals_row";
+    // A valued row of a measured totals block is a totals row by position,
+    // whatever section it runs under (see measureTotalsBlockRows).
+    const totalsBlock = totalsBlockRows.get(line);
+    if (totalsBlock && totalsBlock !== "title" && /\d/.test(line.text)) type = "totals_row";
     if (!inRegion && (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")) {
       type = "guide_row";
     }
@@ -1186,7 +1187,10 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       pageHeight: line.pageHeight,
       rotation: 0,
       lineNumber,
-      section,
+      // A TOTALS SUMMARY row carries its block as its section, whatever the
+      // running section reads: it is how a totals finding tells the
+      // supplement's own change amounts from the estimate's totals.
+      section: totalsBlock && totalsBlock !== "estimate totals" ? TOTALS_SUMMARY_SECTION : section,
       rowText: line.text,
       normalizedRowText: line.normalizedText,
       anchorType: type,
@@ -1697,7 +1701,10 @@ function isTotalsRow(normalized: string, currentSection: string, rawText = "") {
     // so their totals-delta findings had no row to land on.
     return (
       /\b(?:parts|body labor|paint labor|paint supplies|mechanical labor|diagnostic labor|electrical labor|structural labor|frame labor|glass labor|aluminum|miscellaneous|total cost of repairs|net cost of repairs|sales tax|deductible)\b/.test(normalized) ||
-      /\d(?:\.\d+)?\s*hrs?\s*@/.test(normalized)
+      // Tested on the printed text: normalizeMatchText strips "@", so this
+      // branch never matched the normalized row and a category the list above
+      // does not name ("Refinish Labor 3.0 hrs @ …") got no anchor.
+      /\d(?:\.\d+)?\s*hrs?\s*@/i.test(rawText)
     ) &&
       /(?:\$?\d[\d,.]*|\d+(?:\.\d+)?\s*(?:hrs?|@))/.test(normalized);
   }
@@ -1705,32 +1712,48 @@ function isTotalsRow(normalized: string, currentSection: string, rawText = "") {
 }
 
 /**
- * The rows of CCC ONE's ESTIMATE TOTALS block, measured from the block's own
- * header: the title "ESTIMATE TOTALS" ("ESTIMATETOTALS" on an OCR'd print)
- * with the column header "Category Basis Rate Cost $" on the next line, then
- * one row per category ("Parts 3,180.20", "Mechanical Labor 7.7 hrs @ $ 175.00
- * /hr 1,347.50", "Deductible 500.00"). Rows run down from the column header
- * while they start in the Category column, within one text height of where
- * "Category" starts, and no farther apart than the title sits above the column
- * header. The disclaimer under the block starts at the page margin and ends it.
+ * The rows of CCC ONE's two totals blocks, each measured from its own header:
+ * the title ("ESTIMATE TOTALS", "ESTIMATETOTALS" on an OCR'd print, or
+ * "TOTALS SUMMARY") with the column header "Category Basis Rate Cost $" on the
+ * next line, then one row per category ("Parts 3,180.20", "Mechanical Labor
+ * 7.7 hrs @ $ 175.00 /hr 1,347.50", "Deductible 500.00"). Rows run down from
+ * the column header while they start in the Category column, within one text
+ * height of where "Category" starts, and no farther apart than the title sits
+ * above the column header. The disclaimer under the block starts at the page
+ * margin and ends it.
  *
- * isTotalsRow reads a category row with no totals word of its own as a totals
- * row only under the running section "estimate totals", and that section
- * advances only on a page with a U-5 table region. A block printed on the page
- * AFTER the SUBTOTALS rule (RO 22084 and RO 22182 shop, RO 20766 and RO 21995
- * SOR-3) sits on a page with no region, so its Parts, Mechanical Labor, Sales
- * Tax and Deductible rows got no anchor and their totals findings fell into
- * the unanchored appendix. An OCR'd title advances the section to
- * "estimatetotals", which isTotalsRow does not read either (RO 22047 USAA).
- * Letting the section advance on pages without a region is not the fix: cover
- * and ALTERNATE PARTS USAGE text then becomes the section. The block is
- * measured here instead, and the running section is left alone.
+ * ESTIMATE TOTALS. isTotalsRow reads a category row with no totals word of its
+ * own as a totals row only under the running section "estimate totals", and
+ * that section advances only on a page with a U-5 table region. A block
+ * printed on the page AFTER the SUBTOTALS rule (RO 22084 and RO 22182 shop, RO
+ * 20766 and RO 21995 SOR-3) sits on a page with no region, so its Parts,
+ * Mechanical Labor, Sales Tax and Deductible rows got no anchor and their
+ * totals findings fell into the unanchored appendix. An OCR'd title advances
+ * the section to "estimatetotals", which isTotalsRow does not read either (RO
+ * 22047 USAA). Letting the section advance on pages without a region is not
+ * the fix: cover and ALTERNATE PARTS USAGE text then becomes the section. The
+ * block is measured here instead, and the running section is left alone.
+ *
+ * TOTALS SUMMARY. A supplement print follows its ESTIMATE TOTALS with the
+ * SUPPLEMENT's own change amounts in the same shape (RO 20766 SOR-3 page 6:
+ * "Parts 370.00", "Body Labor 0.5 hrs …", "Subtotal 232.50", "NET COST OF
+ * SUPPLEMENT 246.45"). Before this was measured, the rows that happened to
+ * carry a totals word anchored and the rest did not, and the totals lane,
+ * which searches its anchors from the end, could put a Body Labor or Subtotal
+ * finding computed from ESTIMATE TOTALS on the supplement's change row. Every
+ * row of the block, title included, is tagged TOTALS_SUMMARY_SECTION so the
+ * lane can leave the whole block out.
  *
  * Page-local: a block never continues onto the next page. Measured lines only:
  * stored-text synthetic lines carry no geometry.
  */
-function measureEstimateTotalsRows(lines: PdfTextLine[]): Set<PdfTextLine> {
-  const rows = new Set<PdfTextLine>();
+type TotalsBlockKind = "estimate totals" | "totals summary" | "title";
+
+/** The section a TOTALS SUMMARY row carries (see measureTotalsBlockRows). */
+export const TOTALS_SUMMARY_SECTION = "totals summary";
+
+function measureTotalsBlockRows(lines: PdfTextLine[]): Map<PdfTextLine, TotalsBlockKind> {
+  const rows = new Map<PdfTextLine, TotalsBlockKind>();
   const byPage = new Map<number, PdfTextLine[]>();
   for (const line of lines) {
     if (!line.words.length) continue;
@@ -1741,15 +1764,24 @@ function measureEstimateTotalsRows(lines: PdfTextLine[]): Set<PdfTextLine> {
   for (const pageLines of byPage.values()) {
     pageLines.sort((a, b) => a.y - b.y);
     pageLines.forEach((title, index) => {
-      if (!/^ESTIMATETOTALS?$/i.test(title.text.replace(/\s+/g, ""))) return;
+      const titleText = title.text.replace(/\s+/g, "");
+      const kind: TotalsBlockKind | null = /^ESTIMATETOTALS?$/i.test(titleText)
+        ? "estimate totals"
+        : /^TOTALSSUMMARY$/i.test(titleText)
+          ? "totals summary"
+          : null;
+      if (!kind) return;
       const header = pageLines[index + 1];
       if (!header || !/^Category\s*Basis\s*Rate/i.test(header.text)) return;
+      // The ESTIMATE TOTALS title keeps its own classification; a TOTALS
+      // SUMMARY title is tagged with its block (see the doc comment).
+      if (kind === "totals summary") rows.set(title, "title");
       const left = header.words[0].x;
       const maxGap = (header.y - title.y) * 1.5;
       let previous = header;
       for (const row of pageLines.slice(index + 2)) {
         if (Math.abs(row.words[0].x - left) > header.height || row.y - previous.y > maxGap) break;
-        rows.add(row);
+        rows.set(row, kind);
         previous = row;
       }
     });
