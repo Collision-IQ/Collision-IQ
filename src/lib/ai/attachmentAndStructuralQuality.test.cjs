@@ -287,10 +287,11 @@ runAsync("image uploads contribute structured image observations", async () => {
   assert.match(attachments[0].text, /Visible damage zones: front right/);
 });
 
-// a39fabf ("Fix OpenClaw chat and Citation Density PDF extraction") removed the
-// PDF vision-summary path: PDFs keep their extracted text unchanged.
-runAsync("PDF attachments keep extracted text without a vision summary", async () => {
-  let pdfSummarizerCalled = false;
+// A PDF's text layer misses totals pages printed as images, photo and
+// screenshot pages, and scans; the vision summary reads them from the stored
+// file (restored after a39fabf removed it).
+runAsync("PDF vision observations contribute when the PDF file payload is available", async () => {
+  let summarized = null;
   const attachments = await enrichAnalysisAttachments({
     attachments: [
       {
@@ -303,15 +304,54 @@ runAsync("PDF attachments keep extracted text without a vision summary", async (
       },
     ],
     deps: {
-      summarizePdfAttachment: async () => {
-        pdfSummarizerCalled = true;
-        return "Document type: estimate pdf\nKey visible estimate facts: total 19428.53";
+      summarizePdfAttachment: async (attachment) => {
+        summarized = attachment.id;
+        return "Document type: estimate pdf\nKey visible estimate facts: total 19428.53\nVisible damage/photo observations: front-right damage photos present";
       },
     },
   });
 
-  assert.equal(pdfSummarizerCalled, false);
-  assert.equal(attachments[0].text, "Sparse extracted text");
+  assert.equal(summarized, "pdf1");
+  assert.equal(attachments.length, 1);
+  assert.match(attachments[0].text, /^Sparse extracted text\n\n/);
+  assert.match(attachments[0].text, /Key visible estimate facts: total 19428\.53/);
+  assert.match(attachments[0].text, /front-right damage photos present/);
+  assert.equal(attachments[0].pageCount, 4);
+});
+
+runAsync("a PDF without its file payload keeps its extracted text and is never summarized", async () => {
+  let called = false;
+  const attachments = await enrichAnalysisAttachments({
+    attachments: [
+      { id: "pdf2", filename: "large.pdf", type: "application/pdf", text: "Only the text layer", pageCount: 40 },
+    ],
+    deps: {
+      summarizePdfAttachment: async () => {
+        called = true;
+        return "should not appear";
+      },
+    },
+  });
+
+  assert.equal(called, false);
+  assert.equal(attachments[0].text, "Only the text layer");
+});
+
+run("the PDF payload reaches Claude as a document, not as text", () => {
+  const { responsesInputToClaudeMessages } = requireTs("src/lib/anthropic.ts");
+  const messages = responsesInputToClaudeMessages([
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: "Review this PDF." },
+        { type: "input_file", filename: "estimate.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQK" },
+      ],
+    },
+  ]);
+  const blocks = messages[0].content;
+  assert.equal(blocks[1].type, "document");
+  assert.equal(blocks[1].source.media_type, "application/pdf");
+  assert.equal(blocks[1].source.data, "JVBERi0xLjQK");
 });
 
 run("linked-document URL helpers extract Drive file ids and ignore Egnyte links", () => {
