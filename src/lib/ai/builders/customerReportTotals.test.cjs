@@ -108,6 +108,21 @@ test("computes difference from totals when gap is absent", () => {
   assert.equal(byLabel(rows, "Difference"), "$1,306.64");
 });
 
+test("one estimate's total is never attributed to the shop or the carrier", () => {
+  // A CCC estimate prints "Grand Total" whoever wrote it (e227878: no shop /
+  // carrier attribution without an estimate pair).
+  assert.deepEqual(buildCustomerTotalsSummary({ shopEstimateGrandTotal: 4959.35 }, "$1.00"), [
+    { label: "Estimate Total", value: "$4,959.35" },
+  ]);
+  assert.deepEqual(
+    buildCustomerTotalsSummary({ carrierTotalCostOfRepairs: 3652.71, carrierNetAfterDeductible: 3152.71 }, null),
+    [
+      { label: "Estimate Total", value: "$3,652.71" },
+      { label: "Net after deductible", value: "$3,152.71" },
+    ]
+  );
+});
+
 test("falls back to single Estimate Total when no comparison totals exist", () => {
   const rows = buildCustomerTotalsSummary(undefined, "$4,959.35");
   assert.deepEqual(rows, [{ label: "Estimate Total", value: "$4,959.35" }]);
