@@ -16,7 +16,7 @@
  * is null and nothing is printed.
  */
 import { shopLineRate, shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
-import { normalizePartNumber, qualifierStem } from "./integrityChecks";
+import { normalizePartNumber, qualifierStem, separateLocations } from "./integrityChecks";
 import { classifyNonLabor } from "./nonLaborBuckets";
 import type { MatcherPair } from "./argueItems";
 import type { GroupDelta } from "./operationEquivalence";
@@ -132,26 +132,34 @@ export function assignUnits(params: {
     add(pair.coveredByCarrierNote && s.length > 1 ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c]);
   }
   // What the matcher did not report as a difference pairs here by part number,
-  // then by full component name and operation; the rest is one-sided.
+  // then by full component name and operation; the rest is one-sided. No pass
+  // pairs across printed positions: the same name on the RT and the LT wheel,
+  // or on the upper and the lower cover, is two lines, not one priced twice.
   const restShop = () => shop.lines.filter((l) => !usedShop.has(l.line));
   for (const s of restShop()) {
     const key = normalizePartNumber(s.partNumber);
     if (!key) continue;
-    const c = carrier.lines.find((x) => !usedCarrier.has(x.line) && normalizePartNumber(x.partNumber) === key);
+    const c = carrier.lines.find(
+      (x) => !usedCarrier.has(x.line) && normalizePartNumber(x.partNumber) === key && !separateLocations(s, x)
+    );
     if (c) add(s.desc, [s], [c]);
   }
   for (const s of restShop()) {
     const name = qualifierStem(s.desc);
     if (!name) continue;
     const c = carrier.lines.find(
-      (x) => !usedCarrier.has(x.line) && (x.oper ?? "") === (s.oper ?? "") && qualifierStem(x.desc) === name
+      (x) =>
+        !usedCarrier.has(x.line) &&
+        (x.oper ?? "") === (s.oper ?? "") &&
+        qualifierStem(x.desc) === name &&
+        !separateLocations(s, x)
     );
     if (c) add(s.desc, [s], [c]);
   }
   // Same work in different words ("Set back wiring" / "Set back wiring/modules
   // for frame set up", "Four wheel suspension alignment" / "Align
   // suspension"): at least two shared significant words, most of the shorter
-  // description, and never across sides of the vehicle.
+  // description, and never across printed positions.
   // Best matches first across the whole sheet (highest word overlap, then the
   // closest value), so a 0.3 hr "Set back, secure wiring" never takes the
   // 4.0 hr set-back line that a 4.0 hr "Set back wiring" matches exactly.
@@ -160,7 +168,7 @@ export function assignUnits(params: {
     const a = words(s.desc);
     if (a.size < 2) continue;
     for (const c of carrier.lines) {
-      if (usedCarrier.has(c.line) || !sameSide(s.desc, c.desc)) continue;
+      if (usedCarrier.has(c.line) || separateLocations(s, c)) continue;
       const b = words(c.desc);
       const shared = [...a].filter((w) => b.has(w)).length;
       const score = shared / Math.min(a.size, b.size);
@@ -191,11 +199,4 @@ function words(desc: string): Set<string> {
       .filter((w) => w.length > 2 && !STOP.has(w))
       .map((w) => w.slice(0, 5))
   );
-}
-
-function sameSide(a: string, b: string): boolean {
-  const side = (s: string) => (/\brt\b/i.test(s) ? "rt" : /\blt\b/i.test(s) ? "lt" : "");
-  const sa = side(a);
-  const sb = side(b);
-  return !sa || !sb || sa === sb;
 }
