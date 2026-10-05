@@ -4332,6 +4332,11 @@ export function buildRequiredEstimatorDeltaFindings(
   const rejectedAnchors: NonNullable<CitationDensityDebugTrace["rejectedAnchors"]> = [];
   const usedAnchorIds = new Set<string>();
   const comparisonText = context.comparisonEstimateTexts.map((item) => item.text).join("\n");
+  // The wheel-access finding is a claim about the CARRIER's sheet: on a
+  // carrier run that is the annotated estimate, on a shop run the comparison.
+  // null when that text was not supplied: nothing about it is asserted.
+  const carrierSheetText = context.sourceDocumentRole === "carrier" ? context.sourceText ?? "" : comparisonText;
+  const carrierWheelAccess = carrierSheetText.trim() ? wheelAccessLines(carrierSheetText) : null;
   const allText = [context.sourceText ?? "", comparisonText, context.sourcePdfName, ...context.uploadedFileNames].join("\n");
   const isTeslaOrEv = /\b(?:tesla|model\s+[3sxy]|electric vehicle|bev|ev\b|high[-\s]?voltage|hv battery)\b/i.test(allText);
   let lineItemDeltaFindingCount = 0;
@@ -4442,7 +4447,19 @@ export function buildRequiredEstimatorDeltaFindings(
       const zeroOrMissingLabor = anchor.labor === 0 || anchor.labor === null || /\b0\.0\b/.test(rowText);
       const alignmentGroup = /\balignment\b/.test(normalized);
       const groupAlreadySeen = alignmentGroup ? wheelAlignmentDetectorSeen : wheelAccessDetectorSeen;
-      if (!groupAlreadySeen && (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor)) {
+      // RO 22120: the shop's LT/Front and LT/Rear wheels drew "carrier may be
+      // missing wheel R&I/access labor" while the carrier's sheet printed
+      // "LT/Front R&I wheel" and "LT/Rear R&I wheel". A carrier access line at
+      // this row's position (its own row aside) answers the request, so the
+      // finding has no premise; hour differences are the line comparison's.
+      const carrierCoversRow =
+        carrierWheelAccess !== null &&
+        carrierWheelAccess.some(
+          (line) =>
+            !wheelPositionsConflict(normalizeMatchText(line), normalized) &&
+            !(context.sourceDocumentRole === "carrier" && isSameEstimateLine(line, anchor.lineNumber))
+        );
+      if (!groupAlreadySeen && !carrierCoversRow && (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor)) {
         if (alignmentGroup) {
           wheelAlignmentDetectorSeen = true;
         } else {
@@ -6863,6 +6880,36 @@ export function summarizeComparisonEvidence(text: string, pattern: RegExp) {
     .sort((a, b) => scoreWheelComparisonEvidenceLine(b) - scoreWheelComparisonEvidenceLine(a));
   const summary = lines.slice(0, 2).join("; ");
   return summary ? truncateText(summary, 180) : "not located in comparison text";
+}
+
+/** A sheet's wheel R&I / replacement / access lines, as extracted (sublet repair and wheel covers are not access). */
+function wheelAccessLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item) => item && isRelevantWheelComparisonEvidence(item));
+}
+
+/** Front/rear and left/right a normalized wheel line names; null when it names neither end (or both). */
+function wheelPositions(normalized: string): { axle: "front" | "rear" | null; side: "left" | "right" | null } {
+  const one = <T,>(a: boolean, b: boolean, x: T, y: T): T | null => (a === b ? null : a ? x : y);
+  return {
+    axle: one(/\b(?:front|frt|rf|lf)\b/.test(normalized), /\b(?:rear|rr|lr)\b/.test(normalized), "front", "rear"),
+    side: one(/\b(?:lt|left|lf|lr|lh)\b/.test(normalized), /\b(?:rt|right|rf|rr|rh)\b/.test(normalized), "left", "right"),
+  };
+}
+
+/** Two wheel lines name different wheels: an axis both name, at different ends. */
+export function wheelPositionsConflict(a: string, b: string): boolean {
+  const pa = wheelPositions(a);
+  const pb = wheelPositions(b);
+  return Boolean((pa.axle && pb.axle && pa.axle !== pb.axle) || (pa.side && pb.side && pa.side !== pb.side));
+}
+
+/** The extracted line is printed as estimate line `lineNumber` ("28S02R&I…", "28 R&I…"). */
+function isSameEstimateLine(line: string, lineNumber: number | string | null | undefined) {
+  if (lineNumber === null || lineNumber === undefined || lineNumber === "") return false;
+  return new RegExp(`^\\s*${Number(lineNumber)}(?!\\d)`).test(line);
 }
 
 function isRelevantWheelComparisonEvidence(line: string) {
