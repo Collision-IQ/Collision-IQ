@@ -4686,12 +4686,12 @@ export function buildRequiredEstimatorDeltaFindings(
       higherLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld
           ? deltaMatch.higherRowsRead
-          : deltaMatch.matchedPairCount + deltaMatch.missingOperationCount
+          : deltaMatch.operationLineCounts?.higher ?? deltaMatch.matchedPairCount + deltaMatch.missingOperationCount
         : null,
       lowerLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld
           ? deltaMatch.lowerRowsRead
-          : deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
+          : deltaMatch.operationLineCounts?.lower ?? deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
         : null,
       lineItemComparisonWithheld: deltaMatch?.lineItemsWithheld ?? null,
       rows: {
@@ -5085,6 +5085,9 @@ type StructuredLineItemDeltaMatch = {
    * what "rows read" means once the pairing itself has been withheld. */
   higherRowsRead: number;
   lowerRowsRead: number;
+  /** Operation lines each side prints (paired + one-sided), counted before an
+   * inclusion note groups several of them into one comparison. */
+  operationLineCounts?: { higher: number; lower: number };
   /** The rows both sides were read into (the same rows the pairing used), for
    * the Appraisal Dispute Report's line-level ledger. Empty when withheld. */
   higherRows: EstimateDeltaRow[];
@@ -5533,6 +5536,12 @@ function matchStructuredLineItemDeltas(
     }
   }
 
+  // The operation lines each document prints do not change because a note
+  // groups some of them into one comparison: the counts are taken first.
+  const operationLineCounts = {
+    higher: match.matchedPairCount + match.missingOperationCount,
+    lower: match.matchedPairCount + match.lowerOnlyRows.length,
+  };
   // A comparison line whose own note names the work it includes is compared
   // once with our lines that do that work, never reported as missing from
   // either side (RO 21548: "Other diagnostic services … includes pre and post
@@ -5544,16 +5553,18 @@ function matchStructuredLineItemDeltas(
       comparisonText: comparison[0].text,
       comparisonName: comparison[0].fileName || "the comparison estimate",
     });
-    const coveredCount = covered.coverage.reduce((sum, item) => sum + item.coveredRows.length, 0);
+    // Only covered lines the matcher had called missing leave the missing count.
+    const coveredMissing = covered.coverage.reduce((sum, item) => sum + item.missingCount, 0);
     match.deltas = covered.deltas;
     match.lowerOnlyRows = covered.lowerOnlyRows;
-    match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredCount);
+    match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredMissing);
     for (const item of covered.coverage) {
       contradictionNotes.push(
         `"${item.lowerRow.description}" on ${comparison[0].fileName || "the comparison estimate"} states it includes ${item.included}; ` +
           `it is compared with the ${item.coveredRows.length} line${item.coveredRows.length === 1 ? "" : "s"} of this estimate that do that work, and neither side reports them as missing.`
       );
     }
+    contradictionNotes.push(...covered.verify);
   }
 
   // Aggregate-vs-member dedupe (S-3): a description group that produced
@@ -5832,6 +5843,7 @@ function matchStructuredLineItemDeltas(
     lineItemsWithheld,
     higherRowsRead: dedupedHigherRows.length,
     lowerRowsRead: lowerRows.length,
+    operationLineCounts,
     higherRows: lineItemsWithheld ? [] : dedupedHigherRows,
     lowerRows: lineItemsWithheld ? [] : lowerRows,
     // The subject row count and the comparison's own printed total are what

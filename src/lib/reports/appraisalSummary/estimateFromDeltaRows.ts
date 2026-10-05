@@ -374,6 +374,8 @@ export function pairsFromDeltas(
       shopLines,
       carrierLine,
       ...(delta.coveredHigherLines?.length ? { coveredByCarrierNote: true } : {}),
+      ...(delta.coveredLowerLines?.length ? { coveredCarrierLines: delta.coveredLowerLines } : {}),
+      ...(delta.coveredByInferenceLines?.length ? { inferredShopLines: delta.coveredByInferenceLines } : {}),
     });
   }
   const taken = new Set(pairs.flatMap((pair) => pair.shopLines));

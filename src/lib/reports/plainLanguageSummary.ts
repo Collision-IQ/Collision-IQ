@@ -95,7 +95,7 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const { shop, carrier } = input;
   const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
   const partType = partTypeEvidence(shop, carrier);
-  const { groups, usedShop } = groupEquivalents(shop, carrier);
+  const { groups, usedShop } = groupEquivalents(shop, carrier, input.pairs);
   // With carrier dollars unread, a carrier line read with no price may be a
   // price that was not read: every "no price" statement says what was read.
   const carrierLinesIncomplete = carrierPartlyUnread(ledger);

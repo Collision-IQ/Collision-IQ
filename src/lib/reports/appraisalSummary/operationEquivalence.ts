@@ -17,6 +17,7 @@
  * diagnostic app) are recognition vocabulary, like a carrier-name list — no
  * rule branches on a vehicle make or a carrier.
  */
+import type { MatcherPair } from "./argueItems";
 import { shopLineRate, shopRateFor } from "./gapLedger";
 import { round2, type Estimate, type EstimateLine } from "./types";
 
@@ -115,9 +116,21 @@ export interface GroupDelta {
 
 const matches = (re: RegExp, line: EstimateLine) => re.test(line.desc.trim());
 
-export function groupEquivalents(shop: Estimate, carrier: Estimate) {
+export function groupEquivalents(shop: Estimate, carrier: Estimate, pairs: MatcherPair[] = []) {
   const usedShop = new Set<number>();
   const usedCarrier = new Set<number>();
+  // A carrier line whose own note names the work it includes is already one
+  // comparison with the lines of ours it covers (and with its lines whose
+  // notes point back to it). A group taking part of it would split that
+  // comparison, and the dispute report would then argue neither half
+  // (RO 22084: the ADAS group took two of the Tool Box's lines).
+  const reservedShop = new Set<number>();
+  const reservedCarrier = new Set<number>();
+  for (const pair of pairs) {
+    if (!pair.coveredByCarrierNote || pair.carrierLine === undefined) continue;
+    pair.shopLines.forEach((line) => reservedShop.add(line));
+    [pair.carrierLine, ...(pair.coveredCarrierLines ?? [])].forEach((line) => reservedCarrier.add(line));
+  }
   const groups: GroupDelta[] = [];
   // Paint hours count: one sheet can write the same finishing work as paint
   // and the other as body (RO 21548's finish sand & polish).
@@ -126,8 +139,8 @@ export function groupEquivalents(shop: Estimate, carrier: Estimate) {
     round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) * shopLineRate(shop, l) + (l.paintHours ?? 0) * paintRate + (l.price ?? 0), 0));
   const hours = (lines: EstimateLine[]) => round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0));
   for (const group of EQUIV_GROUPS) {
-    const s = shop.lines.filter((l) => !usedShop.has(l.line) && matches(group.shop, l));
-    const c = carrier.lines.filter((l) => !usedCarrier.has(l.line) && matches(group.carrier, l));
+    const s = shop.lines.filter((l) => !usedShop.has(l.line) && !reservedShop.has(l.line) && matches(group.shop, l));
+    const c = carrier.lines.filter((l) => !usedCarrier.has(l.line) && !reservedCarrier.has(l.line) && matches(group.carrier, l));
     // One-sided: leave it for the no-counterpart pass.
     if (!s.length || !c.length) continue;
     if (group.carrierAnchor && !c.some((l) => matches(group.carrierAnchor!, l))) continue;
