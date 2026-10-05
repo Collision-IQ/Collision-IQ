@@ -78,7 +78,35 @@ const repeatKey = (l: EstimateLine) =>
     .replace(/\s+/g, " ")
     .trim()}`;
 
-const LABOR_RANK: Record<LaborCat, number> = { body: 1, paint: 1, other: 1, frame: 2, structural: 2, aluminum: 2, mechanical: 3 };
+/** Position words, per axis, as estimates abbreviate them. */
+const POSITION_AXES: Array<Record<string, RegExp>> = [
+  { front: /\b(front|frt)\b/, rear: /\b(rear|rr)\b/ },
+  { left: /\b(left|lt|lh)\b/, right: /\b(right|rt|rh)\b/ },
+  { upper: /\b(upper|upr)\b/, lower: /\b(lower|lwr)\b/ },
+  { inner: /\b(inner|inr)\b/, outer: /\b(outer|otr)\b/ },
+];
+/** The positions a line names on each axis, from its section and description
+ *  ("REAR SUSPENSION" + "LT Hub assy bolt" → rear, left). An axis that names
+ *  both ends, or neither, says nothing. */
+const positionsOf = (l: EstimateLine): Array<string | null> => {
+  const text = `${l.section ?? ""} ${l.desc}`.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  return POSITION_AXES.map((axis) => {
+    const named = Object.keys(axis).filter((end) => axis[end].test(text));
+    return named.length === 1 ? named[0] : null;
+  });
+};
+/** Two lines at different printed positions (front vs rear wheel, the front
+ *  and rear bumpers' primer masking) are two locations, not one written twice. */
+const separateLocations = (a: EstimateLine, b: EstimateLine) => {
+  const pa = positionsOf(a);
+  const pb = positionsOf(b);
+  return pa.some((p, axis) => p !== null && pb[axis] !== null && p !== pb[axis]);
+};
+/** The lines of a group that share a location with another line of it. */
+const sameLocationLines = (lines: EstimateLine[]) =>
+  lines.filter((l) => lines.some((o) => o !== l && !separateLocations(l, o)));
+
+const LABOR_RANK: Record<LaborCat, number> ={ body: 1, paint: 1, other: 1, frame: 2, structural: 2, aluminum: 2, mechanical: 3 };
 
 /** A carrier line at or above this, with no counterpart on our sheet, is resolved first. */
 export const HIGH_DOLLAR = 500;
@@ -217,8 +245,9 @@ export function integrityChecks(
       const key = `${partNumber}|${l.qty ?? ""}|${l.price ?? ""}`;
       byPartNumber.set(key, [...(byPartNumber.get(key) ?? []), l]);
     }
-    for (const [key, lines] of byPartNumber) {
+    for (const [key, group] of byPartNumber) {
       const partNumber = key.split("|")[0];
+      const lines = sameLocationLines(group);
       if (lines.length < 2 || new Set(lines.map((l) => stem(l.desc))).size < 2) continue;
       flags.push({
         kind: "duplicatePartNumber",
@@ -289,7 +318,8 @@ export function integrityChecks(
     const key = repeatKey(l);
     repeats.set(key, [...(repeats.get(key) ?? []), l]);
   }
-  for (const [key, lines] of repeats) {
+  for (const [key, group] of repeats) {
+    const lines = sameLocationLines(group);
     if (lines.length < 2 || key.length < 5) continue;
     flags.push({
       kind: "duplicateOperation",

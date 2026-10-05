@@ -38,6 +38,8 @@ export interface EstimateLine {
   supplement?: string;
   /** Part provenance as the reader typed it (A/M, LKQ, Recond…). Empty = new OEM. */
   partSource?: string[];
+  /** The section header the line prints under ("FRONT BUMPER & GRILLE"), when read. */
+  section?: string;
 }
 
 export interface LaborTotal {

@@ -15,7 +15,7 @@ import {
   buildForensicReconciliation,
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
-import { buildForensicReportPdf, resolveExportScrub } from "./forensicReportRenderer";
+import { buildForensicReportPdf, resolveExportScrub, type ForensicNoCounterpartRow } from "./forensicReportRenderer";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
 import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
 import type { MatcherPair } from "./appraisalSummary/argueItems";
@@ -897,7 +897,7 @@ export type AnnotatedEstimateGeneratedFindings = {
     reconciliation: ForensicReconciliation;
     higherLineCount: number | null;
     lowerLineCount: number | null;
-    noCounterpartRows: Array<{ line: number | null; description: string; amount: number | null }>;
+    noCounterpartRows: ForensicNoCounterpartRow[];
     /** Non-null when the line-item comparison was withheld (typed columns
      *  failed SUBTOTALS reconciliation): the totals table stands, and the
      *  report must say why it lists no line-level differences. */
@@ -4463,7 +4463,10 @@ export function buildRequiredEstimatorDeltaFindings(
           // zero. "missing/0.0" asserted the carrier allowed nothing about a
           // value this pass never read — Test 98 F47 and Test 100 both shipped
           // that false claim, once against rows that visibly carried hours.
-          currentSupportSummary: `Carrier/source rows affected: ${summarizeWheelCarrierEvidence(context.anchors)}. Anchored row: ${rowText}. Carrier allowed labor: ${typeof anchor.labor === "number" ? anchor.labor : "not read from the document (unknown — not asserted as zero)"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|alignment|access|r&i|remove|install|replacement|repl/i)}.`,
+          // Whose rows these are follows the annotated estimate's role: on a
+          // shop run they are the shop's, and the comparison is the carrier's
+          // (RO 22120 review: shop rows were labelled "Carrier/source rows").
+          currentSupportSummary: `${context.sourceDocumentRole === "shop" ? "Shop" : "Carrier"} rows affected (this estimate): ${summarizeWheelCarrierEvidence(context.anchors)}. Anchored row: ${rowText}. Labor on the anchored row: ${typeof anchor.labor === "number" ? anchor.labor : "not read from the document (unknown — not asserted as zero)"}. ${context.sourceDocumentRole === "shop" ? "Carrier" : "Shop"} wheel access lines (comparison estimate): ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|alignment|access|r&i|remove|install|replacement|repl/i)}.`,
           missingProofSummary: "Carrier may be missing or inadequately documenting wheel R&I/access labor. Wheel repair, wheel cover, mount/balance, wheel replacement, tire replacement, or wheel-opening access may require line-item R&I/access labor when removal is needed for liner, flare, bumper hardware, or wheel-end access.",
           recommendedNextAction: "Request line-item wheel R&I/access labor or a written included-operation basis explaining where the wheel removal/access labor is included.",
           missingAuthorityTypes: ["line-item R&I/access labor basis", "included-operation basis", "shop comparison estimate"],
@@ -4687,6 +4690,9 @@ export function buildRequiredEstimatorDeltaFindings(
             .join(" ")
             .trim(),
           amount: delta.higherRow.price,
+          laborHours: delta.higherRow.labor,
+          laborType: delta.higherRow.laborType,
+          paintHours: delta.higherRow.paint,
         })),
     },
     debug: {
@@ -6819,15 +6825,17 @@ function isRejectedBoilerplateSupplierText(normalized: string) {
     /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn|parts are oem parts|oem parts that may be)\b/.test(normalized);
 }
 
-function isWheelLaborAnchorText(normalized: string) {
+/** A row (normalized text) that is wheel / tire / alignment labor, not a wheel-opening molding or option list. */
+export function isWheelLaborAnchorText(normalized: string) {
   if (!/\b(?:wheel|rim|tire|alignment)\b/.test(normalized)) return false;
-  if (/\b(?:wheel opening|opening molding|molding|flare|liner|vehicle equipment|tilt wheel|fm radio|skyview roof)\b/.test(normalized)) return false;
+  // "opng mldg" is CCC's abbreviation of wheel opening molding (RO 22120 L21).
+  if (/\b(?:wheel opening|opening molding|molding|opng|mldg|flare|liner|vehicle equipment|tilt wheel|fm radio|skyview roof)\b/.test(normalized)) return false;
   return /\b(?:(?:rf|lf|rt|lt|front|rear)\s+(?:wheel|rim)|(?:wheel|rim)\s+(?:repair|replacement|replace|repl|r&i|r\s*&\s*i|access)|tire\s+(?:mount|balance|mount\/balance)|(?:four[-\s]?wheel|4[-\s]?wheel)?\s*alignment|transport\s+alignment)\b/.test(normalized);
 }
 
 function isWheelComparisonBoilerplate(text: string) {
   const normalized = normalizeMatchText(text);
-  return /\b(?:vehicle equipment|4 wheel drive|tilt wheel|fm radio|skyview roof|wheel opening|opening molding)\b/.test(normalized);
+  return /\b(?:vehicle equipment|4 wheel drive|tilt wheel|fm radio|skyview roof|wheel opening|opening molding|opng|mldg)\b/.test(normalized);
 }
 
 function isJunkCitationFindingText(normalized: string) {
@@ -6846,7 +6854,8 @@ function summarizeWheelCarrierEvidence(anchors: EstimateRowAnchor[]) {
   return rows.length ? rows.join("; ") : "wheel/tire/alignment row located in source estimate";
 }
 
-function summarizeComparisonEvidence(text: string, pattern: RegExp) {
+/** The comparison estimate's wheel access lines matching `pattern`, as extracted, or "not located in comparison text". */
+export function summarizeComparisonEvidence(text: string, pattern: RegExp) {
   const lines = text
     .split(/\r?\n/)
     .map((item) => item.replace(/\s+/g, " ").trim())
@@ -6862,6 +6871,12 @@ function isRelevantWheelComparisonEvidence(line: string) {
   if (/\bline\s+210\b/i.test(line)) return false;
   return /\bline\s+(?:50|51)\b/i.test(line) ||
     /\b(?:rf|lf)\s+(?:wheel|rim)\b/.test(normalized) && /\b(?:replacement|replace|repl|r&i|r\s*&\s*i|access)\b/.test(normalized) ||
+    // Any positioned wheel R&I or replacement ("LT/Front R&I wheel"), not a
+    // wheel cover: RO 22120's carrier lines were reported "not located". The
+    // flattened text glues the next column on ("R&I wheel00.00m0.1"), so the
+    // word only has to end before a letter.
+    /\b(?:rf|lf|rr|lr|rt|lt|front|rear)\b/.test(normalized) && /\b(?:wheel|rim)(?![a-z])/.test(normalized) &&
+      !/\bcover\b/.test(normalized) && /\b(?:replacement|replace|repl|r&i|r\s*&\s*i|r i|access)\b/.test(normalized) ||
     /\baccess\b/.test(normalized) && /\b(?:wheel|liner|flare|bumper hardware)\b/.test(normalized);
 }
 
@@ -7556,6 +7571,11 @@ function formatDeltaHours(value: number | null) {
   return Number.isInteger(value) ? `${value}.0` : `${value}`;
 }
 
+/** "1.6 hours", but "not quantified", never "not quantified hours". */
+function withHoursUnit(formatted: string) {
+  return /^-?\d/.test(formatted) ? `${formatted} hours` : formatted;
+}
+
 function describeDeltaRowLocation(row: EstimateDeltaRow | null, fileName: string) {
   if (!row) return `${fileName}: source row missing`;
   const page = row.pageNumber ? ` page ${row.pageNumber}` : "";
@@ -7624,9 +7644,12 @@ function buildLineItemDeltaSupportSummary(params: {
     `Delta category: ${signedDeltaCategory(params.delta)}.`,
     `Higher-cost estimate: ${annotatedLocation}.`,
     `Comparison estimate (lower-cost): ${comparisonLocation}.`,
-    `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
-    `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
-    `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
+    // The price column only: a labor-only operation reads $0.00 here and its
+    // value is in its hours (RO 22120 review: "Amount delta" read as the
+    // operation's full value).
+    `Price-column delta (labor excluded): ${formatDeltaMoney(params.delta.priceDelta)}.`,
+    `Labor delta: ${withHoursUnit(formatDeltaHours(params.delta.laborDelta))}.`,
+    `Paint delta: ${withHoursUnit(formatDeltaHours(params.delta.paintDelta))}.`,
     `Pairing basis: ${params.delta.matchBasis}.`,
     // Swallow an existing leading "the" so "on the lower estimate" never
     // doubles into "on the the comparison estimate" (RO 22140 Test 3 audit).
