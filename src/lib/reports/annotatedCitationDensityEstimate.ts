@@ -149,6 +149,7 @@ import {
 } from "./estimateDeltaMatcher";
 import {
   estimateRowFromTextFields,
+  inclusionBundlesFromDeltas,
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
 import {
@@ -3175,11 +3176,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           valueLayerSuppressionNote = valueLayerSuppressionNote ?? identityNote;
         }
         if (labelForMarks !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
+          // The comparisons the delta matcher made with a comparison line
+          // whose own note includes our lines' work, so this copy says what
+          // the other reports say about those lines. Only when this layer
+          // compares against the document the matcher read the notes from
+          // (its first comparison with text).
+          const matcherComparison = textComparisons.find((item) => item.text && item.text.trim().length > 0);
+          const inclusionBundles =
+            comparisonText && comparisonText === matcherComparison
+              ? inclusionBundlesFromDeltas(forensicInput?.rows?.deltas ?? [], comparisonText.text)
+              : [];
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
             pages: [...pageGeometries.values()],
             competingRows,
             competingTotals,
+            inclusionBundles,
             // EXPORT BOUNDARY — the annotation text is drawn ON the exported
             // page, so naming the carrier there puts insurance information
             // straight back into a redacted document. The role is what the

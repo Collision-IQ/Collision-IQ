@@ -15,6 +15,9 @@
  * supplied by the caller from document data.
  */
 import { formatBasis, notWrittenOn } from "./deltaWording";
+import { lineAnnotationsFromText } from "./appraisalSummary/estimateFromDeltaRows";
+import { noteCoverScope } from "./appraisalSummary/argueItems";
+import type { EstimateLineItemDelta } from "./estimateDeltaMatcher";
 import { canonicalOperationKey } from "./operationAliases";
 import {
   findCollidingWords,
@@ -59,6 +62,89 @@ export interface DeltaValueLayerParams {
    * alone does not know a payment QR code or a logo is sitting there.
    */
   occupiedRegions?: PlacementRect[];
+  /**
+   * Comparison lines whose own note states the work they include, with the
+   * subject lines the delta matcher already compared with each
+   * (applyComparisonInclusionNotes). This layer pairs line to line, so
+   * without them it calls work the comparison's note says it includes "not
+   * written" there; the coverage is taken as computed, never re-derived here.
+   */
+  inclusionBundles?: ComparisonInclusionBundle[];
+}
+
+/** One comparison line whose note includes work this estimate itemizes. */
+export interface ComparisonInclusionBundle {
+  /** The comparison line carrying the note. */
+  competingLine: number;
+  competingDescription: string;
+  /** Its hours as the matcher read them; this layer's own read wins when it has one. */
+  competingHours: number;
+  /** The note, as printed on the comparison estimate. */
+  note: string;
+  /** Subject lines compared with it. */
+  subjectLines: number[];
+  /** Of those, the lines the note's words do not name (counted by inference). */
+  inferredSubjectLines: number[];
+  /** Other comparison lines whose own note says they are included in it. */
+  includedCompetingLines: Array<{ line: number; note: string }>;
+}
+
+/**
+ * The inclusion-note comparisons the delta matcher made, in the shape this
+ * layer takes: its deltas that carry coveredHigherLines, with the notes read
+ * from the comparison text the matcher read them from. A delta whose
+ * comparison line carries no note in `comparisonText` belongs to another
+ * document and is left out, so the layer compares those lines as before.
+ */
+export function inclusionBundlesFromDeltas(
+  deltas: EstimateLineItemDelta[],
+  comparisonText: string
+): ComparisonInclusionBundle[] {
+  const covering = deltas.filter(
+    (delta) => (delta.coveredHigherLines?.length ?? 0) > 0 && typeof delta.lowerRow?.lineNumber === "number"
+  );
+  if (!covering.length) return [];
+  const notes = lineAnnotationsFromText(comparisonText);
+  const bundles: ComparisonInclusionBundle[] = [];
+  for (const delta of covering) {
+    const lowerRow = delta.lowerRow!;
+    const line = lowerRow.lineNumber as number;
+    const note = notes.get(line)?.note?.trim();
+    if (!note) continue;
+    bundles.push({
+      competingLine: line,
+      competingDescription: lowerRow.description,
+      competingHours: (lowerRow.labor ?? 0) + (lowerRow.paint ?? 0),
+      note,
+      subjectLines: [...(delta.coveredHigherLines ?? [])],
+      inferredSubjectLines: [...(delta.coveredByInferenceLines ?? [])],
+      includedCompetingLines: (delta.coveredLowerLines ?? []).map((included) => ({
+        line: included,
+        note: notes.get(included)?.note?.trim() ?? "",
+      })),
+    });
+  }
+  return bundles;
+}
+
+/**
+ * One row per printed line number, the FIRST read: the rule the delta
+ * matcher applies to both sides before its own pairAndCompare. A CCC line
+ * number is unique per estimate; a later row carrying it is a reprint (a
+ * supplement recap page) or an appendix table that lists lines again (TIRE
+ * PARTS SUPPLIERS: description, supplier, price), whose price the column grid
+ * reads into the paint cell. Compared again, that table stated "454.3 hr P"
+ * for a $454.26 tire and reported the tire a second time. A row read with no
+ * line number (0, a text-adapted row) identifies nothing and is kept.
+ */
+export function firstRowPerLine(rows: EstimateRow[]): EstimateRow[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => {
+    if (!(row.line > 0)) return true;
+    if (seen.has(row.line)) return false;
+    seen.add(row.line);
+    return true;
+  });
 }
 
 export interface PlannedStamp {
@@ -81,6 +167,8 @@ export interface DeltaValueLayerPlan {
 const NOTE_FONT_SIZE = 8;
 const STAMP_FONT_SIZE = 8;
 const CELL_PAD = 1.5;
+/** Room left on a wrapped callout line for the placement engine's padding (2 x 1.5pt) and rounding. */
+const NOTE_WRAP_PADDING = 4;
 
 function cellRect(pageNumber: number, box: CellBox): PlacementRect {
   return {
@@ -129,15 +217,48 @@ function toEngineWords(words: PlacementWord[]): Map<number, Word[]> {
   return byPage;
 }
 
+interface NotePiece {
+  text: string;
+  /** The estimate line it is read beside; a piece with none sorts last. */
+  order: number;
+  /** A callout printed on lines of its own, wrapped to the band, never joined to a neighbour. */
+  alone?: boolean;
+}
+
+/** Word-wrap one callout into lines no wider than maxWidth. */
+function wrapNoteText(text: string, maxWidth: number, measureText: MeasureText): string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && measureText(candidate, NOTE_FONT_SIZE) > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
 /** Pack note pieces for one page into lines that fit the page's note band width. */
 function packNoteLines(
-  pieces: string[],
+  pieces: NotePiece[],
   maxWidth: number,
   measureText: MeasureText
 ): string[] {
   const lines: string[] = [];
   let current = "";
-  for (const piece of pieces) {
+  for (const { text: piece, alone } of pieces) {
+    if (alone) {
+      if (current) lines.push(current);
+      current = "";
+      // Less the note's padding, so every wrapped line keeps the note font
+      // instead of being shrunk to fit its band.
+      lines.push(...wrapNoteText(piece, maxWidth - NOTE_WRAP_PADDING, measureText));
+      continue;
+    }
     const candidate = current ? `${current} | ${piece}` : piece;
     if (current && measureText(candidate, NOTE_FONT_SIZE) > maxWidth) {
       lines.push(current);
@@ -177,20 +298,38 @@ function resolveLeftStamp(
 
 export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaValueLayerPlan {
   const wordsByPage = toEngineWords(params.subjectWords);
-  const subjectRows = parseEstimateRows(wordsByPage);
+  const subjectRows = firstRowPerLine(parseEstimateRows(wordsByPage));
+  const competingRows = firstRowPerLine(params.competingRows);
   const subjectTotals = parseTotalsFromWords(wordsByPage);
-  const { findings, competingOnly } = pairAndCompare(subjectRows, params.competingRows);
+  const { findings, competingOnly } = pairAndCompare(subjectRows, competingRows);
   const label = params.competingLabel;
 
   const underlines: PlacementRect[] = [];
   const highlights: PlacementRect[] = [];
   const stamps: PlannedStamp[] = [];
-  const notePieces = new Map<number, string[]>();
-  const addPiece = (pageNumber: number, text: string) => {
+  const notePieces = new Map<number, NotePiece[]>();
+  const addPiece = (pageNumber: number, text: string, options?: { order?: number; alone?: boolean }) => {
     const list = notePieces.get(pageNumber) ?? [];
     if (list.length === 0) notePieces.set(pageNumber, list);
-    list.push(text);
+    const keyed = /^Ln\s+(\d+)/.exec(text);
+    list.push({
+      text,
+      order: options?.order ?? (keyed ? Number(keyed[1]) : Number.MAX_SAFE_INTEGER),
+      alone: options?.alone,
+    });
   };
+
+  // Lines the delta matcher compared ONCE with a comparison line whose own
+  // note includes their work (applyComparisonInclusionNotes). Line to line
+  // they read as "not written" there, or as hours against a 0.0 line noted
+  // "Included in" that one; the other reports compare them with the bundle,
+  // so this copy does too and says nothing else about them.
+  const bundles = (params.inclusionBundles ?? []).filter((bundle) => bundle.subjectLines.length > 0);
+  const bundledSubjectLines = new Set(bundles.flatMap((bundle) => bundle.subjectLines));
+  const bundledCompetingLines = new Set(
+    bundles.flatMap((bundle) => [bundle.competingLine, ...bundle.includedCompetingLines.map((item) => item.line)])
+  );
+  const isBundledSubject = (finding: Finding) => bundledSubjectLines.has(finding.subject.line);
 
   // Matched prices -> red underline on the subject's price cell. A paired row
   // with an equal price is underlined even when other cells differ (the price
@@ -211,7 +350,7 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
   // Merge equal-delta findings (e.g. RT/LT pairs) into one note piece.
   const mergedValueDeltas = new Map<string, { lines: number[]; finding: Finding }>();
   for (const finding of findings) {
-    if (finding.kind === "VALUE_DELTA") {
+    if (finding.kind === "VALUE_DELTA" && !isBundledSubject(finding)) {
       const signature =
         finding.subject.key +
         "::" +
@@ -268,13 +407,13 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
   // never collide there. canonicalOperationKey resolves both to
   // URETHANE_ADHESIVE, which is the question being asked.
   const competingOperations = new Set(
-    params.competingRows
+    competingRows
       .map((row) => canonicalOperationKey(row.rawDesc))
       .filter((key): key is string => Boolean(key))
   );
   const missedByPage = new Map<number, Finding[]>();
   for (const finding of findings) {
-    if (finding.kind !== "MISSED") continue;
+    if (finding.kind !== "MISSED" || isBundledSubject(finding)) continue;
     const subjectOperation = canonicalOperationKey(finding.subject.rawDesc);
     if (subjectOperation && competingOperations.has(subjectOperation)) continue;
     const list = missedByPage.get(finding.subject.page) ?? [];
@@ -312,6 +451,49 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     addPiece(
       finding.subject.page,
       `Ln ${finding.subject.line}+ ${shortDesc(finding.subject)} (${finding.category}): ${parts.join(", ")}`
+    );
+  }
+
+  // One callout per bundle, beside its first line: the hours on each side,
+  // the note quoted as printed, and what it does not establish, in the
+  // wording every other report uses (noteCoverScope).
+  const hoursOf = (row: EstimateRow) => (row.labor ?? 0) + (row.paint ?? 0);
+  const round1 = (value: number) => Math.round(value * 10) / 10;
+  for (const bundle of bundles) {
+    const covered = subjectRows
+      .filter((row) => bundle.subjectLines.includes(row.line))
+      .sort((a, b) => a.line - b.line);
+    if (!covered.length) continue;
+    const competingRow = competingRows.find((row) => row.line === bundle.competingLine);
+    const bundleHours = competingRow ? hoursOf(competingRow) : bundle.competingHours;
+    const crossRefs = bundle.includedCompetingLines.map((item) => {
+      const row = competingRows.find((candidate) => candidate.line === item.line);
+      return { line: item.line, hours: row ? hoursOf(row) : 0, note: item.note };
+    });
+    const here = round1(covered.reduce((sum, row) => sum + hoursOf(row), 0));
+    const there = round1(bundleHours + crossRefs.reduce((sum, ref) => sum + ref.hours, 0));
+    const net = round1(here - there);
+    const lines = covered.map((row) => row.line);
+    const inferred = lines.filter((line) => bundle.inferredSubjectLines.includes(line));
+    const scope = noteCoverScope({
+      hours: bundleHours,
+      crossRefs: crossRefs.filter((ref) => ref.note),
+      named: lines.filter((line) => !inferred.includes(line)),
+      inferred,
+      theirs: `On ${label},`,
+      ours: "",
+    });
+    const difference =
+      net > 0
+        ? `The difference is ${fmtHours(net)} hr, not a missing operation.`
+        : net < 0
+          ? `${label.charAt(0).toUpperCase()}${label.slice(1)} allows ${fmtHours(-net)} hr more in total.`
+          : "The hours are equal.";
+    addPiece(
+      covered[0].page,
+      `Ln ${lines.join("/")} (${fmtHours(here)} hr): compared once with ${label} Ln ${bundle.competingLine} ` +
+        `${bundle.competingDescription} (${fmtHours(bundleHours)} hr), whose note reads "${bundle.note}". ${scope} ${difference}`,
+      { order: covered[0].line, alone: true }
     );
   }
 
@@ -393,8 +575,11 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
   // on the totals page (or the last subject page) — never silently dropped.
   // Only report competing-only rows that carry a value — informational lines
   // (contact instructions, zero-value notes) aren't repair-scope evidence.
+  // A bundle line and the lines noted as included in it are compared above.
   const valuedCompetingOnly = competingOnly.filter(
-    (row) => (row.price ?? 0) > 0 || (row.labor ?? 0) > 0 || (row.paint ?? 0) > 0
+    (row) =>
+      !bundledCompetingLines.has(row.line) &&
+      ((row.price ?? 0) > 0 || (row.labor ?? 0) > 0 || (row.paint ?? 0) > 0)
   );
   if (valuedCompetingOnly.length > 0) {
     const reportPage = totalsPage ?? Math.max(...subjectRows.map((row) => row.page), 1);
@@ -426,11 +611,7 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     // kind, so a callout band printed "184, 185, then 182, 183, then 180, 181"
     // and the reader had to scan back and forth against the page beside it.
     // Pieces with no line number (document-level roll-ups) sort last.
-    const firstLine = (piece: string) => {
-      const match = /^Ln\s+(\d+)/.exec(piece);
-      return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
-    };
-    const ordered = [...pieces].sort((a, b) => firstLine(a) - firstLine(b));
+    const ordered = [...pieces].sort((a, b) => a.order - b.order);
     packNoteLines(ordered, maxWidth, params.measureText).forEach((line, index) => {
       requests.push({ id: `delta-note-p${pageNumber}-${index}`, pageNumber, text: line });
     });

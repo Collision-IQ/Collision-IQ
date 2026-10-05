@@ -26,7 +26,10 @@ import { buildLowerEstimateFindings } from "../appraisalSummary/lowerEstimateFin
 import { groupEquivalents } from "../appraisalSummary/operationEquivalence";
 import { assignUnits } from "../appraisalSummary/shortPayView";
 import type { Estimate, EstimateLine } from "../appraisalSummary/types";
-import { buildRequiredEstimatorDeltaFindings } from "../annotatedCitationDensityEstimate";
+import { buildRequiredEstimatorDeltaFindings, pdfWordsToEnginePages } from "../annotatedCitationDensityEstimate";
+import { auditPlacements } from "../annotationPlacementEngine";
+import { parseEstimateRows, parseTotalsFromWords } from "../deltaEngine/rowCluster";
+import { inclusionBundlesFromDeltas, planDeltaValueAnnotations } from "../deltaValueAnnotationLayer";
 import { buildEstimateRowAnchorsFromLines, buildPdfTextLines, type PdfWord } from "../citationDensityRowAnchors";
 import { applyComparisonInclusionNotes } from "../comparisonInclusionNotes";
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "../estimateDeltaMatcher";
@@ -483,5 +486,95 @@ describe("a carrier-only line whose own note places its time elsewhere is quoted
   it("a carrier-only line without an inclusion note keeps the plain wording", () => {
     const { set } = lowerCopy([body(56, "O/H", "Bumper assy", 3.7)], [body(42, "R&I", "Bumper cover", 1.7, "Time is after moldings are removed.")], []);
     expect(entryFor(set, 42)).toBe("Bumper cover (1.7 hr): on this estimate only, $153.00. Not on ours.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The annotated shop copy. Its delta value layer pairs line to line on its
+// own, so it printed "Ln 69 … Service Mode (0.1 hr): not written on the
+// comparison estimate" for every step the carrier's Tool Box note names, and
+// "Pre-repair scan: labor 1.0 vs 0.0" against the 0.0 hr scan line noted
+// "Included in Tesla tool Box", while the other three reports compared those
+// lines once with the bundle. It now takes the matcher's coverage as computed.
+// ---------------------------------------------------------------------------
+
+describe("the annotated shop copy compares the bundle's lines once, with the note quoted", () => {
+  const FIXTURE_DIR = path.join(__dirname, "../../../../tests/fixtures/22084");
+  const read = (name: string) => fs.readFileSync(path.join(FIXTURE_DIR, name), "utf8");
+  const COVERED = [137, 138, 141, 142, 143, 145];
+  const shopWords = JSON.parse(read("shop_words.json")) as PdfWord[];
+  const sorWords = JSON.parse(read("sor5_words.json")) as PdfWord[];
+  const sorText = read("sor5_text.txt");
+  const pages = [...new Map(shopWords.map((word) => [word.pageNumber, word])).values()].map((word) => ({
+    pageNumber: word.pageNumber,
+    pageWidth: word.pageWidth,
+    pageHeight: word.pageHeight,
+  }));
+  const visualLines = buildPdfTextLines(shopWords);
+  const generated = buildRequiredEstimatorDeltaFindings({
+    anchors: buildEstimateRowAnchorsFromLines(visualLines, { sourceDocumentRole: "shop", sourceDocumentId: "shop" }),
+    visualLines,
+    sourcePdfName: "Shop.pdf",
+    sourceDocumentId: "shop",
+    sourceDocumentRole: "shop",
+    sourcePdfHash: "fixture",
+    uploadedFileNames: ["Shop.pdf", "SOR.pdf"],
+    sourceText: read("shop_text.txt"),
+    comparisonEstimateTexts: [{ sourceDocumentId: "sor", fileName: "SOR.pdf", text: sorText, estimateRole: "carrier" }],
+    comparisonEstimateWords: [{ fileName: "SOR.pdf", estimateRole: "carrier", words: sorWords, textLayerReliable: true }],
+    extractionWarnings: [],
+  });
+  const competingPages = pdfWordsToEnginePages(sorWords);
+  const plan = (withBundles: boolean) =>
+    planDeltaValueAnnotations({
+      subjectWords: shopWords,
+      pages,
+      competingRows: parseEstimateRows(competingPages),
+      competingTotals: parseTotalsFromWords(competingPages),
+      competingLabel: "the comparison estimate",
+      measureText: (text, size) => text.length * size * 0.52,
+      inclusionBundles: withBundles ? inclusionBundlesFromDeltas(generated.forensic!.rows!.deltas, sorText) : [],
+    });
+  type Plan = ReturnType<typeof plan>;
+  const pieces = (p: Plan) => p.notes.flatMap((note) => note.request.text.split(" | "));
+  const keyedTo = (p: Plan, line: number) => pieces(p).filter((piece) => new RegExp(`^Ln ${line}\\b`).test(piece));
+
+  it("calls none of the covered lines 'not written', and prints no 0.0 against their scan lines", () => {
+    // The shape of the defect on this pair, without the coverage.
+    const before = plan(false);
+    expect(
+      COVERED.some((line) => keyedTo(before, line).some((piece) => /not written|vs the comparison estimate 0\.0/.test(piece)))
+    ).toBe(true);
+
+    const after = plan(true);
+    for (const line of COVERED) {
+      for (const piece of keyedTo(after, line)) expect(piece).not.toMatch(/not written|vs the comparison estimate/);
+    }
+    const text = after.notes.map((note) => note.request.text).join(" ");
+    expect(text).toContain(`Ln ${COVERED.join("/")} (`);
+    expect(text).toContain(
+      `compared once with the comparison estimate Ln 100 Tesla Tool Box (1.0 hr), whose note reads "${BUNDLE_NOTE}".`
+    );
+    expect(text).toMatch(/The note does not say how its 1\.0 hr divides among these steps/);
+    // One comparison: the bundle line is not also listed as carrier-only.
+    expect(text).not.toMatch(/only:[^|]*Tesla Tool Box/);
+    expect(after.unplacedNotes.filter((note) => /Tool Box|divides among/.test(note.text))).toEqual([]);
+  });
+
+  it("lines the note does not name read exactly as they did", () => {
+    const covered = new Set(COVERED);
+    const lineOf = (piece: string) => Number(/^Ln (\d+)\b/.exec(piece)?.[1] ?? NaN);
+    const uncovered = (p: Plan) => pieces(p).filter((piece) => /^Ln \d+\b(?!\/)/.test(piece) && !covered.has(lineOf(piece)));
+    expect(uncovered(plan(true)).sort()).toEqual(uncovered(plan(false)).sort());
+  });
+
+  it("the callout is wrapped to the note band and placed in verified whitespace", () => {
+    const after = plan(true);
+    expect(auditPlacements(after.notes.map((note) => ({ id: note.request.id, rect: note.rect })), shopWords, pages)).toEqual([]);
+    const callout = after.notes.filter((note) => /Tesla Tool Box|divides among these steps/.test(note.request.text));
+    expect(callout.length).toBeGreaterThan(1);
+    // Wrapped at the note font with the placement padding left over, so no
+    // line has to be shrunk to fit the band's width (612 - 2 x 24 inset).
+    for (const note of callout) expect(note.request.text.length * 8 * 0.52 + 3).toBeLessThanOrEqual(564);
   });
 });
