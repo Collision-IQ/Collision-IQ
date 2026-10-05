@@ -7,9 +7,9 @@
  *                 note on its line, a part it pays with no labor to install it,
  *                 or a parent part it pays whose child it left off (wheels
  *                 paid, tires not).
- *   Needs proof — an operation with no counterpart, or fewer hours on the
- *                 paired line; it needs a P-page, an invoice or an OEM
- *                 procedure before it is argued.
+ *   Needs proof — an operation with no counterpart, or fewer hours (or a
+ *                 lower price) on the paired line; it needs a P-page, an
+ *                 invoice or an OEM procedure before it is argued.
  *   Weak        — reserved for an operation a retrieved P-page shows is
  *                 included in a database operation the carrier wrote.
  *
@@ -60,8 +60,15 @@ export function noteCoverScope(params: {
   /** How their lines and ours are introduced: "Their" / "our ", "Its" / "". */
   theirs: string;
   ours: string;
+  /**
+   * How a line on THEIR sheet is cited, in the citing document's own
+   * notation: "L" by default; the lower-estimate citation copy marks up their
+   * sheet and cites its lines as "Ln " (its legend keeps "L" for ours).
+   */
+  theirLinePrefix?: string;
 }): string {
   const refs = (lines: number[]) => lines.map((line) => `L${line}`).join(", ");
+  const theirLine = (line: number) => `${params.theirLinePrefix ?? "L"}${line}`;
   const sentences: string[] = [];
   const { crossRefs } = params;
   if (crossRefs.length) {
@@ -70,8 +77,8 @@ export function noteCoverScope(params: {
     const notes = new Set(crossRefs.map((ref) => ref.note));
     sentences.push(
       hours.size === 1 && notes.size === 1
-        ? `${params.theirs} ${refs(crossRefs.map((ref) => ref.line))} ${many ? "print" : "prints"} ${crossRefs[0].hours.toFixed(1)} hr, ${many ? "each " : ""}noted "${crossRefs[0].note}".`
-        : `${params.theirs} ${crossRefs.map((ref) => `L${ref.line} prints ${ref.hours.toFixed(1)} hr, noted "${ref.note}"`).join("; ")}.`
+        ? `${params.theirs} ${crossRefs.map((ref) => theirLine(ref.line)).join(", ")} ${many ? "print" : "prints"} ${crossRefs[0].hours.toFixed(1)} hr, ${many ? "each " : ""}noted "${crossRefs[0].note}".`
+        : `${params.theirs} ${crossRefs.map((ref) => `${theirLine(ref.line)} prints ${ref.hours.toFixed(1)} hr, noted "${ref.note}"`).join("; ")}.`
     );
   }
   const inferred = params.inferred.length ? `${params.ours}${refs(params.inferred)}` : "";
@@ -93,7 +100,7 @@ export interface ArgueItem {
   title: string;
   detail: string;
   hours: number;
-  /** Labor at our category rates plus any part price we wrote and they did not. */
+  /** Labor at our category rates plus the price difference: a part we wrote and they did not, or our price over theirs on a paired line. */
   value: number;
   shopLines: number[];
   carrierLines: number[];
@@ -263,7 +270,14 @@ export function argueItems(params: {
     if (crossRefs.some((l) => usedShopCarrierLine(groups, l.line))) continue;
     const ourHours = round2(lines.reduce((sum, l) => sum + hoursOf(l), 0));
     const hours = round2(ourHours - hoursOf(theirs) - crossRefs.reduce((sum, l) => sum + hoursOf(l), 0));
-    const partValue = theirs ? 0 : lines.reduce((sum, l) => sum + (l.price ?? 0), 0);
+    // A paired line is worth its price difference too, as the gross view and
+    // the citation copy value it: RO 22120's wheel, replaced at $700.00 on
+    // ours against a $189.99 sublet repair on theirs, is not a 0.3 hr item.
+    const ourPrice = round2(lines.reduce((sum, l) => sum + (l.price ?? 0), 0));
+    const theirPrice = theirs ? round2([theirs, ...crossRefs].reduce((sum, l) => sum + (l.price ?? 0), 0)) : 0;
+    const partValue = theirs ? round2(ourPrice - theirPrice) : ourPrice;
+    const pricesDiffer = Boolean(theirs) && ourPrice !== theirPrice;
+    const sideText = (sideHours: number, price: number) => `${sideHours.toFixed(1)} hr${pricesDiffer ? `, ${money(price)}` : ""}`;
     const value = round2(
       lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) - crossRefs.reduce((sum, l) => sum + laborValue(l), 0) + partValue
     );
@@ -284,11 +298,13 @@ export function argueItems(params: {
     const coveredNote = pair.coveredByCarrierNote && theirs ? theirs.note?.replace(/^[(\s]+|[)\s]+$/g, "") : undefined;
     items.push({
       strength: "Needs proof",
-      title: coveredNote && theirs ? `${theirs.desc}: the work its note includes` : `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
+      // The title is read on its own: the lines are compared with their line,
+      // and the detail says which ones the note's words name.
+      title: coveredNote && theirs ? `${theirs.desc} and the lines compared with it` : `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
       detail: pPage
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : coveredNote && theirs
-          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}), whose note reads "${coveredNote}". ` +
+          ? `Ours ${sideText(ourHours, ourPrice)} (${lineRefs}), theirs ${sideText(hoursOf(theirs), theirPrice)} (L${theirs.line}), whose note reads "${coveredNote}". ` +
             noteCoverScope({
               hours: hoursOf(theirs),
               crossRefs: crossRefs.map((l) => ({ line: l.line, hours: hoursOf(l), note: l.note?.trim() ?? "" })),
@@ -298,7 +314,7 @@ export function argueItems(params: {
               ours: "our ",
             })
           : theirs
-          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
+          ? `Ours ${sideText(ourHours, ourPrice)} (${lineRefs}), theirs ${sideText(hoursOf(theirs), theirPrice)} (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
           : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,
       value,

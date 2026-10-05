@@ -246,7 +246,9 @@ describe("a carrier line whose own note names the work it includes", () => {
         { kind: "matched", shopLines: [55], carrierLine: 48 },
       ],
     });
-    expect(items.map((item) => item.title)).toEqual(["Other diagnostic services-TESLA: the work its note includes"]);
+    // The title is read on its own, so it states only the comparison; the
+    // detail says which of our lines the note's words name.
+    expect(items.map((item) => item.title)).toEqual(["Other diagnostic services-TESLA and the lines compared with it"]);
     // The note is quoted, and what it does not establish is said: it never
     // divides its hour among our steps or states that each one is paid.
     expect(items[0].detail).toBe(

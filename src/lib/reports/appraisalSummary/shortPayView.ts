@@ -141,9 +141,11 @@ export function assignUnits(params: {
           .filter((l): l is EstimateLine => Boolean(l))
       : [];
     // Their one line whose note covers several of ours is named for itself,
-    // and the unit sits on that line, where the note is printed.
+    // and the unit sits on that line, where the note is printed. The label is
+    // read on its own, so it says only that our lines are compared with it:
+    // the entry says which of them the note's words name.
     const covering = pair.coveredByCarrierNote && (s.length > 1 || also.length > 0);
-    add(covering ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c, ...also], covering ? c.line : undefined);
+    add(covering ? `${c.desc} and the lines compared with it` : s[0].desc, s, [c, ...also], covering ? c.line : undefined);
   }
   // What the matcher did not report as a difference pairs here by part number,
   // then by full component name and operation; the rest is one-sided. No pass
@@ -194,12 +196,21 @@ export function assignUnits(params: {
     if (usedShop.has(s.line) || usedCarrier.has(c.line)) continue;
     add(s.desc, [s], [c]);
   }
-  for (const s of restShop()) add(s.desc, [s], []);
-  for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(c.desc, [], [c]);
+  // A one-sided line keeps its printed operation. "LT Upper cover" alone,
+  // beside our Rpr of the same cover, read as if our sheet had no line for it
+  // (RO 22120: their R&I upper cover; our O/H bumper assy read "bumper assy").
+  for (const s of restShop()) add(withOperation(s), [s], []);
+  for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(withOperation(c), [], [c]);
   if (ledger.paintMaterials !== 0) units.push({ label: "Paint materials", shopLines: [], carrierLines: [], diff: ledger.paintMaterials });
   if (ledger.otherMaterials !== 0) units.push({ label: "Other materials", shopLines: [], carrierLines: [], diff: ledger.otherMaterials });
   if (ledger.laborRate !== 0) units.push({ label: "Labor rate", shopLines: [], carrierLines: [], diff: ledger.laborRate });
   return { units, shopToCarrier };
+}
+
+/** The line as printed: its operation, then its description ("R&I LT Upper cover"). */
+function withOperation(l: EstimateLine): string {
+  const oper = (l.oper ?? "").trim();
+  return oper && !l.desc.toLowerCase().startsWith(`${oper.toLowerCase()} `) ? `${oper} ${l.desc}` : l.desc;
 }
 
 const STOP = new Set(["for", "and", "the", "of", "to", "into", "per", "on", "with", "from", "plus", "rt", "lt", "assy", "repl", "rpr"]);

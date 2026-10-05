@@ -138,9 +138,38 @@ export function groupEquivalents(shop: Estimate, carrier: Estimate, pairs: Match
   const value = (lines: EstimateLine[]) =>
     round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) * shopLineRate(shop, l) + (l.paintHours ?? 0) * paintRate + (l.price ?? 0), 0));
   const hours = (lines: EstimateLine[]) => round2(lines.reduce((sum, l) => sum + (l.hours ?? 0) + (l.paintHours ?? 0), 0));
+  // A line the matcher paired at equal value joins a group only with its
+  // counterpart. Taking one side alone left the other reading as work only
+  // that sheet wrote: RO 22084's ADAS group took our 'Remove vehicle from
+  // "Service Mode"' (L147, 0.1 M) and left the carrier's same line (L101,
+  // 0.1 M) "on this estimate only. Not on ours." A pair with a difference is
+  // not held whole: correcting the matcher's cross-named pairs is what the
+  // groups are for (RO 21995: it paired our subframe BOLT with their "Susp
+  // subframe", and our in-process scan with their post-repair scan).
+  const counterparts = pairs.filter(
+    (pair) => pair.kind === "matched" && pair.carrierLine !== undefined && pair.shopLines.length > 0
+  );
+  const keepPairsWhole = (s: EstimateLine[], c: EstimateLine[]) => {
+    for (;;) {
+      const inShop = new Set(s.map((l) => l.line));
+      const inCarrier = new Set(c.map((l) => l.line));
+      const split = counterparts.filter((pair) => {
+        const shopIn = pair.shopLines.filter((line) => inShop.has(line)).length;
+        const carrierIn = inCarrier.has(pair.carrierLine!);
+        return (shopIn > 0 || carrierIn) && !(carrierIn && shopIn === pair.shopLines.length);
+      });
+      if (!split.length) return { s, c };
+      const dropShop = new Set(split.flatMap((pair) => pair.shopLines));
+      const dropCarrier = new Set(split.map((pair) => pair.carrierLine!));
+      s = s.filter((l) => !dropShop.has(l.line));
+      c = c.filter((l) => !dropCarrier.has(l.line));
+    }
+  };
   for (const group of EQUIV_GROUPS) {
-    const s = shop.lines.filter((l) => !usedShop.has(l.line) && !reservedShop.has(l.line) && matches(group.shop, l));
-    const c = carrier.lines.filter((l) => !usedCarrier.has(l.line) && !reservedCarrier.has(l.line) && matches(group.carrier, l));
+    const { s, c } = keepPairsWhole(
+      shop.lines.filter((l) => !usedShop.has(l.line) && !reservedShop.has(l.line) && matches(group.shop, l)),
+      carrier.lines.filter((l) => !usedCarrier.has(l.line) && !reservedCarrier.has(l.line) && matches(group.carrier, l))
+    );
     // One-sided: leave it for the no-counterpart pass.
     if (!s.length || !c.length) continue;
     if (group.carrierAnchor && !c.some((l) => matches(group.carrierAnchor!, l))) continue;
