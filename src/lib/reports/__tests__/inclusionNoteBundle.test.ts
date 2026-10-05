@@ -423,7 +423,11 @@ describe("the fixture pair with a Tool Box note: counts, items and the forensic 
     const { generated, shopText, sorText } = run();
     const forensic = generated.forensic!;
     // The operations each sheet prints, as before the note grouped some of them.
-    expect([forensic.higherLineCount, forensic.lowerLineCount]).toEqual([130, 108]);
+    // (132/109 since the row-prefix fix: shop Rpr and R&I trunk lid now pair
+    // with the carrier's own Rpr and R&I lines instead of one aggregated
+    // "2x vs 1x" pair and a test fit paired with an R&I. The count is taken
+    // before coverage, so the note grouping lines changes nothing here.)
+    expect([forensic.higherLineCount, forensic.lowerLineCount]).toEqual([132, 109]);
     const covered = forensic.rows.deltas.find((d) => d.statusLabels?.includes("COVERED_BY_COMPARISON_NOTE"));
     expect(covered).toMatchObject({ lowerRow: expect.objectContaining({ lineNumber: 100 }), coveredHigherLines: [137, 138, 141, 142, 143, 145] });
     expect(forensic.noCounterpartRows.map((r) => r.line)).not.toEqual(expect.arrayContaining([137]));
@@ -447,5 +451,37 @@ describe("the fixture pair with a Tool Box note: counts, items and the forensic 
     // Nothing the bundle covers is argued again as having no counterpart.
     expect(model.items.filter((i) => /No counterpart/.test(i.detail) && i.shopLines.some((l) => [137, 138, 141, 142, 143, 145].includes(l)))).toEqual([]);
     expect(model.shortPay?.gap).toBe(2226.18);
+  });
+});
+
+describe("a carrier-only line whose own note places its time elsewhere is quoted", () => {
+  // RO 22120 review: the carrier's R&I upper cover (0.8 hr) prints "Time is
+  // after bumper cover is removed. Time included with overhaul." beside our
+  // bumper overhaul; "Not on ours" alone read as work we left out.
+  const body = (line: number, oper: string, desc: string, hours: number, note?: string): EstimateLine => ({
+    line, oper, desc, hours, laborCat: "body", ...(note ? { note } : {}),
+  });
+  const entryFor = (set: ReturnType<typeof lowerCopy>["set"], carrierLine: number) =>
+    set.findings.find((f) => f.carrierLine === carrierLine)!.entries.map((e) => e.text).join(" ");
+
+  it("quotes the inclusion note once, decimals intact, and says it is not a line on ours", () => {
+    const repeated = "Time 0.3 hr is included with overhaul. Time 0.3 hr is included with overhaul.";
+    const { set } = lowerCopy(
+      [body(56, "O/H", "Bumper assy", 3.7)],
+      [
+        body(38, "R&I", "LT Upper cover", 0.8, "Time is after bumper cover is removed. Time included with overhaul."),
+        body(40, "R&I", "Tow bracket cover", 0.3, repeated),
+      ],
+      []
+    );
+    expect(entryFor(set, 38)).toBe(
+      'LT Upper cover (0.8 hr): on this estimate only, $72.00; not a line on ours. Its note reads "Time is after bumper cover is removed. Time included with overhaul."'
+    );
+    expect(entryFor(set, 40)).toMatch(/Its note reads "Time 0\.3 hr is included with overhaul\."$/);
+  });
+
+  it("a carrier-only line without an inclusion note keeps the plain wording", () => {
+    const { set } = lowerCopy([body(56, "O/H", "Bumper assy", 3.7)], [body(42, "R&I", "Bumper cover", 1.7, "Time is after moldings are removed.")], []);
+    expect(entryFor(set, 42)).toBe("Bumper cover (1.7 hr): on this estimate only, $153.00. Not on ours.");
   });
 });

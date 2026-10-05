@@ -189,6 +189,26 @@ function sideText(lines: EstimateLine[]): string {
   return parts.length ? parts.join(", ") : "no hours or price";
 }
 
+/** A printed note as quoted text: each sentence once (a note read twice from
+ *  the print is not doubled), ending in a period inside the quote. */
+function quotedNote(note: string): string {
+  const seen = new Set<string>();
+  // Split only where a sentence ends ("removed. Time"), never inside "0.3 hr".
+  const sentences = note
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => {
+      const key = sentence.toLowerCase().replace(/\.$/, "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  const text = sentences.join(" ");
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 function describeUnit(
   unit: ShortPayUnit,
   shopBy: Map<number, EstimateLine>,
@@ -209,6 +229,13 @@ function describeUnit(
     return `Ours ${refs(unit.shopLines)} ${unit.label} (${sideText(ours)}): not on this estimate, ${money(unit.diff)} at our rates.${strength}`;
   }
   if (!ours.length) {
+    // A carrier line whose own note says its time is included elsewhere ("Time
+    // included with overhaul") is quoted, so "not on ours" is not read as work
+    // we left out: RO 22120's R&I upper cover sits beside our bumper overhaul.
+    const inclusion = theirs.length === 1 && /\binclud/i.test(theirs[0].note ?? "") ? quotedNote(theirs[0].note!) : "";
+    if (shopReadCloses && inclusion) {
+      return `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}; not a line on ours. Its note reads "${inclusion}"`;
+    }
     return shopReadCloses
       ? `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}. Not on ours.`
       : `${unit.label} (${sideText(theirs)}): on this estimate, ${money(-unit.diff)}; not found among the lines read from ours, which do not add up to our printed totals. Confirm on our sheet.`;
