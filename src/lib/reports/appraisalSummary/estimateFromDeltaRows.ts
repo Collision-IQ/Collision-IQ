@@ -17,6 +17,7 @@
  * usage page means the report cannot say "both OEM"; an unread note means an
  * exclusion is not cited.
  */
+import { readRowPrefix } from "../deltaEngine/estimateNormalize";
 import type { EstimateDeltaRow, EstimateLineItemDelta } from "../estimateDeltaMatcher";
 import { detectEstimatePlatform } from "../estimatePlatform";
 import type { ForensicReconciliation } from "../forensicEstimateAnalysis";
@@ -26,7 +27,6 @@ import { round2 } from "./types";
 
 const LETTER_CAT: Record<string, LaborCat> = { M: "mechanical", F: "frame", S: "structural", D: "other", E: "other", G: "other" };
 const OP_CODE = /^(Repl|R&I|Rpr|Subl|Blnd|O\/H|Refn|Algn|Sect|PDR)\s+/;
-const SUPPLEMENT = /^(S\d{2})\s+/;
 /** A part number printed at the end of the description ("Subframe bolt sc00006965-a"). */
 const TRAILING_PART_NUMBER = /\s([A-Za-z]{0,3}\d{6,}-?[A-Za-z0-9]{0,3})$/;
 
@@ -276,11 +276,12 @@ export function estimateFromDeltaRows(params: {
     let desc = row.description.trim();
     let supplement = row.supplementTag ?? undefined;
     let oper = row.opCode ?? "";
-    const tag = desc.match(SUPPLEMENT);
-    if (tag) {
-      supplement = supplement ?? tag[1];
-      desc = desc.slice(tag[0].length);
-    }
+    // The row prefix — marker glyphs ("*", "<>") and the supplement tag —
+    // is never the description: "<> S02 Rpr LT Upper cover" is a Rpr of
+    // "LT Upper cover".
+    const prefix = readRowPrefix(desc);
+    supplement = supplement ?? prefix.supplementTag ?? undefined;
+    desc = prefix.afterMarkers;
     const op = desc.match(OP_CODE);
     if (op && !oper) {
       oper = op[1];
