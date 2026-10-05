@@ -4740,7 +4740,8 @@ export function buildRequiredEstimatorDeltaFindings(
   };
 }
 
-function describeLineItemDelta(delta: EstimateLineItemDelta): {
+/** The finding wording for one line-item delta (exported for regression tests). */
+export function describeLineItemDelta(delta: EstimateLineItemDelta): {
   findingType: string;
   title: string;
   label: string;
@@ -4997,10 +4998,16 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   }
   // reduced_labor — name the actual labor category (mechanical/diagnostic/…):
   // an M-marked line bills at the mechanical rate, and calling it "body labor"
-  // misstates the dollars behind the hour difference.
-  const laborNoun = delta.higherRow.laborType
-    ? laborTypeNoun(delta.higherRow.laborType, delta.higherRow.laborCategoryName)
-    : laborTypeNoun(delta.lowerRow?.laborType, delta.lowerRow?.laborCategoryName);
+  // misstates the dollars behind the hour difference. The category is OUR
+  // line's own: an unmarked CCC labor field is body labor as printed, and the
+  // comparison line's letter never stands in for it. A delta that compares
+  // several of our lines together (a comparison inclusion note) carries no
+  // letter when those lines' categories differ, so it names plain "labor".
+  const combinesLines = (delta.coveredHigherLines?.length ?? 0) > 1;
+  const laborNoun =
+    !delta.higherRow.laborType && combinesLines
+      ? "labor"
+      : laborTypeNoun(delta.higherRow.laborType, delta.higherRow.laborCategoryName);
   return {
     findingType: "delta-reduced-labor",
     title: `Comparison estimate allows less ${laborNoun}: ${label}`,

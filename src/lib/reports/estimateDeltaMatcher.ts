@@ -4523,10 +4523,10 @@ function buildReducedSummary(
   const label = describeRow(higherRow);
   const higherValue = field === "labor" ? higherRow.labor : higherRow.paint;
   const lowerValue = field === "labor" ? lowerRow.labor : lowerRow.paint;
-  const noun =
-    field === "labor"
-      ? laborTypeNoun(higherRow.laborType ?? lowerRow.laborType)
-      : "paint";
+  // The subject line's own labor field names its category. An unmarked CCC
+  // labor field is body labor as printed; the comparison line's letter never
+  // stands in for it (that would restate our hours under their category).
+  const noun = field === "labor" ? laborTypeNoun(higherRow.laborType) : "paint";
   return `"${label}": higher estimate allows ${formatHours(higherValue)} ${noun} hr vs ${formatHours(lowerValue)} hr here (+${formatHours(delta)} hr difference).`;
 }
 
