@@ -4731,19 +4731,34 @@ export function buildRequiredEstimatorDeltaFindings(
       // rows), so the two customer-facing numbers cannot diverge. The
       // previous silent .slice(0, 300) is gone: the full gated set ships,
       // and Appendix A renders exactly what the headline counts.
+      //
+      // Appendix A says its rows are "as printed": a side group merged into
+      // one finding ("Wheelhouse liner (both sides, L46/L47)") is listed as
+      // the lines it was made of, each with its own printed hours and price,
+      // so the count is the printed lines and no member is dropped. A member
+      // whose printed row cannot be found by line number keeps the merged
+      // row (never a row this estimate does not print).
       noCounterpartRows: (deltaMatch?.orderedDeltas ?? [])
         .filter((delta) => delta.kind === "missing_operation" && !delta.ocrUncertain)
-        .map((delta) => ({
-          line: delta.higherRow.lineNumber,
-          description: [delta.higherRow.opCode, delta.higherRow.description]
-            .filter(Boolean)
-            .join(" ")
-            .trim(),
-          amount: delta.higherRow.price,
-          laborHours: delta.higherRow.labor,
-          laborType: delta.higherRow.laborType,
-          paintHours: delta.higherRow.paint,
-        })),
+        .flatMap((delta) => {
+          const memberRows = (delta.mergedMembers ?? []).map((member) =>
+            member.higherLine === null
+              ? undefined
+              : deltaMatch?.higherRows.find((row) => row.lineNumber === member.higherLine)
+          );
+          const printed =
+            memberRows.length > 0 && memberRows.every((row): row is EstimateDeltaRow => row !== undefined)
+              ? memberRows
+              : [delta.higherRow];
+          return printed.map((row) => ({
+            line: row.lineNumber,
+            description: [row.opCode, row.description].filter(Boolean).join(" ").trim(),
+            amount: row.price,
+            laborHours: row.labor,
+            laborType: row.laborType,
+            paintHours: row.paint,
+          }));
+        }),
     },
     debug: {
       requiredDetectorFindingCount: findings.length,
@@ -5618,8 +5633,32 @@ function matchStructuredLineItemDeltas(
     if (list.length === 0) deltasByGroupKey.set(key, list);
     list.push(delta);
   }
-  const mergedDeltas: EstimateLineItemDelta[] = [];
+  // A base group that spans positions is ONE finding only when it is an LT/RT
+  // side group at every position it names (LT/RT × Front/Rear). Otherwise each
+  // position is its own group: "RT/Front R&I wheel" and "RT/Rear R&I wheel"
+  // (RO 22120, 0.2 M each) are two printed operations at two locations, and
+  // merged they read as the front wheel carrying both lines' 0.4 hr. The
+  // position is the pairing key's (canonKey.key: side-insensitive,
+  // position-preserving), the same rule pairing applies.
+  const presentationGroups: EstimateLineItemDelta[][] = [];
   for (const group of deltasByGroupKey.values()) {
+    const byPosition = new Map<string, EstimateLineItemDelta[]>();
+    for (const delta of group) {
+      const position = deltaEngineCanonKey(delta.higherRow.description).key;
+      const members = byPosition.get(position) ?? [];
+      if (members.length === 0) byPosition.set(position, members);
+      members.push(delta);
+    }
+    const atPositions = [...byPosition.values()];
+    const sideGroupAtEveryPosition = atPositions.every((members) => {
+      const sides = members.map((delta) => detectDeltaEngineSide(delta.higherRow.description));
+      return sides.includes("left") && sides.includes("right");
+    });
+    if (atPositions.length <= 1 || sideGroupAtEveryPosition) presentationGroups.push(group);
+    else presentationGroups.push(...atPositions);
+  }
+  const mergedDeltas: EstimateLineItemDelta[] = [];
+  for (const group of presentationGroups) {
     if (group.length === 1) {
       mergedDeltas.push(group[0]);
       continue;
