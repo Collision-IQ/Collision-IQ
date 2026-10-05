@@ -21,6 +21,7 @@ import {
   isContactInformationRow,
   repairTokens,
   learnConfusableRepairs,
+  readRowPrefix,
   restoreDroppedHoursDecimal,
   withDocumentRepairs,
   type CanonKey,
@@ -413,7 +414,8 @@ function finalizeRow(row: EstimateRow, state: RowParseState): "row" | "section" 
     /^(?:https?:\/\/\S+|www\.\S+[^\s]*)$/i.test(trimmedDesc) ||
     /^(?:1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s][\dA-Z]{4,}$/i.test(trimmedDesc);
   if (urlOrPhoneOnly) return "empty";
-  const hasOpToken = /^(?:R&I|R&R|RPR|REPL|BLND|REFN|SUBL|O\/H|ALGN|ADD)\b/i.test(trimmedDesc);
+  // The operation sits after the row prefix: "S02 Rpr …", "<> S02 Rpr …".
+  const hasOpToken = /^(?:R&I|R&R|RPR|REPL|BLND|REFN|SUBL|O\/H|ALGN|ADD)\b/i.test(readRowPrefix(trimmedDesc).afterMarkers);
   const hasMeasurableWork =
     row.qty !== null || row.price !== null || row.labor !== null || row.paint !== null;
   if (!hasOpToken && !row.part && !hasMeasurableWork) return "empty";
@@ -591,14 +593,16 @@ export function parseEstimateRows(
   // before parsing — a broken text layer mangles glyphs consistently, so a
   // frequent unknown token IN THE OPERATION POSITION that aligns to the
   // operation vocabulary is that operation. Position matters: only the first
-  // token after a line number (skipping #/* markers) is a candidate, so
+  // token after a line number (skipping the row prefix) is a candidate, so
   // description prose ("and", "Rear", part names) can never become a rule.
   const opPositionTokens: string[] = [];
   for (const words of wordsByPage.values()) {
     for (const cluster of clusterRows(tokenizeWords(words))) {
       if (!/^\d{1,3}$/.test(cluster[0]?.text ?? "") || cluster.length < 2) continue;
       let index = 1;
-      while (index < cluster.length && /^[#*]+$/.test(cluster[index].text)) index += 1;
+      // Skip the row prefix — marker glyphs and a supplement tag ("*", "<>",
+      // "S02") are never the operation.
+      while (index < cluster.length && cluster[index].text && readRowPrefix(cluster[index].text).afterMarkers === "") index += 1;
       if (index < cluster.length) opPositionTokens.push(cluster[index].text);
     }
   }

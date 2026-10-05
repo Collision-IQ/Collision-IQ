@@ -155,6 +155,7 @@ import {
   canonKey as deltaEngineCanonKey,
   detectSide as detectDeltaEngineSide,
   detectPosition as detectDeltaEnginePosition,
+  readRowPrefix,
   repairTokens,
 } from "./deltaEngine/estimateNormalize";
 
@@ -258,11 +259,12 @@ function engineRowsToDeltaRows(
       // split unusual part formats and leak fragments ("P T") into the
       // description. Restore the typed part and the clean description.
       if (row.part) deltaRow.partNumber = row.part;
-      const cleanDescription = row.rawDesc
-        .replace(/^[#*\s]+/, "")
-        .replace(/[*\s]+$/, "")
-        .replace(/^(?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H)\s+/i, "")
-        .trim();
+      // The row prefix (marker glyphs, supplement tag, operation) is read by
+      // the one shared reader. A reader that skipped only "#"/"*" left
+      // "S01 R&I …" / "<> S02 Rpr …" in every supplement row's description
+      // and nulled its operation. rawText stays verbatim for quoting.
+      const prefix = readRowPrefix(row.rawDesc);
+      const cleanDescription = prefix.body.replace(/[*\s]+$/, "").trim();
       if (cleanDescription) {
         deltaRow.description = cleanDescription;
         // Realign opCode with the engine description (D-1): the legacy
@@ -270,8 +272,8 @@ function engineRowsToDeltaRows(
         // as a pseudo-operation while the engine description keeps it —
         // rendering then duplicates the token ("Add Add for Clear Coat").
         // The opCode is a REAL operation token of the engine row, or null.
-        const engineOp = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
-        deltaRow.opCode = engineOp ? engineOp[1] : null;
+        deltaRow.opCode = prefix.op;
+        if (prefix.supplementTag) deltaRow.supplementTag = prefix.supplementTag;
       }
       // A CCC user-defined labor category digit ("1"-"4") is the row's labor
       // type, as the text lane reads it. Dropped here, RO 21548's 7.6 hr of
@@ -597,8 +599,7 @@ export function attachResolvedAuthoritiesToFindings(
 
 /** Leading CCC operation token of an engine row's description ("R&I", "Repl"). */
 function engineRowOpCode(row: DeltaEngineRow): string | null {
-  const match = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
-  return match ? match[1] : null;
+  return readRowPrefix(row.rawDesc).op;
 }
 
 /**
@@ -728,14 +729,25 @@ function engineResultToLineItemDeltas(params: {
     });
   }
 
-  // Unconsumed competing rows: repeated-description residuals are possible
-  // duplicate billing, everything else is genuinely lower-only.
-  const subjectKeys = new Set(engine.pairs.map((pair) => pair.subject.key));
-  for (const finding of engine.findings) subjectKeys.add(finding.subject.key);
+  // Unconsumed competing rows: a residual that repeats a consumed row's
+  // description IN THE SAME SECTION UNDER THE SAME OPERATION is possible
+  // duplicate billing; everything else is genuinely lower-only. Key alone is
+  // not enough — the key carries neither section nor operation, so a REAR
+  // "R&I bumper cover" read as a duplicate of the FRONT one, and a panel's
+  // "R&I" access line as a duplicate of its paired "Rpr" line.
+  const opOf = (row: DeltaEngineRow) => (engineRowOpCode(row) ?? "").replace(/\s/g, "").toUpperCase();
+  const consumedContexts = new Set<string>();
+  const addContext = (subject: DeltaEngineRow, competing: DeltaEngineRow | null) => {
+    for (const section of new Set([subject.section, competing?.section ?? subject.section]))
+      for (const op of new Set([opOf(subject), competing ? opOf(competing) : opOf(subject)]))
+        consumedContexts.add(`${subject.key}|${section}|${op}`);
+  };
+  for (const pair of engine.pairs) addContext(pair.subject, pair.competing);
+  for (const finding of engine.findings) addContext(finding.subject, finding.competing);
   const lowerOnlyRows: DeltaEngineRow[] = [];
   const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
   for (const row of engine.competingOnly) {
-    if (subjectKeys.has(row.key)) potentialDuplicateLowerRows.push(row);
+    if (consumedContexts.has(`${row.key}|${row.section}|${opOf(row)}`)) potentialDuplicateLowerRows.push(row);
     // P0-3 SYMMETRY. pairAndCompare already refuses to call a negative subject
     // row "missing on the competing estimate" (deltaPair isDeduction), but
     // nothing applied the mirror rule to the competing side, so the typed lane
