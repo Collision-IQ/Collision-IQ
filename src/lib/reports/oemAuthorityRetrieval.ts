@@ -14,10 +14,18 @@
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
 } from "@/lib/ai/gteResearch";
-import { buildEstimatingGuideLocator, findEstimatingGuideForUrl, labelEstimatingGuideResult } from "@/lib/ai/estimatingGuides";
+import {
+  buildEstimatingGuideLocator,
+  findEstimatingGuideForUrl,
+  labelEstimatingGuideResult,
+  type EstimatingPlatform,
+} from "@/lib/ai/estimatingGuides";
+import { detectEstimatePlatform } from "./estimatePlatform";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import {
+  retrieveEstimatingGuideSupport,
   retrieveWebSupport,
+  type WebRetrievalResponse,
   type WebRetrievalResult,
 } from "@/lib/ai/webRetrievalService";
 import { isDriveEnabled } from "@/lib/drive/download";
@@ -37,14 +45,81 @@ import type {
 } from "@/lib/reports/annotatedCitationDensityEstimate";
 import type { SourceEstimatePdfSelection } from "@/lib/reports/citationDensitySourcePdf";
 
-export async function buildOemAuthorityTrace(params: {
+type OemAuthorityTraceParams = {
   /** Only the label is read. Narrowed from the full selection so callers whose
    *  selection type is widened elsewhere can still reach the engine. */
   selection: Pick<SourceEstimatePdfSelection, "selectedSourceLabel">;
   sourceDocument: Awaited<ReturnType<typeof getUploadedAttachments>>[number];
   sourceDocuments: Awaited<ReturnType<typeof getUploadedAttachments>>;
   comparisonEstimateTexts: ComparisonEstimateText[];
-}): Promise<OemCitationDensityAuthorityTrace> {
+};
+
+/**
+ * The authority trace for an estimate review or comparison: the OEM, legal
+ * and industry lanes (Drive first, the internet when Drive yields nothing),
+ * and, on every run, the estimating-guide lane for the platform each document
+ * was written on. The guide lane used to ride inside the internet fallback
+ * as its last query, so with Drive answering, or with the OEM and legal
+ * queries filling the three-query budget, no P-page was ever retrieved for
+ * a comparison.
+ */
+export async function buildOemAuthorityTrace(params: OemAuthorityTraceParams): Promise<OemCitationDensityAuthorityTrace> {
+  const texts = [params.sourceDocument.text ?? "", ...params.comparisonEstimateTexts.map((item) => item.text)];
+  const [trace, guides] = await Promise.all([
+    buildOemAndLegalAuthorityTrace(params),
+    retrieveEstimatingGuideSupport({
+      platforms: texts.map((text) => guidePlatformOf(text)),
+      topics: estimatingGuideTopicsFor(texts.join("\n")),
+      text: texts.join("\n"),
+    }).catch(() => null),
+  ]);
+  return mergeEstimatingGuideSources(trace, guides);
+}
+
+/** The estimating platform a document was written on, as the guide registry names it. */
+function guidePlatformOf(text: string): EstimatingPlatform | null {
+  const platform = detectEstimatePlatform(text);
+  return platform === "ccc" || platform === "mitchell" ? platform : null;
+}
+
+/**
+ * The P-page topics a pair of estimates raises, most specific first: an
+ * overhaul (what it includes), refinish (overlap, blend, three-stage), then
+ * the included / not-included premise every review needs.
+ */
+export function estimatingGuideTopicsFor(text: string): string[] {
+  const topics: string[] = [];
+  if (/\bO\/H\b/.test(text)) topics.push("overhaul included operations");
+  if (/\b(?:Blnd|Refn|blend|refinish|three stage|clear coat)\b/i.test(text)) topics.push("refinish overlap blend");
+  topics.push("included not included operations");
+  return topics.slice(0, 2);
+}
+
+/** Guide hits join the trace as section references (never addresses). */
+export function mergeEstimatingGuideSources(
+  trace: OemCitationDensityAuthorityTrace,
+  guides: WebRetrievalResponse | null
+): OemCitationDensityAuthorityTrace {
+  if (!guides || guides.status !== "success" || guides.results.length === 0) return trace;
+  const sources = guides.results.map(mapWebResultToOemAuthoritySource);
+  const known = new Set(trace.authoritySources.map((source) => source.locator ?? source.url ?? source.title));
+  const fresh = sources.filter((source) => !known.has(source.locator ?? source.url ?? source.title));
+  if (!fresh.length) return trace;
+  return {
+    ...trace,
+    onlineSearchAttempted: true,
+    motorPPageSourcesReviewed: uniqueStrings([...trace.motorPPageSourcesReviewed, ...fresh.map((source) => source.title)]),
+    authoritySources: [...trace.authoritySources, ...fresh],
+    authorityContextText: [
+      trace.authorityContextText,
+      ...fresh.map((source) => [`Estimating guide: ${source.title}`, source.locator, source.note].filter(Boolean).join("\n")),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+async function buildOemAndLegalAuthorityTrace(params: OemAuthorityTraceParams): Promise<OemCitationDensityAuthorityTrace> {
   const driveSearchAvailable = isDriveEnabled();
   const estimateText = [
     params.sourceDocument.text ?? "",

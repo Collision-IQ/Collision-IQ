@@ -88,7 +88,7 @@ const POSITION_AXES: Array<Record<string, RegExp>> = [
 /** The positions a line names on each axis, from its section and description
  *  ("REAR SUSPENSION" + "LT Hub assy bolt" → rear, left). An axis that names
  *  both ends, or neither, says nothing. */
-const positionsOf = (l: EstimateLine): Array<string | null> => {
+export const positionsOf = (l: EstimateLine): Array<string | null> => {
   const text = `${l.section ?? ""} ${l.desc}`.toLowerCase().replace(/[^a-z0-9]+/g, " ");
   return POSITION_AXES.map((axis) => {
     const named = Object.keys(axis).filter((end) => axis[end].test(text));

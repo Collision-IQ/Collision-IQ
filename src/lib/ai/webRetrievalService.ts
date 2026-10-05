@@ -8,6 +8,7 @@ import {
   findEstimatingGuideForUrl,
   labelEstimatingGuideResult,
   selectEstimatingGuides,
+  type EstimatingPlatform,
 } from "@/lib/ai/estimatingGuides";
 
 export type WebRetrievalSourceType = "oem" | "law" | "industry";
@@ -58,7 +59,53 @@ export async function retrieveWebSupport(
     return { status: "no_results", queries: [], results: [] };
   }
 
-  const maxResults = options?.maxResults ?? 5;
+  return runSerperQueries(queries, apiKey, options?.maxResults ?? 5);
+}
+
+/**
+ * ESTIMATING-GUIDE LANE for an estimate review or comparison: targeted
+ * site: queries against the P-pages of the platform(s) that produced the
+ * documents (CCC/MOTOR GTE, RAGTE for recycled assemblies, Mitchell CEG),
+ * run on every review rather than only when the OEM lanes come back empty.
+ * A P-page states the estimating premise (what a labor time includes,
+ * overlap, refinish setup), which no OEM or legal query returns, so it is
+ * never a fallback for them nor rationed behind them. Only guide pages are
+ * kept: anything else a site: query returns is not the guide.
+ */
+export async function retrieveEstimatingGuideSupport(params: {
+  platforms: Array<EstimatingPlatform | null>;
+  topics: string[];
+  /** Recycled-assembly language on either document adds the RAGTE. */
+  text?: string | null;
+  maxQueries?: number;
+  maxResults?: number;
+}): Promise<WebRetrievalResponse> {
+  const apiKey = process.env.SERPER_API_KEY || process.env.GOOGLE_SERPER_API_KEY;
+  if (!apiKey) {
+    return { status: "not_configured", queries: [], results: [] };
+  }
+  const platforms = params.platforms.length ? params.platforms : [null];
+  const guides = [
+    ...new Map(
+      platforms
+        .flatMap((platform) => selectEstimatingGuides({ platform, text: params.text ?? null }))
+        .map((guide) => [guide.id, guide])
+    ).values(),
+  ];
+  // Topic-major, so a cap keeps the first topic on every guide before a
+  // second topic on any.
+  const queries = params.topics
+    .flatMap((topic) => guides.map((guide) => buildEstimatingGuideQuery(guide, topic)))
+    .slice(0, params.maxQueries ?? 4);
+  if (queries.length === 0) {
+    return { status: "no_results", queries: [], results: [] };
+  }
+  const response = await runSerperQueries(queries, apiKey, params.maxResults ?? 6);
+  const results = response.results.filter((result) => findEstimatingGuideForUrl(result.url) !== null);
+  return { ...response, status: response.status === "error" ? "error" : results.length ? "success" : "no_results", results };
+}
+
+async function runSerperQueries(queries: string[], apiKey: string, maxResults: number): Promise<WebRetrievalResponse> {
   const results: WebRetrievalResult[] = [];
 
   try {

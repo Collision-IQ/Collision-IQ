@@ -193,7 +193,9 @@ export function argueItems(params: {
           : `Ours ${money(group.shopValue)}, theirs ${money(group.carrierValue)} for the same sublet; the invoices settle it.`
         : group.shopHours === group.carrierHours
           ? pricedDetail(group) ?? `${sides}: the same hours, coded to a different labor category on each sheet.`
-          : `${sides} for the same work written under different names.`;
+          : group.premise
+            ? `${sides}. ${group.premise}`
+            : `${sides} for the same work written under different names.`;
     items.push({
       strength: excluded ? "Strong" : "Needs proof",
       title: group.label,

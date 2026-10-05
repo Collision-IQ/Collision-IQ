@@ -12,10 +12,14 @@
  *                           Tailgate clear-coat pairs with tailgate clear-coat,
  *                           never the bumper's; Rpr pairs with Rpr before R&I.
  *   4. PREFIX-CONTAINMENT — truncated/verbose description variants (>=12 chars).
+ *   5. NEAR-VARIANT       — a minor description variant with comparable values.
+ *   6. BUMPER OVERHAUL    — an O/H bumper against the same end's R&I (or
+ *                           differently named O/H) bumper: one operation scope.
  * Comparison is typed-cell-only: price<->price, labor<->labor, paint<->paint.
  * A finding's category text derives FROM the cell type — a paint delta can never
  * be reported as "less body labor".
  */
+import { endOfLine, isBumperScopePair } from "../appraisalSummary/bumperOverhaul";
 import { separateLocations } from "../appraisalSummary/integrityChecks";
 import { readRowPrefix } from "./estimateNormalize";
 import type { EstimateRow } from "./rowCluster";
@@ -46,6 +50,10 @@ export interface Finding {
   /** Pass 5 (near-variant): the pair was made on a close description with
    *  comparable values — a colour-variant part number, a "+25%" suffix. */
   nearVariant?: boolean;
+  /** Pass 6 (bumper overhaul): the two sheets write one bumper at different
+   *  operation scope, O/H on one and R&I on the other. The printed codes, in
+   *  subject / competing order ("O/H", "R&I"). */
+  operationScope?: { subject: string; competing: string };
 }
 
 /**
@@ -128,6 +136,17 @@ function isNearVariant(a: EstimateRow, b: EstimateRow): boolean {
   }
   if (priceA === null && priceB === null) return Math.abs(hours(a) - hours(b)) <= 1;
   return false;
+}
+
+/** Pass 6: one sheet's O/H bumper against the same end's R&I (or other
+ *  O/H) bumper on the other (bumperOverhaul.ts). */
+function isRowBumperScopePair(a: EstimateRow, b: EstimateRow): boolean {
+  const view = (row: EstimateRow) => ({
+    op: operationOf(row),
+    desc: readRowPrefix(row.rawDesc).body,
+    end: endOfLine({ line: row.line, desc: row.rawDesc, section: row.sectionLabel ?? "" }),
+  });
+  return isBumperScopePair(view(a), view(b));
 }
 
 const EPS = 0.001;
@@ -325,6 +344,22 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
     }
   }
 
+  // pass 6 — bumper overhaul: what is still unpaired on BOTH sides, where one
+  // sheet overhauls a bumper and the other removes and installs the same
+  // end's bumper (bumperOverhaul.ts).
+  const scopePairs = new Set<EstimateRow>();
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s)) || isDeduction(s)) continue;
+    for (let index = 0; index < competing.length; index += 1) {
+      if (!usable(s, index) || isDeduction(competing[index])) continue;
+      if (!isRowBumperScopePair(s, competing[index])) continue;
+      used.add(index);
+      paired.set(s, index);
+      scopePairs.add(s);
+      break;
+    }
+  }
+
   // emit — 1:1 deltas, MISSED, then aggregated qty shortfalls
   const findings: Finding[] = [];
   const aggSubjects = new Map<string, EstimateRow[]>();
@@ -374,6 +409,14 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
             ? "part number change"
             : `reduced ${laborCategory(s, deltas[0].field as CellField)}`,
         ...(nearVariants.has(s) ? { nearVariant: true } : {}),
+        ...(scopePairs.has(s)
+          ? {
+              operationScope: {
+                subject: readRowPrefix(s.rawDesc).op ?? "",
+                competing: readRowPrefix(competing[index].rawDesc).op ?? "",
+              },
+            }
+          : {}),
       });
   }
   for (const [key, subjects] of aggSubjects) {

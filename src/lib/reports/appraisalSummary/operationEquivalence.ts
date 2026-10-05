@@ -18,6 +18,7 @@
  * rule branches on a vehicle make or a carrier.
  */
 import type { MatcherPair } from "./argueItems";
+import { endOfLine, INCLUDED_WITH_OVERHAUL, isBumperScopePair, OVERHAUL_PREMISE } from "./bumperOverhaul";
 import { shopLineRate, shopRateFor } from "./gapLedger";
 import { round2, type Estimate, type EstimateLine } from "./types";
 
@@ -112,6 +113,8 @@ export interface GroupDelta {
   carrierValue: number;
   /** Carrier notes on the group's lines that say what the carrier's time excludes. */
   exclusions: string[];
+  /** What makes the lines one comparison, when the label alone does not say (the overhaul premise). */
+  premise?: string;
 }
 
 const matches = (re: RegExp, line: EstimateLine) => re.test(line.desc.trim());
@@ -188,6 +191,78 @@ export function groupEquivalents(shop: Estimate, carrier: Estimate, pairs: Match
       shopValue: value(s),
       carrierValue: value(c),
       exclusions,
+    });
+  }
+  // A bumper overhaul on one sheet against the same end's bumper R&I on the
+  // other (bumperOverhaul.ts) is one comparison, with the parts each sheet
+  // shows inside its own operation: ours printed with no labor of their own
+  // ("Incl.") beside our overhaul, and theirs whose note says the time is
+  // included with an overhaul, or paired with one of those lines of ours.
+  // Left as lines, RO 22120 argued our rear O/H 3.7 against their R&I cover
+  // 1.7 ($180) while their upper cover 0.8 and air deflector 0.3 read as work
+  // ours lacks or underpays; the one comparison is 3.7 against 2.8.
+  const view = (l: EstimateLine) => ({ op: l.oper ?? "", desc: l.desc, end: endOfLine(l) });
+  for (const overhaul of shop.lines.concat(carrier.lines)) {
+    if ((overhaul.oper ?? "").toLowerCase() !== "o/h") continue;
+    const ours = shop.lines.includes(overhaul);
+    const [own, other] = ours ? [shop, carrier] : [carrier, shop];
+    const [ownUsed, otherUsed] = ours ? [usedShop, usedCarrier] : [usedCarrier, usedShop];
+    if (ownUsed.has(overhaul.line)) continue;
+    const end = endOfLine(overhaul);
+    const counterpart = other.lines.find(
+      (l) => !otherUsed.has(l.line) && isBumperScopePair(view(overhaul), view(l)) && (l.oper ?? "").toLowerCase() === "r&i"
+    );
+    if (!end || !counterpart) continue;
+    const atEnd = (l: EstimateLine) => l.line !== overhaul.line && l.line !== counterpart.line && endOfLine(l) === end;
+    // The matcher pair a line of the overhaul's sheet sits in, when it has a
+    // line on the other sheet.
+    const pairedWith = (l: EstimateLine) =>
+      pairs.find(
+        (pair) => pair.carrierLine !== undefined && (ours ? pair.shopLines.includes(l.line) : pair.carrierLine === l.line)
+      );
+    // Parts inside the overhaul's own operation: printed in its section with
+    // no labor of their own, and written on the other sheet too.
+    const ownIncluded = own.lines.filter(
+      (l) =>
+        atEnd(l) &&
+        l.section === overhaul.section &&
+        !ownUsed.has(l.line) &&
+        (l.hours ?? 0) === 0 &&
+        (l.paintHours ?? 0) === 0 &&
+        pairedWith(l)
+    );
+    const ownPartners = new Set(
+      ownIncluded.flatMap((l) => {
+        const pair = pairedWith(l)!;
+        return ours ? [pair.carrierLine!] : pair.shopLines;
+      })
+    );
+    const otherIncluded = other.lines.filter(
+      (l) =>
+        atEnd(l) &&
+        !otherUsed.has(l.line) &&
+        (ownPartners.has(l.line) || (l.section === counterpart.section && INCLUDED_WITH_OVERHAUL.test(l.note ?? "")))
+    );
+    // A pair is compared whole or not at all (keepPairsWhole).
+    const { s, c } = keepPairsWhole(
+      ours ? [overhaul, ...ownIncluded] : [counterpart, ...otherIncluded],
+      ours ? [counterpart, ...otherIncluded] : [overhaul, ...ownIncluded]
+    );
+    if (!s.some((l) => l.line === (ours ? overhaul : counterpart).line)) continue;
+    if (!c.some((l) => l.line === (ours ? counterpart : overhaul).line)) continue;
+    s.forEach((l) => usedShop.add(l.line));
+    c.forEach((l) => usedCarrier.add(l.line));
+    groups.push({
+      key: `bumperOverhaul:${end}`,
+      label: `${end === "front" ? "Front" : "Rear"} bumper overhaul`,
+      shopLines: s.map((l) => l.line),
+      carrierLines: c.map((l) => l.line),
+      shopHours: hours(s),
+      carrierHours: hours(c),
+      shopValue: value(s),
+      carrierValue: value(c),
+      exclusions: [],
+      premise: `${ours ? "Ours" : "Theirs"} is an O/H; ${ours ? "theirs" : "ours"} an R&I of the same bumper. ${OVERHAUL_PREMISE}`,
     });
   }
   return { groups, usedShop, usedCarrier };

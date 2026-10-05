@@ -210,6 +210,8 @@ import {
   sectionSupportsAbsenceClaims,
 } from "./extractionConfidence";
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
+import { OVERHAUL_PREMISE } from "./appraisalSummary/bumperOverhaul";
+import { findEstimatingGuideForSource } from "@/lib/ai/estimatingGuides";
 import {
   emptyRowParseDiagnostics,
   hoursReconcile,
@@ -495,6 +497,18 @@ export function attachResolvedAuthoritiesToFindings(
     if (declared) return declared.toLowerCase() === vehicleMake.toLowerCase();
     return new RegExp(`\\b${vehicleMake.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(authorityText(authority));
   };
+  const isGuideAuthority = (authority: (typeof authorities)[number]) =>
+    findEstimatingGuideForSource({ locator: authority.locator, title: authority.sourceTitle, url: authority.url }) !== null;
+  const findingText = (finding: CitationDensityFinding) =>
+    [
+      finding.operationLabel,
+      finding.shopEvidence?.description,
+      finding.carrierEvidence?.description,
+      finding.currentSupportSummary,
+      finding.counterpartSummary,
+    ]
+      .filter(Boolean)
+      .join(" ");
   const matchesJurisdiction = (authority: (typeof authorities)[number]) =>
     !jurisdiction || new RegExp(jurisdiction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(authorityText(authority));
   const restoreIdentifier = (authority: (typeof authorities)[number]): string => {
@@ -530,6 +544,25 @@ export function attachResolvedAuthoritiesToFindings(
       authorityMatches: (authority) => /\bscan(?:ning)?\b/i.test(authorityText(authority)),
       type: "oem_position_statement",
       gate: "make",
+    },
+    // Estimating-guide (P-page) sections on the findings whose dispute is the
+    // estimating premise: what an overhaul includes, refinish overlap and
+    // blend. Only a retrieved guide section qualifies, never a page that
+    // merely mentions the word, and a guide is general guidance for any
+    // vehicle, so no make gate applies.
+    {
+      findingMatches: (finding) => /\bo\/h\b|\boverhaul/i.test(findingText(finding)),
+      authorityMatches: (authority) => isGuideAuthority(authority) && /\boverhaul|\bo\/h\b/i.test(authorityText(authority)),
+      type: "p_page",
+      gate: "none",
+    },
+    {
+      findingMatches: (finding) =>
+        finding.category === "refinish" || /\b(?:blnd|blend|refinish|refn|three stage|clear ?coat)\b/i.test(findingText(finding)),
+      authorityMatches: (authority) =>
+        isGuideAuthority(authority) && /\b(?:refinish|blend|overlap|three[\s-]?stage|clear ?coat)\b/i.test(authorityText(authority)),
+      type: "p_page",
+      gate: "none",
     },
     // Jurisdictional paint-and-materials / labor-rate authority on rate
     // findings (statute, DOI guidance, or accepted P&M basis).
@@ -585,7 +618,12 @@ export function attachResolvedAuthoritiesToFindings(
         type: matcher.type,
         status: "verified",
         title,
-        confidence: (authority.confidenceScore ?? 0) >= 0.7 ? "high" : "medium",
+        // A guide section states the general estimating premise, never the
+        // vehicle's procedure: it supports the finding at medium confidence.
+        confidence: matcher.type !== "p_page" && (authority.confidenceScore ?? 0) >= 0.7 ? "high" : "medium",
+        ...(matcher.type === "p_page"
+          ? { note: "General estimating-guide guidance (not vehicle-specific); cited by guide and section." }
+          : {}),
       };
       finding.matchedDocumentTitle = title;
       finding.matchedDocumentUrl = authority.url ?? null;
@@ -691,9 +729,16 @@ function engineResultToLineItemDeltas(params: {
         ? [`AGGREGATED_GROUP_${(finding.subjects ?? []).length || 1}X`]
         : finding.nearVariant
           ? ["NEAR_VARIANT_PAIR"]
-          : undefined,
+          : finding.operationScope
+            ? ["OPERATION_SCOPE_PAIR"]
+            : undefined,
       summary: aggregated
         ? `${finding.category} across L${lines.join("/L")}.`
+        : finding.operationScope && finding.operationScope.subject !== finding.operationScope.competing
+          ? `${higherRow.description}: ${finding.operationScope.subject} here vs ${finding.operationScope.competing} on the comparison estimate (${finding.deltas
+              .filter((entry) => entry.field !== "part#")
+              .map((entry) => `${entry.field} ${String(entry.subject)} vs ${String(entry.competing)}`)
+              .join(", ")}). ${OVERHAUL_PREMISE}`
         : `${higherRow.description}: ${finding.deltas
             .map((entry) =>
               entry.field === "part#"
