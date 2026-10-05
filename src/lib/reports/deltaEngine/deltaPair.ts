@@ -5,6 +5,7 @@
  *   2. AGG ROUTING        — keys where subject count > competing count skip 1:1
  *                           and compare as sums (qty shortfall), so a 3-line tape
  *                           group compares its total vs a single flat line.
+ *                           Never across printed locations (front vs rear).
  *   3. CONTEXT-PREFERRED  — same canonical key; exact context (same section,
  *                           same operation) first across all subjects, then
  *                           candidates ordered by (section, operation, side).
@@ -15,6 +16,8 @@
  * A finding's category text derives FROM the cell type — a paint delta can never
  * be reported as "less body labor".
  */
+import { separateLocations } from "../appraisalSummary/integrityChecks";
+import { readRowPrefix } from "./estimateNormalize";
 import type { EstimateRow } from "./rowCluster";
 
 export type CellField = "price" | "labor" | "paint";
@@ -68,9 +71,14 @@ function aggKeyOf(row: EstimateRow): string {
 /** Operation codes and supplement tags print on every row: never content. */
 const NON_CONTENT_WORD = /^(rpr|repl|subl|refn|blnd|algn|sect|add|incl|s\d{2})$/;
 
-/** The operation code a row prints ("rpr", "repl", "r&i" …), or "". */
+/** The operation code a row prints ("rpr", "repl", "r&i" …), or "". Read
+ *  through the shared row-prefix reader, so a glued supplement print
+ *  ("*<>S02Rpr LT Upper cover") reads "rpr" exactly as the residual bucketing
+ *  and the serializers read it; an unanchored match needed a space before
+ *  the code, read "" there, and pass 3 paired the shop's Rpr line with the
+ *  carrier's R&I line of the same panel. */
 function operationOf(row: EstimateRow): string {
-  return row.rawDesc.match(/(?:^|[\s#*])(R&I|Rpr|Repl|Subl|Refn|Blnd|O\/H|Algn)(?=\s|$)/i)?.[1].toLowerCase() ?? "";
+  return (readRowPrefix(row.rawDesc).op ?? "").toLowerCase();
 }
 
 /** Content words of a row's printed description, for the near-variant pass
@@ -209,9 +217,30 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
   };
   const subjectCount = count(subject, (index) => !paired.has(subject[index]));
   const competingCount = count(competing, (index) => !used.has(index) && !isDeduction(competing[index]));
+  // A surplus is one operation written more times than it is paid only when
+  // the rows are at ONE location. A subject and a comparison row whose
+  // printed section or description name opposite ends of an axis (a FRONT
+  // BUMPER "O/H bumper assy" against a REAR BODY one) are two operations:
+  // summing them reported the front overhaul the comparison paid in full as
+  // "2x here vs 1x paid" carrying the rear overhaul's hours. Such a key pairs
+  // 1:1 by context instead. A comparison row that prints no location (a MISC
+  // "Set Back Wiring") separates nothing, so that group still compares as a
+  // sum: neither sheet says which of the two it pays.
+  const locationOf = (row: EstimateRow) => ({ line: row.line, desc: row.rawDesc, section: row.sectionLabel ?? "" });
+  const locationsDiffer = (key: string) =>
+    subject.some(
+      (s) =>
+        !paired.has(s) &&
+        aggKeyOf(s) === key &&
+        competing.some(
+          (c, index) =>
+            !used.has(index) && !isDeduction(c) && aggKeyOf(c) === key && separateLocations(locationOf(s), locationOf(c))
+        )
+    );
   const aggKeys = new Set(
     [...subjectCount.keys()].filter(
-      (key) => (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)!
+      (key) =>
+        (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)! && !locationsDiffer(key)
     )
   );
 

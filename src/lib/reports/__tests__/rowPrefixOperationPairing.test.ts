@@ -66,6 +66,29 @@ describe("the row-prefix reader", () => {
     expect(canonKey("*<>S01RprBumper cover primed").key).toBe(canonKey("* Rpr Bumper cover primed").key);
   });
 
+  it("keeps a description head that only looks like a supplement tag", () => {
+    // A model designator or a word opening the description is content: the
+    // printed tag is S + two digits, and its short / spaced / OCR read forms
+    // count only where the row shows they are a tag.
+    for (const text of ["S4 nameplate", "S5 emblem", "S 63 badge", "SOL VALVE", "Sol Panel"]) {
+      expect(readRowPrefix(text)).toMatchObject({ supplementTag: null, op: null, body: text });
+      expect(canonKey(text).key).toBe(canonKey(`Repl ${text}`).key);
+    }
+  });
+
+  it("still reads the tag in every printed and read form a supplement line carries", () => {
+    expect(readRowPrefix("S01 R&I LT Upper cover")).toMatchObject({ supplementTag: "S01", op: "R&I", body: "LT Upper cover" });
+    expect(readRowPrefix("S 01 R&I LT Upper cover")).toMatchObject({ supplementTag: "S01", op: "R&I" });
+    expect(readRowPrefix("S1 Rpr Bumper cover")).toMatchObject({ supplementTag: "S1", op: "Rpr" });
+    expect(readRowPrefix("* S1 Add for Clear Coat")).toMatchObject({ supplementTag: "S1", body: "Add for Clear Coat" });
+    expect(readRowPrefix("SOI R&I Bumper cover")).toMatchObject({ supplementTag: "SOI", op: "R&I" });
+    expect(readRowPrefix("*<>S0IRprBumper cover")).toMatchObject({ supplementTag: "S0I", op: "Rpr", body: "Bumper cover" });
+    expect(readRowPrefix("S02 Add for Three Stage")).toMatchObject({ supplementTag: "S02", body: "Add for Three Stage" });
+    expect(readRowPrefix("S04O/H bumper assy")).toMatchObject({ supplementTag: "S04", op: "O/H", body: "bumper assy" });
+    // A Mitchell supplement summary prints the short number before the line it changed.
+    expect(readRowPrefix("S3 19 Hood Latch Added")).toMatchObject({ supplementTag: "S3", body: "19 Hood Latch Added" });
+  });
+
   it("finds the operation behind every marker a discard rule sees", () => {
     expect(startsWithRepairOperation("12 * S01 Rpr Bumper cover")).toBe(true);
     expect(startsWithRepairOperation("39 * <> S02 Rpr LT Upper cover")).toBe(true);
@@ -135,6 +158,24 @@ describe("same-key pairing prefers the same operation", () => {
     expect(result.competingOnly.map((row) => row.line)).toEqual([38]);
   });
 
+  it("reads the operation off a glued supplement print the same way", () => {
+    // "*<>S02Rpr": no space before the operation code. An unanchored read
+    // needed one, saw no operation on either carrier row, and the R&I line,
+    // printed first, took the shop's repair line.
+    for (const [ri, rpr] of [
+      ["*S01R&I LT Upper cover", "*<>S02Rpr LT Upper cover"],
+      ["S01R&I LT Upper cover", "S02Rpr LT Upper cover"],
+      ["* R&I LT Upper cover", "*<>Rpr LT Upper cover"],
+    ]) {
+      const result = pairAndCompare(
+        [engineRow(59, "* Rpr LT Upper cover", 3.0, 1.8)],
+        [engineRow(38, ri, 0.8, 0), engineRow(39, rpr, 3.0, 1.8)]
+      );
+      expect(result.pairs.map((pair) => [pair.subject.line, pair.competing.line])).toEqual([[59, 39]]);
+      expect(result.findings).toEqual([]);
+    }
+  });
+
   it("matches exact operations across all subjects before any cross-operation pair", () => {
     // Document order would let the shop's Repl take the carrier's R&I (both
     // candidates differ in operation), leaving the shop's R&I the Rpr.
@@ -167,6 +208,56 @@ describe("the dispute report's line read", () => {
       text: "",
     });
     expect(estimate.lines[0]).toMatchObject({ line: 39, oper: "Rpr", desc: "LT Upper cover", supplement: "S02" });
+  });
+
+  it("never reads a tag off a description whose operation was already taken", () => {
+    const rows = ["12 Repl S4 nameplate 1 45.00 0.2", "13 Repl S10 emblem 1 30.00 0.2"].map(
+      (rawText) => deltaRowFromRawText({ rawText, section: "REAR BODY" })!
+    );
+    expect(rows.map((row) => [row.opCode, row.description])).toEqual([
+      ["Repl", "S4 nameplate"],
+      ["Repl", "S10 emblem"],
+    ]);
+    const estimate = estimateFromDeltaRows({
+      role: "shop",
+      fileName: "shop.pdf",
+      rows,
+      totals: { parts: 0, misc: 0, labor: [], paintSupplies: { hours: 0, rate: 0, cost: 0 }, subtotal: 0, tax: 0, grandTotal: 0 },
+      userCategory: "other",
+      text: "",
+    });
+    expect(estimate.lines.map((line) => [line.oper, line.desc, line.supplement])).toEqual([
+      ["Repl", "S4 nameplate", undefined],
+      ["Repl", "S10 emblem", undefined],
+    ]);
+  });
+});
+
+describe("a surplus is summed only at one printed location", () => {
+  const located = (row: EstimateRow, sectionLabel: string): EstimateRow => ({ ...row, sectionLabel });
+
+  it("pairs the front overhaul with the comparison's front overhaul; the rear one is its own operation", () => {
+    const result = pairAndCompare(
+      [
+        located(engineRow(4, "O/H bumper assy", 2.5, 0, "FRONTBUMPERGRILLE"), "FRONT BUMPER & GRILLE"),
+        located(engineRow(56, "O/H bumper assy", 3.7, 0, "REARBODYFLOOR"), "REAR BODY & FLOOR"),
+      ],
+      [located(engineRow(3, "S02 O/H bumper assy", 2.5, 0, "FRONTBUMPERGRILLE"), "FRONT BUMPER & GRILLE")]
+    );
+    expect(result.pairs.map((pair) => [pair.subject.line, pair.competing.line])).toEqual([[4, 3]]);
+    expect(result.findings.map((finding) => [finding.kind, finding.subject.line])).toEqual([["MISSED", 56]]);
+  });
+
+  it("still sums a group the comparison pays once at no printed location (neither sheet says which one)", () => {
+    const result = pairAndCompare(
+      [
+        located(engineRow(14, "Set Back Wiring", 0.3, 0, "FRONTBUMPERGRILLE"), "FRONT BUMPER & GRILLE"),
+        located(engineRow(65, "Set Back Wiring", 0.3, 0, "REARBUMPER"), "REAR BUMPER"),
+      ],
+      [located(engineRow(53, "Set Back Wiring", 0.3, 0, "MISCELLANEOUSOPERATIONS"), "MISCELLANEOUS OPERATIONS")]
+    );
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ kind: "QTY_SHORTFALL", category: "quantity shortfall (2x here vs 1x paid)" });
   });
 });
 
@@ -303,5 +394,61 @@ describe("a shop estimate against a supplement of record (typed lane)", { timeou
     expect(lowerOnlySummary).toContain("L7 R&I R&I bumper cover (1.7 hr) [REAR BUMPER]");
     expect(lowerOnlySummary).not.toMatch(/possible duplicate/);
     expect(lowerOnlySummary).not.toMatch(/S0\d|<>|changed line/i);
+  });
+});
+
+describe("the possible-duplicate bucket names only repeats of a line that was matched (typed lane)", { timeout: 60_000 }, () => {
+  // The shop removes the RIGHT wheels, the carrier the LEFT ones: no wheel
+  // R&I line is matched, so neither carrier line repeats one. The fender
+  // liner is matched, and the carrier prints it a second time in the same
+  // section under the same operation: that one is a possible duplicate.
+  const shop: PrintRow[] = [
+    { line: 1, section: "WHEELS" },
+    { line: 2, prefix: ["*", "R&I"], desc: "RT/Front R&I wheel", labor: "0.2" },
+    { line: 3, prefix: ["*", "R&I"], desc: "RT/Rear R&I wheel", labor: "0.2" },
+    { line: 4, section: "FRONT BODY" },
+    { line: 5, prefix: ["R&I"], desc: "LT Fender liner", labor: "0.3" },
+    { line: 6, prefix: ["Rpr"], desc: "LT Fender", labor: "2.0" },
+    { line: 7, section: "MISC" },
+    ...filler(8),
+    ...totals(2.7, 0, 145),
+  ];
+  const carrier: PrintRow[] = [
+    { line: 1, section: "WHEELS" },
+    { line: 2, prefix: ["S02", "R&I"], desc: "LT/Front R&I wheel", labor: "0.1" },
+    { line: 3, prefix: ["S02", "R&I"], desc: "LT/Rear R&I wheel", labor: "0.1" },
+    { line: 4, section: "FRONT BODY" },
+    { line: 5, prefix: ["S01", "R&I"], desc: "LT Fender liner", labor: "0.3" },
+    { line: 6, prefix: ["S02", "R&I"], desc: "LT Fender liner", labor: "0.3" },
+    { line: 7, section: "MISC" },
+    ...filler(8),
+    ...totals(0.8, 0, 145),
+  ];
+  const shopWords = printWords(shop);
+  const visualLines = buildPdfTextLines(shopWords);
+  const generated = buildRequiredEstimatorDeltaFindings({
+    anchors: buildEstimateRowAnchorsFromLines(visualLines, { sourceDocumentRole: "shop", sourceDocumentId: "shop" }),
+    visualLines,
+    sourcePdfName: "shop.pdf",
+    sourceDocumentId: "shop",
+    sourceDocumentRole: "shop",
+    sourcePdfHash: "synthetic-shop-wheels",
+    uploadedFileNames: ["shop.pdf", "carrier.pdf"],
+    sourceText: printText(shop),
+    comparisonEstimateTexts: [{ sourceDocumentId: "carrier", fileName: "carrier.pdf", text: printText(carrier), estimateRole: "carrier" }],
+    comparisonEstimateWords: [{ fileName: "carrier.pdf", estimateRole: "carrier", words: printWords(carrier), textLayerReliable: true }],
+    extractionWarnings: [],
+  });
+  const lowerOnlySummary = generated.findings.find((finding) => /totals-lower-only-lines/.test(finding.id))?.currentSupportSummary ?? "";
+  const [onlyPart, duplicatePart = ""] = lowerOnlySummary.split(/possible duplicate/);
+
+  it("lists the carrier's opposite-side wheel R&I lines as carrier-only", () => {
+    expect(onlyPart).toContain("L2 R&I LT/Front R&I wheel (0.1 hr) [WHEELS]");
+    expect(onlyPart).toContain("L3 R&I LT/Rear R&I wheel (0.1 hr) [WHEELS]");
+    expect(duplicatePart).not.toMatch(/R&I wheel/);
+  });
+
+  it("still names a repeat of a matched line as a possible duplicate", () => {
+    expect(duplicatePart).toMatch(/L6 R&I LT Fender liner \(0\.3 hr\) \[FRONT BODY\]/);
   });
 });
