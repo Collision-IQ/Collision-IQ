@@ -316,10 +316,23 @@ export function resolveExportScrub(
   return (value: string): string => redactDownloadContent(value);
 }
 
-export type ForensicDomain = "structural" | "adas" | "parts" | "refinish" | "other";
+export type ForensicDomain = "mechanical" | "structural" | "adas" | "parts" | "refinish" | "other";
 
 /** Domain grouping for the findings sections, by the finding's own category. */
 const DOMAINS: Array<{ title: string; key: ForensicDomain; match: (finding: CitationDensityFinding) => boolean }> = [
+  {
+    // Before structural: hub, caliper and brake lines arrive with the generic
+    // structural_or_fit_verification category, and RO 22120's review read
+    // "structural repair" over them as their billing category. The heading
+    // names the component; the line's own labor letter is its category.
+    title: "Findings — suspension, steering and brakes",
+    key: "mechanical",
+    match: (finding) =>
+      finding.category !== "refinish" &&
+      /\b(?:hub|caliper|brakes?|rotor|bearing|knuckle|control arm|strut|shock absorber|tie rod|axle|half ?shaft|suspension|steering)\b/i.test(
+        finding.operationLabel
+      ),
+  },
   {
     title: "Findings — structural repair",
     key: "structural",
@@ -735,9 +748,11 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
       "damaged panels come off."
   );
   writer.bullet(
-    "If the two sides cannot agree on the amount, your policy contains an appraisal clause. It applies to disputes " +
-      "about the amount of loss, not about whether something is covered. Read your policy for the exact procedure " +
-      "and any time limits before invoking it."
+    // No policy is among the documents compared, so whether it has an
+    // appraisal clause is not known here (RO 22120 review).
+    "If the two sides cannot agree on the amount, check whether your policy has an appraisal clause. Where it " +
+      "does, it applies to disputes about the amount of loss, not about whether something is covered. Read your " +
+      "policy for the exact procedure and any time limits before invoking it."
   );
   writer.bullet(
     "Ask in writing that any electronic safety systems disturbed by the repair be calibrated afterwards, and that " +
