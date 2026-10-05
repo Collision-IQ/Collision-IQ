@@ -920,6 +920,9 @@ export type AnnotatedEstimateGeneratedFindings = {
     higherLineCount: number | null;
     lowerLineCount: number | null;
     noCounterpartRows: ForensicNoCounterpartRow[];
+    /** The matcher's notices that must reach the reader (withdrawn
+     *  contradictions, category-gap checks, inclusion-note verify lines). */
+    checkNotes?: string[];
     /** Non-null when the line-item comparison was withheld (typed columns
      *  failed SUBTOTALS reconciliation): the totals table stands, and the
      *  report must say why it lists no line-level differences. */
@@ -3427,6 +3430,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       // is a parsing limit, never a finding of "no differences".
       limitations: [
         ...(forensicInput.lineItemComparisonWithheld ? [forensicInput.lineItemComparisonWithheld] : []),
+        // P0-1: a check the matcher made must be visible in the report the
+        // reader adjudicates from, not only on a finding's own record.
+        ...(forensicInput.checkNotes ?? []),
         ...textLayerNotes,
       ],
       redactionScope,
@@ -4704,6 +4710,15 @@ export function buildRequiredEstimatorDeltaFindings(
         higherTotals: deltaMatch?.higherTotalsSummary ?? null,
         lowerTotals: deltaMatch?.lowerTotalsSummary ?? null,
       }),
+      // Checks that changed or qualify a claim: withdrawn same-operation pairs,
+      // inclusion-note comparisons, category-gap checks. Not the heuristic
+      // "closely resembles" suggestions (they change no claim, and shared
+      // wording such as "w/o Performance" makes many of them wrong), and not
+      // the target/source note, whose net total differs from the
+      // reconciliation table's grand total.
+      checkNotes: (deltaMatch?.contradictionNotes ?? []).filter(
+        (note) => !/closely resembles/i.test(note) && !/^Target \(annotated document\)/.test(note)
+      ),
       higherLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld
           ? deltaMatch.higherRowsRead
@@ -5602,9 +5617,16 @@ function matchStructuredLineItemDeltas(
     match.lowerOnlyRows = covered.lowerOnlyRows;
     match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredMissing);
     for (const item of covered.coverage) {
+      // Lines folded in by inference are counted, never presented as work the
+      // note names (RO 22120: drive time and service-mode out).
+      const inferred = covered.deltas.find((delta) => delta.lowerRow === item.lowerRow)?.coveredByInferenceLines?.length ?? 0;
+      const named = item.coveredRows.length - inferred;
+      const lines = (n: number) => `${n} line${n === 1 ? "" : "s"}`;
       contradictionNotes.push(
         `"${item.lowerRow.description}" on ${comparison[0].fileName || "the comparison estimate"} states it includes ${item.included}; ` +
-          `it is compared with the ${item.coveredRows.length} line${item.coveredRows.length === 1 ? "" : "s"} of this estimate that do that work, and neither side reports them as missing.`
+          (inferred > 0
+            ? `it is compared with ${lines(item.coveredRows.length)} of this estimate: ${named} whose wording the note names and ${inferred} counted with it by inference, which the note does not state. Neither side reports them as missing.`
+            : `it is compared with the ${lines(item.coveredRows.length)} of this estimate that do that work, and neither side reports them as missing.`)
       );
     }
     contradictionNotes.push(...covered.verify);
@@ -5840,6 +5862,7 @@ function matchStructuredLineItemDeltas(
     deltas: orderedDeltas,
     higher: higherTotals,
     lower: lowerTotals,
+    lowerOnlyRows: match.lowerOnlyRows,
   });
   if (categoryGapCheck.notes.length > 0) contradictionNotes.push(...categoryGapCheck.notes);
   // The totals deltas compare the ESTIMATE TOTALS blocks, so a TOTALS SUMMARY
