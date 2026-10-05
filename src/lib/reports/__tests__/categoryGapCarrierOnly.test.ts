@@ -70,7 +70,7 @@ describe("category gap: the comparison's own unmatched lines are part of the gap
       expect(delta.exceedsCategoryGap).toBeUndefined();
     }
     expect(result.notes).toHaveLength(1);
-    expect(result.notes[0]).toMatch(/claims total 5\.7 h, above the 3\.7 h gap/);
+    expect(result.notes[0]).toMatch(/claims checked here total 5\.7 h, above the 3\.7 h gap/);
     expect(result.notes[0]).toMatch(/own lines with no counterpart here carry 2\.5 h of body labor \(L42 R&I R&I bumper cover \(1\.7 h\); L38 R&I LT Upper cover \(0\.8 h\)\)/);
     expect(result.notes[0]).toMatch(/may be some of the claimed work written under other wording/);
   });
@@ -117,6 +117,6 @@ describe("the forensic report carries the checks that qualify a claim, not heuri
     });
     const notes = generated.forensic?.checkNotes ?? [];
     expect(notes.some((note) => /Tool Box" on SOR\.pdf states it includes/.test(note))).toBe(true);
-    expect(notes.filter((note) => /closely resembles|^Target \(annotated document\)/.test(note))).toEqual([]);
+    expect(notes.filter((note) => /closely resembles|^Target \(annotated document\)|extraction confidence/i.test(note))).toEqual([]);
   });
 });

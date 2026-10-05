@@ -870,6 +870,11 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
         "of this report and the vehicle was not physically inspected; hidden damage may alter both estimates."
     );
   } else {
+    // A notice about one check is not a reconciliation failure: when the
+    // totals balanced, say so before the notices.
+    if (described.balanceWarnings.length === 0) {
+      writer.paragraph("Both documents reconciled against their own printed totals.");
+    }
     for (const limitation of allLimitations) writer.bullet(limitation);
     writer.paragraph(
       "Neither appraisal was prepared by the author of this report and the vehicle was not physically inspected; " +

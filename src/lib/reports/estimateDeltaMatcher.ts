@@ -4680,8 +4680,8 @@ export function reconcileMissingClaimsAgainstTotals(params: {
         .map((row) => `L${row.lineNumber ?? "?"} ${describeRow(row)} (${fmt(lane.rowValue(row))})`)
         .join("; ");
       notes.push(
-        `${lane.label}: the line-level "not present" claims total ${fmt(claimed)}, above the ${fmt(Math.max(lane.gap, 0))} gap the two totals blocks state, ` +
-          `and the comparison estimate's own lines with no counterpart here carry ${fmt(theirsOnlyValue)} of ${lane.label.toLowerCase()} (${named}${theirsOnly.length > 6 ? `; ${theirsOnly.length - 6} more` : ""}), which accounts for the difference. ` +
+        `${lane.label}: the line-level "not present" claims checked here total ${fmt(claimed)}, above the ${fmt(Math.max(lane.gap, 0))} gap the two totals blocks state, ` +
+          `and the comparison estimate's own lines with no counterpart here carry ${fmt(theirsOnlyValue)} of ${lane.label.toLowerCase()} (${named}${theirsOnly.length > 6 ? `; ${theirsOnly.length - 6} more` : ""}), which covers the excess. ` +
           `Those lines may be some of the claimed work written under other wording; compare them before relying on the claims.`
       );
       continue;
@@ -4695,7 +4695,7 @@ export function reconcileMissingClaimsAgainstTotals(params: {
     }
     notes.push(
       `${lane.label}: the line-level "not present" claims total ${fmt(claimed)}, but the two totals blocks put the ${lane.label.toLowerCase()} gap at ${fmt(Math.max(lane.gap, 0))}. ` +
-        `Some of these operations are paid on the comparison estimate under other wording; each is marked a verify item, not a confirmed omission.`
+        `Some of these operations may be paid on the comparison estimate under other wording; each is marked a verify item, not a confirmed omission.`
     );
     for (const delta of lane.members) {
       delta.exceedsCategoryGap = true;

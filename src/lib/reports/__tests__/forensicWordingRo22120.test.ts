@@ -93,6 +93,34 @@ describe("the forensic report states only what its documents show", () => {
     expect(text).toMatch(/40 Repl LT Hub assy 150mm 1\.6 M — \$330\.00/);
     expect(text).toMatch(/72 Rpr In-Proc repair scan 1\.0 M — \$0\.00/);
   });
+  it("a check note does not hide that both documents reconciled against their printed totals", async () => {
+    const result = await buildForensicReportPdf({
+      reconciliation: buildForensicReconciliation({
+        higherTotals: {
+          categories: [{ category: "Mechanical Labor", hours: 2.6, rate: 175, cost: 455 }],
+          subtotal: 455, salesTax: 0, grandTotal: 455, taxLanes: [],
+        },
+        lowerTotals: { categories: [], subtotal: 0, salesTax: 0, grandTotal: 0, taxLanes: [] },
+      }),
+      findings: [finding("Missing from comparison estimate: LT Hub assy 150mm")],
+      higherDocumentName: "Shop estimate.pdf",
+      lowerDocumentName: "Carrier SOR.pdf",
+      higherLineCount: 2,
+      lowerLineCount: 0,
+      noCounterpartRows: [
+        { line: 40, description: "Repl LT Hub assy 150mm", amount: 330, laborHours: 1.6, laborType: "M", paintHours: 0 },
+        { line: 72, description: "Rpr In-Proc repair scan", amount: 0, laborHours: 1.0, laborType: "M", paintHours: null },
+      ],
+      vehicleLabel: "Synthetic test vehicle",
+      limitations: ["Body labor: a check note that qualifies some claims."],
+      authorities: [],
+      retrievedSources: [],
+      generatedAt: "2026-10-04T00:00:00.000Z",
+    });
+    const text = await pdfText(result.bytes);
+    expect(text).toMatch(/Both documents reconciled against their own printed totals\./);
+    expect(text).toMatch(/a check note that qualifies some claims/);
+  });
 });
 
 describe("the wheel-access finding reads the comparison's wheel lines", () => {

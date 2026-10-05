@@ -96,3 +96,18 @@ describe("a paired line whose prices differ is argued at labor plus the price di
     expect(result.find((i) => i.shopLines.includes(40))).toBeUndefined();
   });
 });
+
+describe("a price their sheet does not print is not $0.00", () => {
+  it("argues the pair on its hours only, and never prints their price as $0.00", () => {
+    // RO 21995 shape: ours priced, theirs a quantity with no price (the
+    // integrity check asks them to price it).
+    const result = items(
+      [{ line: 68, oper: "Subl", desc: "Forklift frame from lot", price: 175, hours: 0.5, laborCat: "body" }],
+      [{ line: 57, oper: "Subl", desc: "Forklift frame from lot", qty: 1 }],
+      [{ kind: "reduced", shopLines: [68], carrierLine: 57 }]
+    );
+    const item = result.find((i) => i.shopLines.includes(68));
+    expect(item?.value).toBe(45); // 0.5 hr body at $90, no price difference
+    expect(item?.detail ?? "").not.toMatch(/\$0\.00/);
+  });
+});

@@ -3665,6 +3665,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         if (/extraction confidence/i.test(line) && !textLayerNotes.includes(line)) {
           textLayerNotes.push(line);
         }
+        // A capped finding list reads as "this is everything" unless the
+        // report says otherwise (RO 22182: seat-track findings past the cap).
+        if (/beyond this pack's per-report limit/i.test(line) && !textLayerNotes.includes(line)) {
+          textLayerNotes.push(line);
+        }
       }
     }
     // The Delta report opens as a forensic document — purpose, documents
@@ -4717,7 +4722,14 @@ export function buildRequiredEstimatorDeltaFindings(
       // the target/source note, whose net total differs from the
       // reconciliation table's grand total.
       checkNotes: (deltaMatch?.contradictionNotes ?? []).filter(
-        (note) => !/closely resembles/i.test(note) && !/^Target \(annotated document\)/.test(note)
+        (note) =>
+          !/closely resembles/i.test(note) &&
+          !/^Target \(annotated document\)/.test(note) &&
+          // Its hours window also takes a supplement's TOTALS SUMMARY and RATE
+          // CHANGES rows, and it says absence findings "are marked unverified"
+          // whether or not any were (RO 22120: every printed hour was read and
+          // none was marked). It is not printed until it reports what was done.
+          !/extraction confidence/i.test(note)
       ),
       higherLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld

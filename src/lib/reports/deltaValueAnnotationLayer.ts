@@ -485,7 +485,9 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     });
     const difference =
       net > 0
-        ? `The difference is ${fmtHours(net)} hr, not a missing operation.`
+        ? inferred.length > 0
+          ? `The difference is ${fmtHours(net)} hr; the work the note's words name is not a missing operation.`
+          : `The difference is ${fmtHours(net)} hr, not a missing operation.`
         : net < 0
           ? `${label.charAt(0).toUpperCase()}${label.slice(1)} allows ${fmtHours(-net)} hr more in total.`
           : "The hours are equal.";

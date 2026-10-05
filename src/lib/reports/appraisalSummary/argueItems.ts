@@ -275,8 +275,12 @@ export function argueItems(params: {
     // ours against a $189.99 sublet repair on theirs, is not a 0.3 hr item.
     const ourPrice = round2(lines.reduce((sum, l) => sum + (l.price ?? 0), 0));
     const theirPrice = theirs ? round2([theirs, ...crossRefs].reduce((sum, l) => sum + (l.price ?? 0), 0)) : 0;
-    const partValue = theirs ? round2(ourPrice - theirPrice) : ourPrice;
-    const pricesDiffer = Boolean(theirs) && ourPrice !== theirPrice;
+    // A price their sheet does not print (or this read could not) is not
+    // $0.00: the pair is then argued on its hours, and the integrity check
+    // asks for the price (RO 21995: "Forklift frame from lot", quantity 1).
+    const theirPriceRead = Boolean(theirs) && [theirs!, ...crossRefs].some((l) => l.price !== undefined && l.price !== null);
+    const partValue = theirs ? (theirPriceRead ? round2(ourPrice - theirPrice) : 0) : ourPrice;
+    const pricesDiffer = theirPriceRead && ourPrice !== theirPrice;
     const sideText = (sideHours: number, price: number) => `${sideHours.toFixed(1)} hr${pricesDiffer ? `, ${money(price)}` : ""}`;
     const value = round2(
       lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) - crossRefs.reduce((sum, l) => sum + laborValue(l), 0) + partValue
