@@ -734,20 +734,29 @@ function engineResultToLineItemDeltas(params: {
   // duplicate billing; everything else is genuinely lower-only. Key alone is
   // not enough — the key carries neither section nor operation, so a REAR
   // "R&I bumper cover" read as a duplicate of the FRONT one, and a panel's
-  // "R&I" access line as a duplicate of its paired "Rpr" line.
+  // "R&I" access line as a duplicate of its paired "Rpr" line. The key carries
+  // no side either: the carrier's "LT/Front R&I wheel" read as a repeat of
+  // the shop's "RT/Front R&I wheel". And only a line that WAS matched can be
+  // repeated — a MISSED subject, or an aggregate the comparison pays zero
+  // times, matched nothing, so it seeds no context.
   const opOf = (row: DeltaEngineRow) => (engineRowOpCode(row) ?? "").replace(/\s/g, "").toUpperCase();
+  const contextOf = (key: string, side: string, section: string, op: string) => `${key}|${side}|${section}|${op}`;
   const consumedContexts = new Set<string>();
-  const addContext = (subject: DeltaEngineRow, competing: DeltaEngineRow | null) => {
-    for (const section of new Set([subject.section, competing?.section ?? subject.section]))
-      for (const op of new Set([opOf(subject), competing ? opOf(competing) : opOf(subject)]))
-        consumedContexts.add(`${subject.key}|${section}|${op}`);
+  const addContext = (subject: DeltaEngineRow, competing: DeltaEngineRow) => {
+    for (const side of new Set([subject.side, competing.side]))
+      for (const section of new Set([subject.section, competing.section]))
+        for (const op of new Set([opOf(subject), opOf(competing)]))
+          consumedContexts.add(contextOf(subject.key, side, section, op));
   };
   for (const pair of engine.pairs) addContext(pair.subject, pair.competing);
-  for (const finding of engine.findings) addContext(finding.subject, finding.competing);
+  for (const finding of engine.findings) {
+    if (!finding.competing) continue;
+    for (const subject of finding.subjects ?? [finding.subject]) addContext(subject, finding.competing);
+  }
   const lowerOnlyRows: DeltaEngineRow[] = [];
   const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
   for (const row of engine.competingOnly) {
-    if (consumedContexts.has(`${row.key}|${row.section}|${opOf(row)}`)) potentialDuplicateLowerRows.push(row);
+    if (consumedContexts.has(contextOf(row.key, row.side, row.section, opOf(row)))) potentialDuplicateLowerRows.push(row);
     // P0-3 SYMMETRY. pairAndCompare already refuses to call a negative subject
     // row "missing on the competing estimate" (deltaPair isDeduction), but
     // nothing applied the mirror rule to the competing side, so the typed lane

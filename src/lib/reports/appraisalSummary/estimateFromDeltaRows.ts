@@ -278,10 +278,15 @@ export function estimateFromDeltaRows(params: {
     let oper = row.opCode ?? "";
     // The row prefix — marker glyphs ("*", "<>") and the supplement tag —
     // is never the description: "<> S02 Rpr LT Upper cover" is a Rpr of
-    // "LT Upper cover".
-    const prefix = readRowPrefix(desc);
-    supplement = supplement ?? prefix.supplementTag ?? undefined;
-    desc = prefix.afterMarkers;
+    // "LT Upper cover". Read only off a description that still carries the
+    // prefix: once the operation was taken, the description is the text
+    // after it, and its head is content ("Repl S4 nameplate" is a nameplate
+    // named S4, not a nameplate under supplement S4).
+    if (!oper) {
+      const prefix = readRowPrefix(desc);
+      supplement = supplement ?? prefix.supplementTag ?? undefined;
+      desc = prefix.afterMarkers;
+    }
     const op = desc.match(OP_CODE);
     if (op && !oper) {
       oper = op[1];

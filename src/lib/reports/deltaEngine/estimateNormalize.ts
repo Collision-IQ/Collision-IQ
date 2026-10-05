@@ -170,10 +170,14 @@ const OPENS_WITH_OPERATION_CI = new RegExp(`^(?:${LENIENT_OP_TOKENS})\\b`, "i");
  * serialized the carrier's operation as null.
  *
  * Glyphs and the tag are consumed in any order and glued or spaced
- * ("*<>S01RprBumper cover"); the tag tolerates the OCR reads of S01
- * ("SOI", "S0I") and the short "S1" form, but only where the next character
- * cannot continue a word, so a description opening "SOLID" or "S2000" keeps
- * its head.
+ * ("*<>S01RprBumper cover"). The tag as printed is "S" and two digits. Its
+ * read forms — the short "S1", the spaced "S 01", the OCR "SOI"/"S0I" — are
+ * taken only where the row shows they are a tag (behind a marker glyph, in
+ * front of an operation code, or in front of the line number a Mitchell
+ * supplement summary prints; the OCR forms only before an operation code),
+ * and never
+ * where the next character continues a word. So a description opening
+ * "SOLID", "S2000", "S4 nameplate" or "SOL VALVE" keeps its head.
  */
 export type RowPrefixGlyph = "#" | "*" | "**" | "<>";
 
@@ -194,13 +198,45 @@ export interface RowPrefix {
 }
 
 const ROW_PREFIX_GLYPH = /^(\*\*|\*|#|<>)\s*/;
-const ROW_PREFIX_SUPPLEMENT_TAG = /^S(?:\s?0?\d{1,2}|[0Oo][1IiLl])(?=$|[\s#*<]|[A-Z][a-z]|R&I)/;
+/** What may follow a supplement tag: nothing, a space or glyph, or a glued
+ *  operation / description ("S01RprBumper", "S01R&I", "S02O/H"). */
+const ROW_PREFIX_TAG_END = String.raw`(?=$|[\s#*<]|[A-Z][a-z]|R&[IR]|O\/H)`;
+/** The tag as a CCC supplement prints it: S and two digits ("S01", "S02"). */
+const ROW_PREFIX_SUPPLEMENT_TAG = new RegExp(`^S\\d{2}${ROW_PREFIX_TAG_END}`);
+/** Short and spaced forms of the tag ("S1", "S 01"). A description can open
+ *  this way too ("S4 nameplate", "S 63 badge"), so these are a tag only
+ *  behind a marker glyph, or in front of an operation code or a line number. */
+const ROW_PREFIX_SUPPLEMENT_TAG_SHORT = new RegExp(`^S\\s?\\d{1,2}${ROW_PREFIX_TAG_END}`);
+/** OCR reads of a zero or a one as a letter ("SO1", "S0I", "SOI"). A word
+ *  can open this way ("SOL VALVE", "Sol Panel"), so these are a tag only in
+ *  front of an operation code. */
+const ROW_PREFIX_SUPPLEMENT_TAG_OCR = new RegExp(`^S\\s?[0Oo][\\dIiLl]${ROW_PREFIX_TAG_END}`);
 const ROW_PREFIX_OPS = "R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\\/H";
 /** Spaced operation token, any case ("Rpr Bumper", "RPR BUMPER"). */
 const ROW_PREFIX_OP_SPACED = new RegExp(`^(${ROW_PREFIX_OPS})(?=$|\\s)`, "i");
 /** Glued mixed-case operation token ("RprBumper", "R&IRT"); case-sensitive,
  *  so an ALL-CAPS word ("REPLACEMENT") is never split. */
 const ROW_PREFIX_OP_GLUED = new RegExp(`^(${ROW_PREFIX_OPS})(?=[A-Z])`);
+
+/** The supplement tag at the head of `rest`, or null. The printed form is a
+ *  tag wherever it stands; a short or OCR-read form only where the row's own
+ *  print shows it is one (see the patterns above). */
+function readSupplementTag(rest: string, afterGlyph: boolean): string | null {
+  const printed = ROW_PREFIX_SUPPLEMENT_TAG.exec(rest);
+  if (printed) return printed[0];
+  const operationFollows = (match: RegExpExecArray) => {
+    const next = rest.slice(match[0].length).trimStart();
+    return ROW_PREFIX_OP_SPACED.test(next) || ROW_PREFIX_OP_GLUED.test(next);
+  };
+  // Mitchell prints its supplement number short, in front of the line number
+  // it changed ("S3 19 Hood Latch Added").
+  const lineNumberFollows = (match: RegExpExecArray) => /^\s+\d{1,4}\s+[A-Za-z]/.test(rest.slice(match[0].length));
+  const short = ROW_PREFIX_SUPPLEMENT_TAG_SHORT.exec(rest);
+  if (short && (afterGlyph || operationFollows(short) || lineNumberFollows(short))) return short[0];
+  const ocr = ROW_PREFIX_SUPPLEMENT_TAG_OCR.exec(rest);
+  if (ocr && operationFollows(ocr)) return ocr[0];
+  return null;
+}
 
 export function readRowPrefix(text: string): RowPrefix {
   let rest = (text ?? "").trim();
@@ -213,10 +249,10 @@ export function readRowPrefix(text: string): RowPrefix {
       rest = rest.slice(glyph[0].length);
       continue;
     }
-    const tag: RegExpExecArray | null = supplementTag === null ? ROW_PREFIX_SUPPLEMENT_TAG.exec(rest) : null;
+    const tag: string | null = supplementTag === null ? readSupplementTag(rest, glyphs.length > 0) : null;
     if (tag) {
-      supplementTag = tag[0].replace(/\s+/g, "");
-      rest = rest.slice(tag[0].length).trimStart();
+      supplementTag = tag.replace(/\s+/g, "");
+      rest = rest.slice(tag.length).trimStart();
       continue;
     }
     break;
