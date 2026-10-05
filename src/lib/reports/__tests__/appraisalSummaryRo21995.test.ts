@@ -380,6 +380,12 @@ describe("RO 21995 from the production-path rows (strict line guard on)", () => 
     expect(text).toContain("Short-paid vs. what only they wrote");
   });
 
+  it("never scripts the shop to tell the owner what a policy no one supplied contains", () => {
+    // No policy is among the documents compared (RO 22120 review, item 7).
+    expect(text).toContain("Check whether your policy has a section on what happens when the two sides cannot agree on the amount");
+    expect(text).not.toMatch(/Your policy has a section/);
+  });
+
   it("never asserts a P-page it has not retrieved", () => {
     const caliper = model.items.find((i) => /caliper/i.test(i.title));
     expect(caliper?.strength).toBe("Needs proof");

@@ -44,6 +44,7 @@ const INCLUDES = /\binclud(?:es|ing|ed)\b([^.]*)/i;
 const NEGATED = /(?:does\s*n[o']?t|do\s+not|\bnot)\s+includ|\bexclud/i;
 /** A comparison line's own note naming the line it is included in. */
 const INCLUDED_IN = /\bincluded\s+(?:in|with)\s+([^.;]+)/i;
+const INCLUDED_IN_ALL = new RegExp(INCLUDED_IN.source, "gi");
 /** A back-reference shorter than this names nothing ("Included in labor"). */
 const MIN_REFERENCE_LETTERS = 6;
 
@@ -132,7 +133,11 @@ export function applyComparisonInclusionNotes(params: {
     const annotation = notes.get(lowerRow.lineNumber);
     const note = annotation?.note?.trim();
     if (!note || NEGATED.test(note)) continue;
-    const included = note.match(INCLUDES)?.[1]?.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+    // "Included in calibration" / "Included with pre-scan" says THIS line is
+    // included in other work, the opposite of a bundle: it is taken out before
+    // the note is read for what the line itself includes.
+    const forward = note.replace(INCLUDED_IN_ALL, " ");
+    const included = forward.match(INCLUDES)?.[1]?.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
     if (!included) continue;
     const terms = TERMS.filter((term) => term.named.test(included));
     if (!terms.length) continue;
@@ -195,7 +200,10 @@ export function applyComparisonInclusionNotes(params: {
       lowerRow,
       higherRow: {
         ...lead,
-        description: `${lead.description}${others ? ` and ${others} more line${others === 1 ? "" : "s"}` : ""} that "${lowerRow.description}" includes`,
+        // A heading is read on its own: it says the lines are compared with
+        // the note's line, never that the note includes each one (some are
+        // counted with it by inference, which the summary states).
+        description: `${lead.description}${others ? ` and ${others} more line${others === 1 ? "" : "s"}` : ""} compared with "${lowerRow.description}"`,
         laborType: types.size === 1 ? lead.laborType ?? null : null,
       },
       coveredHigherLines: lines,
@@ -222,7 +230,9 @@ export function applyComparisonInclusionNotes(params: {
         }) +
         " " +
         (net > 0
-          ? `The difference is ${hr(net)} hr, not a missing operation.`
+          ? inferred.length
+            ? `The difference is ${hr(net)} hr; the work the note's words name is not a missing operation.`
+            : `The difference is ${hr(net)} hr, not a missing operation.`
           : `The comparison estimate allows ${hr(-net)} hr more in total.`),
       changedFields: ["labor"],
       statusLabels: ["COVERED_BY_COMPARISON_NOTE"],

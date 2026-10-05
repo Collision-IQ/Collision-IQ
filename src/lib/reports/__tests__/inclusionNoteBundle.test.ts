@@ -139,6 +139,35 @@ describe("a diagnostic bundle written as two words, or under a diagnostic sectio
     expect(result.lowerOnlyRows).toEqual([bracket]);
   });
 
+  it("a back-reference note ('Included in calibration') is never read as the line including that work", () => {
+    // A 0.0 hr line in VEHICLE DIAGNOSTICS whose note says IT is included in
+    // calibration: our unpaired calibration road test stays missing.
+    const deltas = [missing(row(73, "Calibration road test", 0.5))];
+    const exit = row(45, "S01 Rpr Exit service mode", 0);
+    const result = applyComparisonInclusionNotes({
+      deltas,
+      lowerOnlyRows: [exit],
+      comparisonText: cccText([["45*S01  Rpr  Exit service mode00.00m0.0M0.0", "Included in calibration"]]),
+      comparisonName: "SOR.pdf",
+    });
+    expect(result.coverage).toEqual([]);
+    expect(result.deltas).toEqual(deltas);
+    expect(result.lowerOnlyRows).toEqual([exit]);
+  });
+
+  it("'Included with pre-scan' on their post-repair scan does not absorb our pre-repair scan", () => {
+    const deltas = [missing(row(68, "Pre-repair scan", 1.0))];
+    const post = row(47, "S01 Rpr Post-repair scan", 0);
+    const result = applyComparisonInclusionNotes({
+      deltas,
+      lowerOnlyRows: [post],
+      comparisonText: cccText([["47*S01  Rpr  Post-repair scan00.00m0.00.0", "Included with pre-scan"]]),
+      comparisonName: "SOR.pdf",
+    });
+    expect(result.coverage).toEqual([]);
+    expect(result.deltas).toEqual(deltas);
+  });
+
   it("a truck-bed tool box outside a diagnostic section, noting its hardware, changes nothing", () => {
     const deltas = [missing(row(68, "Pre-repair scan", 1.0))];
     const box = row(42, "S01 Repl Tool box", 0.5, null, "PICKUP BOX");
@@ -203,6 +232,12 @@ describe("carrier lines whose own note says 'Included in <bundle>' join its one 
     expect(covered?.summary).toContain("The note's words name the work on L68, L69, L73, L77; L76, L79 are counted with it by inference only");
     expect(covered?.summary).toContain("The note does not say how its 1.0 hr divides among these steps or that each step is paid.");
     expect(covered?.summary).not.toMatch(/\bpays\b/);
+    // Headings and the closing line state no more than the note does: L76 and
+    // L79 are counted by inference, so the heading says "compared with", and
+    // only the work the note's words name is called not missing.
+    expect(covered?.higherRow.description).toBe('Pre-repair scan and 5 more lines compared with "S02 Rpr Maker Tool Box"');
+    expect(covered?.summary).toMatch(/The difference is 3\.2 hr; the work the note's words name is not a missing operation\.$/);
+    expect(covered?.summary).not.toContain("3.2 hr, not a missing operation");
     // The dispute layer receives the whole comparison as one pair.
     expect(pairsFromDeltas(result.deltas)).toContainEqual({
       kind: "reduced",
@@ -345,7 +380,9 @@ describe("the bundle is one unit and one argued item, on the line that prints it
   it("no equivalence group takes a line of the bundle, so its argued item survives", () => {
     const { groups, items } = lowerCopy(shopLines, carrierLines, pairs);
     expect(groups.map((g) => [g.key, g.shopLines, g.carrierLines])).toEqual([["adas", [72, 76], [50]]]);
-    const bundle = items.find((i) => i.title === "Maker Tool Box: the work its note includes");
+    // The title is read alone: it says the lines are compared with their line,
+    // never that the note includes each one (L79 is counted by inference).
+    const bundle = items.find((i) => i.title === "Maker Tool Box and the lines compared with it");
     expect(bundle).toMatchObject({ shopLines: [68, 69, 73, 77, 79], carrierLines: [46, 45, 47], hours: 2.2, value: 385 });
     expect(bundle?.detail).toBe(
       'Ours 3.2 hr (L68, L69, L73, L77, L79), theirs 1.0 hr (L46), whose note reads "includes pre and post and 1 Calibration and Service Mode". ' +
@@ -365,9 +402,12 @@ describe("the bundle is one unit and one argued item, on the line that prints it
     const { set } = lowerCopy(shopLines, carrierLines, pairs);
     expect(set.findings.find((f) => f.carrierLine === 45)).toBeUndefined();
     const text = set.findings.find((f) => f.carrierLine === 46)!.entries.map((e) => e.text).join(" ");
-    expect(text).toContain("Maker Tool Box (the work its note includes): ours 3.2 hr M (L68, L69, L73, L77, L79) vs this estimate's 1.0 hr M; short $385.00.");
+    expect(text).toContain("Maker Tool Box and the lines compared with it: ours 3.2 hr M (L68, L69, L73, L77, L79) vs this estimate's 1.0 hr M; short $385.00.");
+    expect(text).not.toContain("the work its note includes");
     expect(text).toContain(`Ln 46 prints 1.0 hr M; its note reads "${BUNDLE_NOTE}".`);
-    expect(text).toContain("This estimate's L45, L47 print 0.0 hr");
+    // This copy's legend: "Ln" is a line on this estimate, "L" a line on ours.
+    expect(text).toContain("This estimate's Ln 45, Ln 47 print 0.0 hr");
+    expect(text).not.toMatch(/This estimate's L\d/);
     expect(text).toContain("our L79 is counted with it by inference only");
     expect(text).not.toMatch(/no hours or price|on this estimate only/);
   });
@@ -385,6 +425,19 @@ describe("a grouped entry prints its hours per category, never one tag over mixe
     );
     const text = set.findings.flatMap((f) => f.entries.map((e) => e.text)).join(" ");
     expect(text).toContain("Pre / post repair scans: ours 2.0 hr M (L68, L77) vs this estimate's 0.5 hr + 0.3 hr M;");
+  });
+});
+
+describe("an equivalence group never takes one line of an equal-value matcher pair", () => {
+  it("our service-mode-out line stays with their identical line, which is not 'on this estimate only'", () => {
+    const shopLines = [m(69, "Set up targets", 1.0), m(79, 'Remove vehicle from "Service Mode"', 0.1)];
+    const carrierLines = [m(50, "Calibrate front camera", 1.0), m(51, 'Remove vehicle from "Service Mode"', 0.1)];
+    const pairs: MatcherPair[] = [{ kind: "matched", shopLines: [79], carrierLine: 51 }];
+    const { groups, set } = lowerCopy(shopLines, carrierLines, pairs);
+    expect(groups.map((g) => [g.key, g.shopLines, g.carrierLines])).toEqual([["adas", [69], [50]]]);
+    const text = set.findings.flatMap((f) => f.entries.map((e) => e.text)).join(" ");
+    expect(text).not.toMatch(/Service Mode"[^:]*: on this estimate only/);
+    expect(set.findings.find((f) => f.carrierLine === 51)).toBeUndefined();
   });
 });
 
@@ -422,15 +475,19 @@ describe("the fixture pair with a Tool Box note: counts, items and the forensic 
   it("the bundle covers the steps its note names; each document's operation count is unchanged", () => {
     const { generated, shopText, sorText } = run();
     const forensic = generated.forensic!;
-    // The operations each sheet prints, as before the note grouped some of them.
-    // (132/109 since the row-prefix fix: shop Rpr and R&I trunk lid now pair
-    // with the carrier's own Rpr and R&I lines instead of one aggregated
-    // "2x vs 1x" pair and a test fit paired with an R&I. The count is taken
-    // before coverage, so the note grouping lines changes nothing here.)
+    // The forensic header's operation counts: matched pairs plus each side's
+    // unpaired lines, so they depend on the pairing (an aggregated "2x vs 1x"
+    // pair counts once) and are not a count of the rows each sheet prints.
+    // 132/109 since the row-prefix fix: shop Rpr and R&I trunk lid now pair
+    // with the carrier's own Rpr and R&I lines instead of one aggregated pair
+    // and a test fit paired with an R&I. The counts are taken before
+    // coverage, so the note grouping lines changes nothing here.
     expect([forensic.higherLineCount, forensic.lowerLineCount]).toEqual([132, 109]);
     const covered = forensic.rows.deltas.find((d) => d.statusLabels?.includes("COVERED_BY_COMPARISON_NOTE"));
     expect(covered).toMatchObject({ lowerRow: expect.objectContaining({ lineNumber: 100 }), coveredHigherLines: [137, 138, 141, 142, 143, 145] });
     expect(forensic.noCounterpartRows.map((r) => r.line)).not.toEqual(expect.arrayContaining([137]));
+    // The finding's heading says the lines are compared with the note's line.
+    expect(covered?.higherRow.description).toMatch(/ and 5 more lines compared with ".*Tool Box"$/i);
 
     const adapted = adaptForensicToPlainSummary({
       reconciliation: forensic.reconciliation,
@@ -445,8 +502,18 @@ describe("the fixture pair with a Tool Box note: counts, items and the forensic 
     if (!adapted.ok) throw new Error(adapted.reason);
     const model = buildPlainSummaryModel(adapted.input);
     // Their drive time (L102) still anchors the ADAS group, without the bundle's lines.
-    expect(model.groups.find((g) => g.key === "adas")).toMatchObject({ shopLines: [140, 144, 146, 147], carrierLines: [102] });
-    const bundle = model.items.find((i) => /Tool Box: the work its note includes/.test(i.title));
+    const adas = model.groups.find((g) => g.key === "adas")!;
+    expect(adas.carrierLines).toContain(102);
+    expect(adas.shopLines.some((l) => [137, 138, 141, 142, 143, 145].includes(l))).toBe(false);
+    // Our L147 and their L101 both print 'Remove vehicle from "Service Mode"'
+    // 0.1 M, and the matcher paired them: no group takes one without the other,
+    // and the citation copy never calls their line work only they wrote.
+    expect(adapted.input.pairs).toContainEqual({ kind: "matched", shopLines: [147], carrierLine: 101 });
+    expect(adas.shopLines.includes(147)).toBe(adas.carrierLines.includes(101));
+    const lower = buildLowerEstimateFindings(model, adapted.input.pairs);
+    const ln101 = lower.findings.find((f) => f.carrierLine === 101)?.entries.map((e) => e.text).join(" ") ?? "";
+    expect(ln101).not.toMatch(/on this estimate only|Not on ours/);
+    const bundle = model.items.find((i) => /Tool Box and the lines compared with it/.test(i.title));
     expect(bundle).toMatchObject({ shopLines: [137, 138, 141, 142, 143, 145], carrierLines: [100], value: 525 });
     // Nothing the bundle covers is argued again as having no counterpart.
     expect(model.items.filter((i) => /No counterpart/.test(i.detail) && i.shopLines.some((l) => [137, 138, 141, 142, 143, 145].includes(l)))).toEqual([]);
@@ -474,14 +541,33 @@ describe("a carrier-only line whose own note places its time elsewhere is quoted
       ],
       []
     );
+    // The label keeps the line's printed operation (R&I), so it is not read
+    // as our own Rpr of the same cover.
     expect(entryFor(set, 38)).toBe(
-      'LT Upper cover (0.8 hr): on this estimate only, $72.00; not a line on ours. Its note reads "Time is after bumper cover is removed. Time included with overhaul."'
+      'R&I LT Upper cover (0.8 hr): on this estimate only, $72.00; not a line on ours. Its note reads "Time is after bumper cover is removed. Time included with overhaul."'
     );
     expect(entryFor(set, 40)).toMatch(/Its note reads "Time 0\.3 hr is included with overhaul\."$/);
   });
 
   it("a carrier-only line without an inclusion note keeps the plain wording", () => {
     const { set } = lowerCopy([body(56, "O/H", "Bumper assy", 3.7)], [body(42, "R&I", "Bumper cover", 1.7, "Time is after moldings are removed.")], []);
-    expect(entryFor(set, 42)).toBe("Bumper cover (1.7 hr): on this estimate only, $153.00. Not on ours.");
+    expect(entryFor(set, 42)).toBe("R&I Bumper cover (1.7 hr): on this estimate only, $153.00. Not on ours.");
+  });
+
+  it("a note with no closing period is quoted as printed, the sentence's period outside the quote", () => {
+    const { set } = lowerCopy([body(56, "O/H", "Bumper assy", 3.7)], [body(38, "R&I", "LT Upper cover", 0.8, "Time included with overhaul")], []);
+    expect(entryFor(set, 38)).toBe(
+      'R&I LT Upper cover (0.8 hr): on this estimate only, $72.00; not a line on ours. Its note reads "Time included with overhaul".'
+    );
+  });
+
+  it("our one-sided line keeps its operation too: 'O/H Bumper assy', not 'Bumper assy'", () => {
+    const { set } = lowerCopy(
+      [body(30, "Rpr", "Hood", 1.0), body(56, "O/H", "Bumper assy", 3.7)],
+      [body(20, "Rpr", "Hood", 1.0)],
+      [{ kind: "matched", shopLines: [30], carrierLine: 20 }]
+    );
+    const text = set.findings.flatMap((f) => f.entries.map((e) => e.text)).join(" ");
+    expect(text).toContain("Ours L56 O/H Bumper assy (3.7 hr): not on this estimate, $333.00 at our rates.");
   });
 });

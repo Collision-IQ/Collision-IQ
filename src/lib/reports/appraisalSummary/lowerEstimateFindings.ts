@@ -190,7 +190,7 @@ function sideText(lines: EstimateLine[]): string {
 }
 
 /** A printed note as quoted text: each sentence once (a note read twice from
- *  the print is not doubled), ending in a period inside the quote. */
+ *  the print is not doubled), with no punctuation the print does not have. */
 function quotedNote(note: string): string {
   const seen = new Set<string>();
   // Split only where a sentence ends ("removed. Time"), never inside "0.3 hr".
@@ -205,8 +205,7 @@ function quotedNote(note: string): string {
       seen.add(key);
       return true;
     });
-  const text = sentences.join(" ");
-  return /[.!?]$/.test(text) ? text : `${text}.`;
+  return sentences.join(" ");
 }
 
 function describeUnit(
@@ -234,7 +233,9 @@ function describeUnit(
     // we left out: RO 22120's R&I upper cover sits beside our bumper overhaul.
     const inclusion = theirs.length === 1 && /\binclud/i.test(theirs[0].note ?? "") ? quotedNote(theirs[0].note!) : "";
     if (shopReadCloses && inclusion) {
-      return `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}; not a line on ours. Its note reads "${inclusion}"`;
+      // The sentence's own period goes outside the quote when the note has none.
+      const end = /[.!?]$/.test(inclusion) ? "" : ".";
+      return `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}; not a line on ours. Its note reads "${inclusion}"${end}`;
     }
     return shopReadCloses
       ? `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}. Not on ours.`
@@ -270,6 +271,8 @@ function noteScope(unit: ShortPayUnit, carrierBy: Map<number, EstimateLine>, pai
       inferred: unit.shopLines.filter((n) => inferred.includes(n)),
       theirs: "This estimate's",
       ours: "our ",
+      // This copy's legend: "Ln" is a line on this estimate, "L" one on ours.
+      theirLinePrefix: "Ln ",
     })
   );
 }
