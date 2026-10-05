@@ -149,12 +149,14 @@ import {
 } from "./estimateDeltaMatcher";
 import {
   estimateRowFromTextFields,
+  inclusionBundlesFromDeltas,
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
 import {
   canonKey as deltaEngineCanonKey,
   detectSide as detectDeltaEngineSide,
   detectPosition as detectDeltaEnginePosition,
+  readRowPrefix,
   repairTokens,
 } from "./deltaEngine/estimateNormalize";
 
@@ -258,11 +260,12 @@ function engineRowsToDeltaRows(
       // split unusual part formats and leak fragments ("P T") into the
       // description. Restore the typed part and the clean description.
       if (row.part) deltaRow.partNumber = row.part;
-      const cleanDescription = row.rawDesc
-        .replace(/^[#*\s]+/, "")
-        .replace(/[*\s]+$/, "")
-        .replace(/^(?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H)\s+/i, "")
-        .trim();
+      // The row prefix (marker glyphs, supplement tag, operation) is read by
+      // the one shared reader. A reader that skipped only "#"/"*" left
+      // "S01 R&I …" / "<> S02 Rpr …" in every supplement row's description
+      // and nulled its operation. rawText stays verbatim for quoting.
+      const prefix = readRowPrefix(row.rawDesc);
+      const cleanDescription = prefix.body.replace(/[*\s]+$/, "").trim();
       if (cleanDescription) {
         deltaRow.description = cleanDescription;
         // Realign opCode with the engine description (D-1): the legacy
@@ -270,8 +273,8 @@ function engineRowsToDeltaRows(
         // as a pseudo-operation while the engine description keeps it —
         // rendering then duplicates the token ("Add Add for Clear Coat").
         // The opCode is a REAL operation token of the engine row, or null.
-        const engineOp = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
-        deltaRow.opCode = engineOp ? engineOp[1] : null;
+        deltaRow.opCode = prefix.op;
+        if (prefix.supplementTag) deltaRow.supplementTag = prefix.supplementTag;
       }
       // A CCC user-defined labor category digit ("1"-"4") is the row's labor
       // type, as the text lane reads it. Dropped here, RO 21548's 7.6 hr of
@@ -597,8 +600,7 @@ export function attachResolvedAuthoritiesToFindings(
 
 /** Leading CCC operation token of an engine row's description ("R&I", "Repl"). */
 function engineRowOpCode(row: DeltaEngineRow): string | null {
-  const match = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
-  return match ? match[1] : null;
+  return readRowPrefix(row.rawDesc).op;
 }
 
 /**
@@ -728,14 +730,34 @@ function engineResultToLineItemDeltas(params: {
     });
   }
 
-  // Unconsumed competing rows: repeated-description residuals are possible
-  // duplicate billing, everything else is genuinely lower-only.
-  const subjectKeys = new Set(engine.pairs.map((pair) => pair.subject.key));
-  for (const finding of engine.findings) subjectKeys.add(finding.subject.key);
+  // Unconsumed competing rows: a residual that repeats a consumed row's
+  // description IN THE SAME SECTION UNDER THE SAME OPERATION is possible
+  // duplicate billing; everything else is genuinely lower-only. Key alone is
+  // not enough — the key carries neither section nor operation, so a REAR
+  // "R&I bumper cover" read as a duplicate of the FRONT one, and a panel's
+  // "R&I" access line as a duplicate of its paired "Rpr" line. The key carries
+  // no side either: the carrier's "LT/Front R&I wheel" read as a repeat of
+  // the shop's "RT/Front R&I wheel". And only a line that WAS matched can be
+  // repeated — a MISSED subject, or an aggregate the comparison pays zero
+  // times, matched nothing, so it seeds no context.
+  const opOf = (row: DeltaEngineRow) => (engineRowOpCode(row) ?? "").replace(/\s/g, "").toUpperCase();
+  const contextOf = (key: string, side: string, section: string, op: string) => `${key}|${side}|${section}|${op}`;
+  const consumedContexts = new Set<string>();
+  const addContext = (subject: DeltaEngineRow, competing: DeltaEngineRow) => {
+    for (const side of new Set([subject.side, competing.side]))
+      for (const section of new Set([subject.section, competing.section]))
+        for (const op of new Set([opOf(subject), opOf(competing)]))
+          consumedContexts.add(contextOf(subject.key, side, section, op));
+  };
+  for (const pair of engine.pairs) addContext(pair.subject, pair.competing);
+  for (const finding of engine.findings) {
+    if (!finding.competing) continue;
+    for (const subject of finding.subjects ?? [finding.subject]) addContext(subject, finding.competing);
+  }
   const lowerOnlyRows: DeltaEngineRow[] = [];
   const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
   for (const row of engine.competingOnly) {
-    if (subjectKeys.has(row.key)) potentialDuplicateLowerRows.push(row);
+    if (consumedContexts.has(contextOf(row.key, row.side, row.section, opOf(row)))) potentialDuplicateLowerRows.push(row);
     // P0-3 SYMMETRY. pairAndCompare already refuses to call a negative subject
     // row "missing on the competing estimate" (deltaPair isDeduction), but
     // nothing applied the mirror rule to the competing side, so the typed lane
@@ -898,6 +920,9 @@ export type AnnotatedEstimateGeneratedFindings = {
     higherLineCount: number | null;
     lowerLineCount: number | null;
     noCounterpartRows: ForensicNoCounterpartRow[];
+    /** The matcher's notices that must reach the reader (withdrawn
+     *  contradictions, category-gap checks, inclusion-note verify lines). */
+    checkNotes?: string[];
     /** Non-null when the line-item comparison was withheld (typed columns
      *  failed SUBTOTALS reconciliation): the totals table stands, and the
      *  report must say why it lists no line-level differences. */
@@ -3163,11 +3188,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           valueLayerSuppressionNote = valueLayerSuppressionNote ?? identityNote;
         }
         if (labelForMarks !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
+          // The comparisons the delta matcher made with a comparison line
+          // whose own note includes our lines' work, so this copy says what
+          // the other reports say about those lines. Only when this layer
+          // compares against the document the matcher read the notes from
+          // (its first comparison with text).
+          const matcherComparison = textComparisons.find((item) => item.text && item.text.trim().length > 0);
+          const inclusionBundles =
+            comparisonText && comparisonText === matcherComparison
+              ? inclusionBundlesFromDeltas(forensicInput?.rows?.deltas ?? [], comparisonText.text)
+              : [];
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
             pages: [...pageGeometries.values()],
             competingRows,
             competingTotals,
+            inclusionBundles,
             // EXPORT BOUNDARY — the annotation text is drawn ON the exported
             // page, so naming the carrier there puts insurance information
             // straight back into a redacted document. The role is what the
@@ -3394,6 +3430,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       // is a parsing limit, never a finding of "no differences".
       limitations: [
         ...(forensicInput.lineItemComparisonWithheld ? [forensicInput.lineItemComparisonWithheld] : []),
+        // P0-1: a check the matcher made must be visible in the report the
+        // reader adjudicates from, not only on a finding's own record.
+        ...(forensicInput.checkNotes ?? []),
         ...textLayerNotes,
       ],
       redactionScope,
@@ -3624,6 +3663,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     for (const detail of findingDetails) {
       for (const line of detail.finding.limitations ?? []) {
         if (/extraction confidence/i.test(line) && !textLayerNotes.includes(line)) {
+          textLayerNotes.push(line);
+        }
+        // A capped finding list reads as "this is everything" unless the
+        // report says otherwise (RO 22182: seat-track findings past the cap).
+        if (/beyond this pack's per-report limit/i.test(line) && !textLayerNotes.includes(line)) {
           textLayerNotes.push(line);
         }
       }
@@ -4671,15 +4715,31 @@ export function buildRequiredEstimatorDeltaFindings(
         higherTotals: deltaMatch?.higherTotalsSummary ?? null,
         lowerTotals: deltaMatch?.lowerTotalsSummary ?? null,
       }),
+      // Checks that changed or qualify a claim: withdrawn same-operation pairs,
+      // inclusion-note comparisons, category-gap checks. Not the heuristic
+      // "closely resembles" suggestions (they change no claim, and shared
+      // wording such as "w/o Performance" makes many of them wrong), and not
+      // the target/source note, whose net total differs from the
+      // reconciliation table's grand total.
+      checkNotes: (deltaMatch?.contradictionNotes ?? []).filter(
+        (note) =>
+          !/closely resembles/i.test(note) &&
+          !/^Target \(annotated document\)/.test(note) &&
+          // Its hours window also takes a supplement's TOTALS SUMMARY and RATE
+          // CHANGES rows, and it says absence findings "are marked unverified"
+          // whether or not any were (RO 22120: every printed hour was read and
+          // none was marked). It is not printed until it reports what was done.
+          !/extraction confidence/i.test(note)
+      ),
       higherLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld
           ? deltaMatch.higherRowsRead
-          : deltaMatch.matchedPairCount + deltaMatch.missingOperationCount
+          : deltaMatch.operationLineCounts?.higher ?? deltaMatch.matchedPairCount + deltaMatch.missingOperationCount
         : null,
       lowerLineCount: deltaMatch
         ? deltaMatch.lineItemsWithheld
           ? deltaMatch.lowerRowsRead
-          : deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
+          : deltaMatch.operationLineCounts?.lower ?? deltaMatch.matchedPairCount + deltaMatch.lowerOnlyRows.length
         : null,
       lineItemComparisonWithheld: deltaMatch?.lineItemsWithheld ?? null,
       rows: {
@@ -4698,19 +4758,34 @@ export function buildRequiredEstimatorDeltaFindings(
       // rows), so the two customer-facing numbers cannot diverge. The
       // previous silent .slice(0, 300) is gone: the full gated set ships,
       // and Appendix A renders exactly what the headline counts.
+      //
+      // Appendix A says its rows are "as printed": a side group merged into
+      // one finding ("Wheelhouse liner (both sides, L46/L47)") is listed as
+      // the lines it was made of, each with its own printed hours and price,
+      // so the count is the printed lines and no member is dropped. A member
+      // whose printed row cannot be found by line number keeps the merged
+      // row (never a row this estimate does not print).
       noCounterpartRows: (deltaMatch?.orderedDeltas ?? [])
         .filter((delta) => delta.kind === "missing_operation" && !delta.ocrUncertain)
-        .map((delta) => ({
-          line: delta.higherRow.lineNumber,
-          description: [delta.higherRow.opCode, delta.higherRow.description]
-            .filter(Boolean)
-            .join(" ")
-            .trim(),
-          amount: delta.higherRow.price,
-          laborHours: delta.higherRow.labor,
-          laborType: delta.higherRow.laborType,
-          paintHours: delta.higherRow.paint,
-        })),
+        .flatMap((delta) => {
+          const memberRows = (delta.mergedMembers ?? []).map((member) =>
+            member.higherLine === null
+              ? undefined
+              : deltaMatch?.higherRows.find((row) => row.lineNumber === member.higherLine)
+          );
+          const printed =
+            memberRows.length > 0 && memberRows.every((row): row is EstimateDeltaRow => row !== undefined)
+              ? memberRows
+              : [delta.higherRow];
+          return printed.map((row) => ({
+            line: row.lineNumber,
+            description: [row.opCode, row.description].filter(Boolean).join(" ").trim(),
+            amount: row.price,
+            laborHours: row.labor,
+            laborType: row.laborType,
+            paintHours: row.paint,
+          }));
+        }),
     },
     debug: {
       requiredDetectorFindingCount: findings.length,
@@ -4740,7 +4815,8 @@ export function buildRequiredEstimatorDeltaFindings(
   };
 }
 
-function describeLineItemDelta(delta: EstimateLineItemDelta): {
+/** The finding wording for one line-item delta (exported for regression tests). */
+export function describeLineItemDelta(delta: EstimateLineItemDelta): {
   findingType: string;
   title: string;
   label: string;
@@ -4997,10 +5073,16 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   }
   // reduced_labor — name the actual labor category (mechanical/diagnostic/…):
   // an M-marked line bills at the mechanical rate, and calling it "body labor"
-  // misstates the dollars behind the hour difference.
-  const laborNoun = delta.higherRow.laborType
-    ? laborTypeNoun(delta.higherRow.laborType, delta.higherRow.laborCategoryName)
-    : laborTypeNoun(delta.lowerRow?.laborType, delta.lowerRow?.laborCategoryName);
+  // misstates the dollars behind the hour difference. The category is OUR
+  // line's own: an unmarked CCC labor field is body labor as printed, and the
+  // comparison line's letter never stands in for it. A delta that compares
+  // several of our lines together (a comparison inclusion note) carries no
+  // letter when those lines' categories differ, so it names plain "labor".
+  const combinesLines = (delta.coveredHigherLines?.length ?? 0) > 1;
+  const laborNoun =
+    !delta.higherRow.laborType && combinesLines
+      ? "labor"
+      : laborTypeNoun(delta.higherRow.laborType, delta.higherRow.laborCategoryName);
   return {
     findingType: "delta-reduced-labor",
     title: `Comparison estimate allows less ${laborNoun}: ${label}`,
@@ -5073,6 +5155,9 @@ type StructuredLineItemDeltaMatch = {
    * what "rows read" means once the pairing itself has been withheld. */
   higherRowsRead: number;
   lowerRowsRead: number;
+  /** Operation lines each side prints (paired + one-sided), counted before an
+   * inclusion note groups several of them into one comparison. */
+  operationLineCounts?: { higher: number; lower: number };
   /** The rows both sides were read into (the same rows the pairing used), for
    * the Appraisal Dispute Report's line-level ledger. Empty when withheld. */
   higherRows: EstimateDeltaRow[];
@@ -5521,6 +5606,12 @@ function matchStructuredLineItemDeltas(
     }
   }
 
+  // The operation lines each document prints do not change because a note
+  // groups some of them into one comparison: the counts are taken first.
+  const operationLineCounts = {
+    higher: match.matchedPairCount + match.missingOperationCount,
+    lower: match.matchedPairCount + match.lowerOnlyRows.length,
+  };
   // A comparison line whose own note names the work it includes is compared
   // once with our lines that do that work, never reported as missing from
   // either side (RO 21548: "Other diagnostic services … includes pre and post
@@ -5532,16 +5623,25 @@ function matchStructuredLineItemDeltas(
       comparisonText: comparison[0].text,
       comparisonName: comparison[0].fileName || "the comparison estimate",
     });
-    const coveredCount = covered.coverage.reduce((sum, item) => sum + item.coveredRows.length, 0);
+    // Only covered lines the matcher had called missing leave the missing count.
+    const coveredMissing = covered.coverage.reduce((sum, item) => sum + item.missingCount, 0);
     match.deltas = covered.deltas;
     match.lowerOnlyRows = covered.lowerOnlyRows;
-    match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredCount);
+    match.missingOperationCount = Math.max(0, match.missingOperationCount - coveredMissing);
     for (const item of covered.coverage) {
+      // Lines folded in by inference are counted, never presented as work the
+      // note names (RO 22120: drive time and service-mode out).
+      const inferred = covered.deltas.find((delta) => delta.lowerRow === item.lowerRow)?.coveredByInferenceLines?.length ?? 0;
+      const named = item.coveredRows.length - inferred;
+      const lines = (n: number) => `${n} line${n === 1 ? "" : "s"}`;
       contradictionNotes.push(
         `"${item.lowerRow.description}" on ${comparison[0].fileName || "the comparison estimate"} states it includes ${item.included}; ` +
-          `it is compared with the ${item.coveredRows.length} line${item.coveredRows.length === 1 ? "" : "s"} of this estimate that do that work, and neither side reports them as missing.`
+          (inferred > 0
+            ? `it is compared with ${lines(item.coveredRows.length)} of this estimate: ${named} whose wording the note names and ${inferred} counted with it by inference, which the note does not state. Neither side reports them as missing.`
+            : `it is compared with the ${lines(item.coveredRows.length)} of this estimate that do that work, and neither side reports them as missing.`)
       );
     }
+    contradictionNotes.push(...covered.verify);
   }
 
   // Aggregate-vs-member dedupe (S-3): a description group that produced
@@ -5567,8 +5667,32 @@ function matchStructuredLineItemDeltas(
     if (list.length === 0) deltasByGroupKey.set(key, list);
     list.push(delta);
   }
-  const mergedDeltas: EstimateLineItemDelta[] = [];
+  // A base group that spans positions is ONE finding only when it is an LT/RT
+  // side group at every position it names (LT/RT × Front/Rear). Otherwise each
+  // position is its own group: "RT/Front R&I wheel" and "RT/Rear R&I wheel"
+  // (RO 22120, 0.2 M each) are two printed operations at two locations, and
+  // merged they read as the front wheel carrying both lines' 0.4 hr. The
+  // position is the pairing key's (canonKey.key: side-insensitive,
+  // position-preserving), the same rule pairing applies.
+  const presentationGroups: EstimateLineItemDelta[][] = [];
   for (const group of deltasByGroupKey.values()) {
+    const byPosition = new Map<string, EstimateLineItemDelta[]>();
+    for (const delta of group) {
+      const position = deltaEngineCanonKey(delta.higherRow.description).key;
+      const members = byPosition.get(position) ?? [];
+      if (members.length === 0) byPosition.set(position, members);
+      members.push(delta);
+    }
+    const atPositions = [...byPosition.values()];
+    const sideGroupAtEveryPosition = atPositions.every((members) => {
+      const sides = members.map((delta) => detectDeltaEngineSide(delta.higherRow.description));
+      return sides.includes("left") && sides.includes("right");
+    });
+    if (atPositions.length <= 1 || sideGroupAtEveryPosition) presentationGroups.push(group);
+    else presentationGroups.push(...atPositions);
+  }
+  const mergedDeltas: EstimateLineItemDelta[] = [];
+  for (const group of presentationGroups) {
     if (group.length === 1) {
       mergedDeltas.push(group[0]);
       continue;
@@ -5750,6 +5874,7 @@ function matchStructuredLineItemDeltas(
     deltas: orderedDeltas,
     higher: higherTotals,
     lower: lowerTotals,
+    lowerOnlyRows: match.lowerOnlyRows,
   });
   if (categoryGapCheck.notes.length > 0) contradictionNotes.push(...categoryGapCheck.notes);
   // The totals deltas compare the ESTIMATE TOTALS blocks, so a TOTALS SUMMARY
@@ -5820,6 +5945,7 @@ function matchStructuredLineItemDeltas(
     lineItemsWithheld,
     higherRowsRead: dedupedHigherRows.length,
     lowerRowsRead: lowerRows.length,
+    operationLineCounts,
     higherRows: lineItemsWithheld ? [] : dedupedHigherRows,
     lowerRows: lineItemsWithheld ? [] : lowerRows,
     // The subject row count and the comparison's own printed total are what

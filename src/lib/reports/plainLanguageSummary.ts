@@ -95,7 +95,7 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const { shop, carrier } = input;
   const ledger = buildGapLedger(shop, carrier, { strictLines: input.strictLines ?? true });
   const partType = partTypeEvidence(shop, carrier);
-  const { groups, usedShop } = groupEquivalents(shop, carrier);
+  const { groups, usedShop } = groupEquivalents(shop, carrier, input.pairs);
   // With carrier dollars unread, a carrier line read with no price may be a
   // price that was not read: every "no price" statement says what was read.
   const carrierLinesIncomplete = carrierPartlyUnread(ledger);
@@ -336,7 +336,9 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
     { cells: ["\"Two appraisers disagree about how many hours the repair takes. That is normal, and most of it gets settled at the car.\"", "Anything about intent: no \"lowballing\", no \"bad faith\". Nothing in the estimates supports it."] },
     { cells: ["\"You choose the repair shop. Nobody can require you to use a particular one.\"", "\"The carrier has to pay whatever we write.\" They do not, and this is not a number we can promise."] },
     { cells: ["\"A supplement is a step in the process, not the final answer.\"", "\"This will be fixed in a week.\" Supplements and reinspections take time; do not set a date."] },
-    { cells: ["\"Your policy has a section on what happens when the two sides cannot agree on the amount. Read it, or ask your agent.\"", "Explaining the appraisal clause, quoting it, or telling the owner to invoke it. That is legal territory and not the shop's role."] },
+    // No policy is among the documents compared, so whether it has such a
+    // section is not known here: the script says to check (RO 22120 review).
+    { cells: ["\"Check whether your policy has a section on what happens when the two sides cannot agree on the amount: read the policy, or ask your agent.\"", "Explaining the appraisal clause, quoting it, or telling the owner to invoke it. That is legal territory and not the shop's role."] },
   ];
   if (facts.notParts) {
     sayRows.push({ cells: ["\"Both estimates use new factory parts.\"", "Any claim about part type. The carrier's parts-usage page lists nothing but new factory parts."] });

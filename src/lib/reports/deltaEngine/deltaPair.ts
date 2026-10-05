@@ -5,14 +5,19 @@
  *   2. AGG ROUTING        — keys where subject count > competing count skip 1:1
  *                           and compare as sums (qty shortfall), so a 3-line tape
  *                           group compares its total vs a single flat line.
- *   3. CONTEXT-PREFERRED  — same canonical key; candidates ordered by
- *                           (same section, same side). Tailgate clear-coat pairs
- *                           with tailgate clear-coat, never the bumper's.
+ *                           Never across printed locations (front vs rear).
+ *   3. CONTEXT-PREFERRED  — same canonical key; exact context (same section,
+ *                           same operation) first across all subjects, then
+ *                           candidates ordered by (section, operation, side).
+ *                           Tailgate clear-coat pairs with tailgate clear-coat,
+ *                           never the bumper's; Rpr pairs with Rpr before R&I.
  *   4. PREFIX-CONTAINMENT — truncated/verbose description variants (>=12 chars).
  * Comparison is typed-cell-only: price<->price, labor<->labor, paint<->paint.
  * A finding's category text derives FROM the cell type — a paint delta can never
  * be reported as "less body labor".
  */
+import { separateLocations } from "../appraisalSummary/integrityChecks";
+import { readRowPrefix } from "./estimateNormalize";
 import type { EstimateRow } from "./rowCluster";
 
 export type CellField = "price" | "labor" | "paint";
@@ -66,9 +71,14 @@ function aggKeyOf(row: EstimateRow): string {
 /** Operation codes and supplement tags print on every row: never content. */
 const NON_CONTENT_WORD = /^(rpr|repl|subl|refn|blnd|algn|sect|add|incl|s\d{2})$/;
 
-/** The operation code a row prints ("rpr", "repl", "r&i" …), or "". */
+/** The operation code a row prints ("rpr", "repl", "r&i" …), or "". Read
+ *  through the shared row-prefix reader, so a glued supplement print
+ *  ("*<>S02Rpr LT Upper cover") reads "rpr" exactly as the residual bucketing
+ *  and the serializers read it; an unanchored match needed a space before
+ *  the code, read "" there, and pass 3 paired the shop's Rpr line with the
+ *  carrier's R&I line of the same panel. */
 function operationOf(row: EstimateRow): string {
-  return row.rawDesc.match(/(?:^|[\s#*])(R&I|Rpr|Repl|Subl|Refn|Blnd|O\/H|Algn)(?=\s|$)/i)?.[1].toLowerCase() ?? "";
+  return (readRowPrefix(row.rawDesc).op ?? "").toLowerCase();
 }
 
 /** Content words of a row's printed description, for the near-variant pass
@@ -207,9 +217,30 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
   };
   const subjectCount = count(subject, (index) => !paired.has(subject[index]));
   const competingCount = count(competing, (index) => !used.has(index) && !isDeduction(competing[index]));
+  // A surplus is one operation written more times than it is paid only when
+  // the rows are at ONE location. A subject and a comparison row whose
+  // printed section or description name opposite ends of an axis (a FRONT
+  // BUMPER "O/H bumper assy" against a REAR BODY one) are two operations:
+  // summing them reported the front overhaul the comparison paid in full as
+  // "2x here vs 1x paid" carrying the rear overhaul's hours. Such a key pairs
+  // 1:1 by context instead. A comparison row that prints no location (a MISC
+  // "Set Back Wiring") separates nothing, so that group still compares as a
+  // sum: neither sheet says which of the two it pays.
+  const locationOf = (row: EstimateRow) => ({ line: row.line, desc: row.rawDesc, section: row.sectionLabel ?? "" });
+  const locationsDiffer = (key: string) =>
+    subject.some(
+      (s) =>
+        !paired.has(s) &&
+        aggKeyOf(s) === key &&
+        competing.some(
+          (c, index) =>
+            !used.has(index) && !isDeduction(c) && aggKeyOf(c) === key && separateLocations(locationOf(s), locationOf(c))
+        )
+    );
   const aggKeys = new Set(
     [...subjectCount.keys()].filter(
-      (key) => (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)!
+      (key) =>
+        (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)! && !locationsDiffer(key)
     )
   );
 
@@ -220,23 +251,45 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
     if (list) list.push(index);
     else byKey.set(row.key, [index]);
   });
-  for (const s of subject) {
-    if (paired.has(s) || aggKeys.has(aggKeyOf(s))) continue;
-    // Same operation, and never the OPPOSING side: "LT R&I front seat" is
-    // not "RT R&I front seat" however the subject list is ordered.
-    const candidates = (byKey.get(s.key) ?? []).filter(
-      (index) => usable(s, index) && !(s.side && competing[index].side && competing[index].side !== s.side)
-    );
-    candidates.sort((a, b) => {
-      const costA = (competing[a].section !== s.section ? 2 : 0) + (competing[a].side !== s.side ? 1 : 0);
-      const costB = (competing[b].section !== s.section ? 2 : 0) + (competing[b].side !== s.side ? 1 : 0);
-      return costA - costB;
-    });
-    if (candidates.length) {
-      used.add(candidates[0]);
-      paired.set(s, candidates[0]);
+  // The key carries no operation code, so one panel's "R&I" and "Rpr" lines
+  // share a key. Context cost, lexicographic: section, then operation, then
+  // side. The operation is a preference, never a filter — a "Repl" here
+  // against a "Rpr" there of the same part still pairs when nothing better
+  // exists (that is an operation change, and it must be reported as one).
+  const contextCost = (s: EstimateRow, index: number) =>
+    (competing[index].section !== s.section ? 4 : 0) +
+    (operationOf(competing[index]) !== operationOf(s) ? 2 : 0) +
+    (competing[index].side !== s.side ? 1 : 0);
+  const candidatesFor = (s: EstimateRow, exactContextOnly: boolean) =>
+    (byKey.get(s.key) ?? [])
+      .filter(
+        // Never the OPPOSING side: "LT R&I front seat" is not "RT R&I front
+        // seat" however the subject list is ordered.
+        (index) => usable(s, index) && !(s.side && competing[index].side && competing[index].side !== s.side)
+      )
+      .filter((index) => !exactContextOnly || contextCost(s, index) < 2)
+      .sort((a, b) => contextCost(s, a) - contextCost(s, b));
+  // Stage 1 — same key, same section, same operation, across ALL subjects
+  // before any cross-operation pairing, so an earlier subject cannot take the
+  // row a later subject matches exactly. On a CCC print the R&I line of a
+  // panel usually precedes its repair line: a document-order greedy loop paid
+  // the shop's "Rpr LT Upper cover 3.0 + 1.8" against the carrier's "R&I LT
+  // Upper cover 0.8" while the carrier's identical "Rpr" line read as
+  // carrier-only.
+  // Stage 2 — what remains, ranked by the full context cost.
+  // Pairs are recorded in subject order, as a single document-order pass did.
+  const contextPairs = new Map<EstimateRow, number>();
+  for (const exactContextOnly of [true, false]) {
+    for (const s of subject) {
+      if (paired.has(s) || contextPairs.has(s) || aggKeys.has(aggKeyOf(s))) continue;
+      const candidates = candidatesFor(s, exactContextOnly);
+      if (candidates.length) {
+        used.add(candidates[0]);
+        contextPairs.set(s, candidates[0]);
+      }
     }
   }
+  for (const s of subject) if (contextPairs.has(s)) paired.set(s, contextPairs.get(s)!);
 
   // pass 4 — prefix containment for truncated/verbose variants
   for (const s of subject) {

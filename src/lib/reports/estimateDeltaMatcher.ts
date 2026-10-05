@@ -276,6 +276,18 @@ export interface EstimateLineItemDelta {
    */
   coveredHigherLines?: number[];
   /**
+   * Other comparison lines whose OWN note says they are included in this
+   * delta's comparison line ("Included in Tesla tool Box" on a 0.0 hr
+   * pre-repair scan): they belong to the same comparison, never to another.
+   */
+  coveredLowerLines?: number[];
+  /**
+   * The covered lines of this estimate the note's words do not name (drive
+   * time for a calibration, taking the vehicle out of service mode): counted
+   * with it by inference, and worded as such.
+   */
+  coveredByInferenceLines?: number[];
+  /**
    * Set when an unmatched "Add for Clear Coat" child was folded into this
    * parent refinish delta because the parent paint-time difference equals the
    * child's hours and the lower estimate shows no separate clear-coat line.
@@ -4523,10 +4535,10 @@ function buildReducedSummary(
   const label = describeRow(higherRow);
   const higherValue = field === "labor" ? higherRow.labor : higherRow.paint;
   const lowerValue = field === "labor" ? lowerRow.labor : lowerRow.paint;
-  const noun =
-    field === "labor"
-      ? laborTypeNoun(higherRow.laborType ?? lowerRow.laborType)
-      : "paint";
+  // The subject line's own labor field names its category. An unmarked CCC
+  // labor field is body labor as printed; the comparison line's letter never
+  // stands in for it (that would restate our hours under their category).
+  const noun = field === "labor" ? laborTypeNoun(higherRow.laborType) : "paint";
   return `"${label}": higher estimate allows ${formatHours(higherValue)} ${noun} hr vs ${formatHours(lowerValue)} hr here (+${formatHours(delta)} hr difference).`;
 }
 
@@ -4564,6 +4576,12 @@ export function reconcileMissingClaimsAgainstTotals(params: {
   deltas: EstimateLineItemDelta[];
   higher: EstimateTotalsSummary | null;
   lower: EstimateTotalsSummary | null;
+  /**
+   * The comparison's own lines with no counterpart on this estimate. Their
+   * hours sit inside the category gap too: claims may exceed the gap by up
+   * to what these lines carry without any claim being false.
+   */
+  lowerOnlyRows?: EstimateDeltaRow[];
 }): { flagged: number; notes: string[] } {
   const notes: string[] = [];
   if (!params.higher || !params.lower) return { flagged: 0, notes };
@@ -4584,10 +4602,11 @@ export function reconcileMissingClaimsAgainstTotals(params: {
   // A lane counts only lines that carry its hours: a $649.90 sublet with a
   // printed 0.0 labor cell is not a body-labor claim (RO 21548), and a line in
   // a shop-defined category ("1"-"4") is not body labor.
-  const isBodyLabor = (delta: EstimateLineItemDelta) => {
-    const type = (delta.higherRow.laborType ?? "").trim().toUpperCase();
-    return (delta.higherRow.labor ?? 0) > 0 && (type === "" || type === "B");
+  const isBodyLaborRow = (row: EstimateDeltaRow) => {
+    const type = (row.laborType ?? "").trim().toUpperCase();
+    return (row.labor ?? 0) > 0 && (type === "" || type === "B");
   };
+  const isBodyLabor = (delta: EstimateLineItemDelta) => isBodyLaborRow(delta.higherRow);
   const lanes: Array<{
     label: string;
     unit: string;
@@ -4595,6 +4614,8 @@ export function reconcileMissingClaimsAgainstTotals(params: {
     tolerance: number;
     members: EstimateLineItemDelta[];
     value: (delta: EstimateLineItemDelta) => number;
+    /** What one of the comparison's own unmatched lines carries in this lane. */
+    rowValue: (row: EstimateDeltaRow) => number;
   }> = [
     {
       label: "Body labor",
@@ -4603,6 +4624,7 @@ export function reconcileMissingClaimsAgainstTotals(params: {
       tolerance: 0.35,
       members: claims.filter(isBodyLabor),
       value: (delta) => delta.higherRow.labor ?? 0,
+      rowValue: (row) => (isBodyLaborRow(row) ? row.labor ?? 0 : 0),
     },
     {
       label: "Paint labor",
@@ -4611,6 +4633,7 @@ export function reconcileMissingClaimsAgainstTotals(params: {
       tolerance: 0.35,
       members: claims.filter((delta) => (delta.higherRow.paint ?? 0) > 0),
       value: (delta) => delta.higherRow.paint ?? 0,
+      rowValue: (row) => Math.max(0, row.paint ?? 0),
     },
     {
       label: "Parts",
@@ -4619,6 +4642,7 @@ export function reconcileMissingClaimsAgainstTotals(params: {
       tolerance: 25,
       members: claims.filter((delta) => Boolean(delta.higherRow.partNumber) && (delta.higherRow.price ?? 0) > 0),
       value: (delta) => (delta.higherRow.price ?? 0) * Math.max(1, delta.higherRow.qty ?? 1),
+      rowValue: (row) => (row.partNumber && (row.price ?? 0) > 0 ? (row.price ?? 0) * Math.max(1, row.qty ?? 1) : 0),
     },
   ];
   // The two estimates may file the same work under different categories (a
@@ -4642,6 +4666,26 @@ export function reconcileMissingClaimsAgainstTotals(params: {
     const claimed = Math.round(lane.members.reduce((sum, delta) => sum + lane.value(delta), 0) * 100) / 100;
     if (claimed <= lane.gap + lane.tolerance) continue;
     const fmt = (value: number) => (lane.unit === "$" ? `$${value.toFixed(2)}` : `${value.toFixed(1)} h`);
+    // The gap is our lines less theirs: the comparison's own lines with no
+    // counterpart here add to what our claims may total. When they cover the
+    // excess, every claim can be true, so none is demoted; those lines may
+    // still be some of this work under other wording, which the note names.
+    // RO 22120: 8.7 h claimed against a 6.3 h body gap, with 3.0 h on their
+    // R&I bumper cover, R&I upper cover and other lines not on ours.
+    const theirsOnly = (params.lowerOnlyRows ?? []).filter((row) => lane.rowValue(row) > 0);
+    const theirsOnlyValue = Math.round(theirsOnly.reduce((sum, row) => sum + lane.rowValue(row), 0) * 100) / 100;
+    if (theirsOnlyValue > 0 && claimed <= lane.gap + theirsOnlyValue + lane.tolerance) {
+      const named = theirsOnly
+        .slice(0, 6)
+        .map((row) => `L${row.lineNumber ?? "?"} ${describeRow(row)} (${fmt(lane.rowValue(row))})`)
+        .join("; ");
+      notes.push(
+        `${lane.label}: the line-level "not present" claims checked here total ${fmt(claimed)}, above the ${fmt(Math.max(lane.gap, 0))} gap the two totals blocks state, ` +
+          `and the comparison estimate's own lines with no counterpart here carry ${fmt(theirsOnlyValue)} of ${lane.label.toLowerCase()} (${named}${theirsOnly.length > 6 ? `; ${theirsOnly.length - 6} more` : ""}), which covers the excess. ` +
+          `Those lines may be some of the claimed work written under other wording; compare them before relying on the claims.`
+      );
+      continue;
+    }
     if (lane.unit === "h" && lane.gap <= 0 && totalHoursClaimed <= totalHoursGap + lane.tolerance) {
       notes.push(
         `${lane.label}: the comparison estimate carries ${fmt(-lane.gap)} more ${lane.label.toLowerCase()} than this one, so its ${lane.label.toLowerCase()} includes work this estimate files under another category; ` +
@@ -4651,7 +4695,7 @@ export function reconcileMissingClaimsAgainstTotals(params: {
     }
     notes.push(
       `${lane.label}: the line-level "not present" claims total ${fmt(claimed)}, but the two totals blocks put the ${lane.label.toLowerCase()} gap at ${fmt(Math.max(lane.gap, 0))}. ` +
-        `Some of these operations are paid on the comparison estimate under other wording; each is marked a verify item, not a confirmed omission.`
+        `Some of these operations may be paid on the comparison estimate under other wording; each is marked a verify item, not a confirmed omission.`
     );
     for (const delta of lane.members) {
       delta.exceedsCategoryGap = true;

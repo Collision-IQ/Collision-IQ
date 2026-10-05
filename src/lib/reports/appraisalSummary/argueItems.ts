@@ -7,9 +7,9 @@
  *                 note on its line, a part it pays with no labor to install it,
  *                 or a parent part it pays whose child it left off (wheels
  *                 paid, tires not).
- *   Needs proof — an operation with no counterpart, or fewer hours on the
- *                 paired line; it needs a P-page, an invoice or an OEM
- *                 procedure before it is argued.
+ *   Needs proof — an operation with no counterpart, or fewer hours (or a
+ *                 lower price) on the paired line; it needs a P-page, an
+ *                 invoice or an OEM procedure before it is argued.
  *   Weak        — reserved for an operation a retrieved P-page shows is
  *                 included in a database operation the carrier wrote.
  *
@@ -37,6 +37,62 @@ export interface MatcherPair {
   carrierLine?: number;
   /** The carrier line's own note says it includes the work on these shop lines. */
   coveredByCarrierNote?: boolean;
+  /** Other carrier lines whose own note says they are included in `carrierLine`. */
+  coveredCarrierLines?: number[];
+  /** Covered shop lines the note's words do not name: counted with it by inference. */
+  inferredShopLines?: number[];
+}
+
+/**
+ * What a carrier line's inclusion note establishes, and what it does not, in
+ * one wording for every report: the lines whose own notes point back to it,
+ * which of our lines the note's words name and which are counted with it by
+ * inference only, and that the note neither divides its hours among those
+ * steps nor says each one is paid.
+ */
+export function noteCoverScope(params: {
+  /** The note-bearing carrier line's hours. */
+  hours: number;
+  /** Carrier lines whose own note says they are included in it. */
+  crossRefs: Array<{ line: number; hours: number; note: string }>;
+  named: number[];
+  inferred: number[];
+  /** How their lines and ours are introduced: "Their" / "our ", "Its" / "". */
+  theirs: string;
+  ours: string;
+  /**
+   * How a line on THEIR sheet is cited, in the citing document's own
+   * notation: "L" by default; the lower-estimate citation copy marks up their
+   * sheet and cites its lines as "Ln " (its legend keeps "L" for ours).
+   */
+  theirLinePrefix?: string;
+}): string {
+  const refs = (lines: number[]) => lines.map((line) => `L${line}`).join(", ");
+  const theirLine = (line: number) => `${params.theirLinePrefix ?? "L"}${line}`;
+  const sentences: string[] = [];
+  const { crossRefs } = params;
+  if (crossRefs.length) {
+    const many = crossRefs.length > 1;
+    const hours = new Set(crossRefs.map((ref) => ref.hours.toFixed(1)));
+    const notes = new Set(crossRefs.map((ref) => ref.note));
+    sentences.push(
+      hours.size === 1 && notes.size === 1
+        ? `${params.theirs} ${crossRefs.map((ref) => theirLine(ref.line)).join(", ")} ${many ? "print" : "prints"} ${crossRefs[0].hours.toFixed(1)} hr, ${many ? "each " : ""}noted "${crossRefs[0].note}".`
+        : `${params.theirs} ${crossRefs.map((ref) => `${theirLine(ref.line)} prints ${ref.hours.toFixed(1)} hr, noted "${ref.note}"`).join("; ")}.`
+    );
+  }
+  const inferred = params.inferred.length ? `${params.ours}${refs(params.inferred)}` : "";
+  const one = params.inferred.length === 1;
+  if (params.named.length) {
+    sentences.push(
+      `The note's words name the work on ${params.ours}${refs(params.named)}` +
+        (inferred ? `; ${inferred} ${one ? "is" : "are"} counted with it by inference only, which the note does not state.` : ".")
+    );
+  } else if (inferred) {
+    sentences.push(`The note's words do not name ${inferred}; ${one ? "it is" : "they are"} counted with it by inference only.`);
+  }
+  sentences.push(`The note does not say how its ${params.hours.toFixed(1)} hr divides among these steps or that each step is paid.`);
+  return sentences.join(" ");
 }
 
 export interface ArgueItem {
@@ -44,7 +100,7 @@ export interface ArgueItem {
   title: string;
   detail: string;
   hours: number;
-  /** Labor at our category rates plus any part price we wrote and they did not. */
+  /** Labor at our category rates plus the price difference: a part we wrote and they did not, or our price over theirs on a paired line. */
   value: number;
   shopLines: number[];
   carrierLines: number[];
@@ -205,10 +261,30 @@ export function argueItems(params: {
     if (!lines.length || lines.some((l) => claimed.has(l.line))) continue;
     const theirs = pair.carrierLine !== undefined ? carrierLine.get(pair.carrierLine) : undefined;
     if (theirs && usedShopCarrierLine(groups, theirs.line)) continue;
+    // Their lines whose own note says they are included in this one ("Included
+    // in Tesla tool Box" on a 0.0 hr pre-repair scan) are part of the same item.
+    const crossRefs =
+      pair.coveredByCarrierNote && theirs
+        ? (pair.coveredCarrierLines ?? []).map((n) => carrierLine.get(n)).filter((l): l is EstimateLine => Boolean(l))
+        : [];
+    if (crossRefs.some((l) => usedShopCarrierLine(groups, l.line))) continue;
     const ourHours = round2(lines.reduce((sum, l) => sum + hoursOf(l), 0));
-    const hours = round2(ourHours - hoursOf(theirs));
-    const partValue = theirs ? 0 : lines.reduce((sum, l) => sum + (l.price ?? 0), 0);
-    const value = round2(lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) + partValue);
+    const hours = round2(ourHours - hoursOf(theirs) - crossRefs.reduce((sum, l) => sum + hoursOf(l), 0));
+    // A paired line is worth its price difference too, as the gross view and
+    // the citation copy value it: RO 22120's wheel, replaced at $700.00 on
+    // ours against a $189.99 sublet repair on theirs, is not a 0.3 hr item.
+    const ourPrice = round2(lines.reduce((sum, l) => sum + (l.price ?? 0), 0));
+    const theirPrice = theirs ? round2([theirs, ...crossRefs].reduce((sum, l) => sum + (l.price ?? 0), 0)) : 0;
+    // A price their sheet does not print (or this read could not) is not
+    // $0.00: the pair is then argued on its hours, and the integrity check
+    // asks for the price (RO 21995: "Forklift frame from lot", quantity 1).
+    const theirPriceRead = Boolean(theirs) && [theirs!, ...crossRefs].some((l) => l.price !== undefined && l.price !== null);
+    const partValue = theirs ? (theirPriceRead ? round2(ourPrice - theirPrice) : 0) : ourPrice;
+    const pricesDiffer = theirPriceRead && ourPrice !== theirPrice;
+    const sideText = (sideHours: number, price: number) => `${sideHours.toFixed(1)} hr${pricesDiffer ? `, ${money(price)}` : ""}`;
+    const value = round2(
+      lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) - crossRefs.reduce((sum, l) => sum + laborValue(l), 0) + partValue
+    );
     if (value <= 0 || hours < 0) continue;
     lines.forEach((l) => claimed.add(l.line));
     const head = lines[0];
@@ -226,18 +302,28 @@ export function argueItems(params: {
     const coveredNote = pair.coveredByCarrierNote && theirs ? theirs.note?.replace(/^[(\s]+|[)\s]+$/g, "") : undefined;
     items.push({
       strength: "Needs proof",
-      title: coveredNote && theirs ? `${theirs.desc}: the work its note includes` : `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
+      // The title is read on its own: the lines are compared with their line,
+      // and the detail says which ones the note's words name.
+      title: coveredNote && theirs ? `${theirs.desc} and the lines compared with it` : `${head.oper ? `${head.oper} ` : ""}${head.desc}`,
       detail: pPage
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : coveredNote && theirs
-          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}), whose note reads "${coveredNote}".`
+          ? `Ours ${sideText(ourHours, ourPrice)} (${lineRefs}), theirs ${sideText(hoursOf(theirs), theirPrice)} (L${theirs.line}), whose note reads "${coveredNote}". ` +
+            noteCoverScope({
+              hours: hoursOf(theirs),
+              crossRefs: crossRefs.map((l) => ({ line: l.line, hours: hoursOf(l), note: l.note?.trim() ?? "" })),
+              named: lines.map((l) => l.line).filter((n) => !(pair.inferredShopLines ?? []).includes(n)),
+              inferred: lines.map((l) => l.line).filter((n) => (pair.inferredShopLines ?? []).includes(n)),
+              theirs: "Their",
+              ours: "our ",
+            })
           : theirs
-          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
+          ? `Ours ${sideText(ourHours, ourPrice)} (${lineRefs}), theirs ${sideText(hoursOf(theirs), theirPrice)} (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
           : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,
       value,
       shopLines: lines.map((l) => l.line),
-      carrierLines: theirs ? [theirs.line] : [],
+      carrierLines: theirs ? [theirs.line, ...crossRefs.map((l) => l.line)] : [],
     });
   }
 

@@ -16,7 +16,7 @@
  * is null and nothing is printed.
  */
 import { shopLineRate, shopRateFor, unreconciledShopRead, type GapLedger } from "./gapLedger";
-import { normalizePartNumber, qualifierStem } from "./integrityChecks";
+import { normalizePartNumber, qualifierStem, separateLocations } from "./integrityChecks";
 import { classifyNonLabor } from "./nonLaborBuckets";
 import type { MatcherPair } from "./argueItems";
 import type { GroupDelta } from "./operationEquivalence";
@@ -28,6 +28,8 @@ export interface ShortPayUnit {
   carrierLines: number[];
   /** Ours minus theirs, at our rates. Positive = short-paid; negative = carrier-only / carrier pays more. */
   diff: number;
+  /** The carrier line the unit is about, when it is not simply the first: the line whose note covers the rest. */
+  anchorLine?: number;
 }
 
 export interface UnitAssignment {
@@ -95,7 +97,7 @@ export function assignUnits(params: {
   const usedShop = new Set<number>();
   const usedCarrier = new Set<number>();
   const units: ShortPayUnit[] = [];
-  const add = (label: string, s: EstimateLine[], c: EstimateLine[]) => {
+  const add = (label: string, s: EstimateLine[], c: EstimateLine[], anchorLine?: number) => {
     s.forEach((l) => usedShop.add(l.line));
     c.forEach((l) => usedCarrier.add(l.line));
     // Only a one-to-one pair locates a line: a group spans many lines on both
@@ -112,6 +114,7 @@ export function assignUnits(params: {
         shopLines: s.map((l) => l.line),
         carrierLines: c.map((l) => l.line),
         diff,
+        ...(anchorLine !== undefined ? { anchorLine } : {}),
       });
     }
   };
@@ -128,30 +131,51 @@ export function assignUnits(params: {
     const s = pair.shopLines.filter((n) => !usedShop.has(n)).map((n) => shopBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
     const c = carrierBy.get(pair.carrierLine);
     if (!s.length || !c) continue;
-    // Their one line whose note covers several of ours is named for itself.
-    add(pair.coveredByCarrierNote && s.length > 1 ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c]);
+    // Their lines whose own note says they are included in this one are part
+    // of the same unit. Left loose, a 0.0 hr "Pre-repair scan" would pair by
+    // its words with our "In-Proc repair scan" further down.
+    const also = pair.coveredByCarrierNote
+      ? (pair.coveredCarrierLines ?? [])
+          .filter((n) => n !== c.line && !usedCarrier.has(n))
+          .map((n) => carrierBy.get(n))
+          .filter((l): l is EstimateLine => Boolean(l))
+      : [];
+    // Their one line whose note covers several of ours is named for itself,
+    // and the unit sits on that line, where the note is printed. The label is
+    // read on its own, so it says only that our lines are compared with it:
+    // the entry says which of them the note's words name.
+    const covering = pair.coveredByCarrierNote && (s.length > 1 || also.length > 0);
+    add(covering ? `${c.desc} and the lines compared with it` : s[0].desc, s, [c, ...also], covering ? c.line : undefined);
   }
   // What the matcher did not report as a difference pairs here by part number,
-  // then by full component name and operation; the rest is one-sided.
+  // then by full component name and operation; the rest is one-sided. No pass
+  // pairs across printed positions: the same name on the RT and the LT wheel,
+  // or on the upper and the lower cover, is two lines, not one priced twice.
   const restShop = () => shop.lines.filter((l) => !usedShop.has(l.line));
   for (const s of restShop()) {
     const key = normalizePartNumber(s.partNumber);
     if (!key) continue;
-    const c = carrier.lines.find((x) => !usedCarrier.has(x.line) && normalizePartNumber(x.partNumber) === key);
+    const c = carrier.lines.find(
+      (x) => !usedCarrier.has(x.line) && normalizePartNumber(x.partNumber) === key && !separateLocations(s, x)
+    );
     if (c) add(s.desc, [s], [c]);
   }
   for (const s of restShop()) {
     const name = qualifierStem(s.desc);
     if (!name) continue;
     const c = carrier.lines.find(
-      (x) => !usedCarrier.has(x.line) && (x.oper ?? "") === (s.oper ?? "") && qualifierStem(x.desc) === name
+      (x) =>
+        !usedCarrier.has(x.line) &&
+        (x.oper ?? "") === (s.oper ?? "") &&
+        qualifierStem(x.desc) === name &&
+        !separateLocations(s, x)
     );
     if (c) add(s.desc, [s], [c]);
   }
   // Same work in different words ("Set back wiring" / "Set back wiring/modules
   // for frame set up", "Four wheel suspension alignment" / "Align
   // suspension"): at least two shared significant words, most of the shorter
-  // description, and never across sides of the vehicle.
+  // description, and never across printed positions.
   // Best matches first across the whole sheet (highest word overlap, then the
   // closest value), so a 0.3 hr "Set back, secure wiring" never takes the
   // 4.0 hr set-back line that a 4.0 hr "Set back wiring" matches exactly.
@@ -160,7 +184,7 @@ export function assignUnits(params: {
     const a = words(s.desc);
     if (a.size < 2) continue;
     for (const c of carrier.lines) {
-      if (usedCarrier.has(c.line) || !sameSide(s.desc, c.desc)) continue;
+      if (usedCarrier.has(c.line) || separateLocations(s, c)) continue;
       const b = words(c.desc);
       const shared = [...a].filter((w) => b.has(w)).length;
       const score = shared / Math.min(a.size, b.size);
@@ -172,12 +196,21 @@ export function assignUnits(params: {
     if (usedShop.has(s.line) || usedCarrier.has(c.line)) continue;
     add(s.desc, [s], [c]);
   }
-  for (const s of restShop()) add(s.desc, [s], []);
-  for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(c.desc, [], [c]);
+  // A one-sided line keeps its printed operation. "LT Upper cover" alone,
+  // beside our Rpr of the same cover, read as if our sheet had no line for it
+  // (RO 22120: their R&I upper cover; our O/H bumper assy read "bumper assy").
+  for (const s of restShop()) add(withOperation(s), [s], []);
+  for (const c of carrier.lines.filter((l) => !usedCarrier.has(l.line))) add(withOperation(c), [], [c]);
   if (ledger.paintMaterials !== 0) units.push({ label: "Paint materials", shopLines: [], carrierLines: [], diff: ledger.paintMaterials });
   if (ledger.otherMaterials !== 0) units.push({ label: "Other materials", shopLines: [], carrierLines: [], diff: ledger.otherMaterials });
   if (ledger.laborRate !== 0) units.push({ label: "Labor rate", shopLines: [], carrierLines: [], diff: ledger.laborRate });
   return { units, shopToCarrier };
+}
+
+/** The line as printed: its operation, then its description ("R&I LT Upper cover"). */
+function withOperation(l: EstimateLine): string {
+  const oper = (l.oper ?? "").trim();
+  return oper && !l.desc.toLowerCase().startsWith(`${oper.toLowerCase()} `) ? `${oper} ${l.desc}` : l.desc;
 }
 
 const STOP = new Set(["for", "and", "the", "of", "to", "into", "per", "on", "with", "from", "plus", "rt", "lt", "assy", "repl", "rpr"]);
@@ -191,11 +224,4 @@ function words(desc: string): Set<string> {
       .filter((w) => w.length > 2 && !STOP.has(w))
       .map((w) => w.slice(0, 5))
   );
-}
-
-function sameSide(a: string, b: string): boolean {
-  const side = (s: string) => (/\brt\b/i.test(s) ? "rt" : /\blt\b/i.test(s) ? "lt" : "");
-  const sa = side(a);
-  const sb = side(b);
-  return !sa || !sb || sa === sb;
 }

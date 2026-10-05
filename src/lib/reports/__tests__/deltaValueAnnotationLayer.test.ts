@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { planDeltaValueAnnotations } from "../deltaValueAnnotationLayer";
+import { firstRowPerLine, planDeltaValueAnnotations } from "../deltaValueAnnotationLayer";
 import { auditPlacements, type PlacementWord } from "../annotationPlacementEngine";
 import { parseEstimateRows, parseTotalsFromWords, type Word } from "../deltaEngine/rowCluster";
 
@@ -93,5 +93,67 @@ describe("planDeltaValueAnnotations on the 22047 pair", () => {
       expect(rect.height).toBeGreaterThan(0);
       expect(pages.some((page) => page.pageNumber === rect.pageNumber)).toBe(true);
     }
+  });
+});
+
+describe("an appendix table that lists estimate lines again is not read as estimate lines", () => {
+  // RO 22120: a CCC shop print ends with a TIRE PARTS SUPPLIERS page (Line,
+  // Description, Supplier, Price). Its rows carry the line numbers already
+  // read on the estimate page, and the price printed at the right edge falls
+  // in the paint column the grid carried over: the layer printed "Ln 33 …
+  // (454.3 hr P): not written on the comparison estimate" for a $454.26 tire
+  // already annotated at its own line. Same layout, synthetic page.
+  const shopWords = loadWords("shop_words.json");
+  const usaaWords = loadWords("usaa_words.json");
+  const appendixPage = Math.max(...shopWords.keys()) + 1;
+  const word = (text: string, x0: number, x1: number, top: number): Word => ({ text, x0, x1, top, bottom: top + 8 });
+  const withAppendix = new Map(shopWords);
+  withAppendix.set(appendixPage, [
+    word("TIRE", 250, 270, 100),
+    word("PARTS", 272, 298, 100),
+    word("SUPPLIERS", 300, 345, 100),
+    word("Line", 29, 46, 120),
+    word("Description", 66, 110, 120),
+    word("Supplier", 230, 265, 120),
+    word("Price", 545, 566, 120),
+    // Line 47 prints on the estimate as "Repl RT Upper panel … 163.58 0.3".
+    word("47", 36, 45, 140),
+    word("RT", 66, 76, 140),
+    word("Upper", 78, 100, 140),
+    word("panel", 102, 121, 140),
+    word("$", 530, 535, 140),
+    word("163.58", 540, 565, 140),
+  ]);
+  const subjectWords = toPlacementWords(withAppendix);
+  const pages = [...withAppendix.keys()].map((pageNumber) => ({ pageNumber, pageWidth: 612, pageHeight: 792 }));
+  const plan = planDeltaValueAnnotations({
+    subjectWords,
+    pages,
+    competingRows: parseEstimateRows(usaaWords),
+    competingTotals: parseTotalsFromWords(usaaWords),
+    competingLabel: "EOR",
+    measureText,
+  });
+  const pieces = plan.notes.flatMap((note) => note.request.text.split(" | "));
+
+  it("states no price as hours and reports no line twice", () => {
+    expect(pieces.filter((piece) => /163\.6 hr|163\.58 hr/.test(piece))).toEqual([]);
+    expect(plan.findings.filter((finding) => finding.subject.page === appendixPage)).toEqual([]);
+    const keyed = pieces.map((piece) => /^Ln (\d+)\b/.exec(piece)?.[1]).filter(Boolean);
+    expect(keyed.length).toBe(new Set(keyed).size);
+    expect(plan.highlights.filter((rect) => rect.pageNumber === appendixPage)).toEqual([]);
+  });
+
+  it("the estimate line itself is still compared where it prints", () => {
+    // Its $163.58 matches the comparison: the price cell on page 3 keeps its underline.
+    expect(plan.underlines.some((rect) => rect.pageNumber === 3 && Math.abs(rect.y + 1.5 - 331) < 1 && rect.x < 420)).toBe(true);
+  });
+});
+
+describe("firstRowPerLine", () => {
+  const row = (line: number, page: number) => ({ line, page }) as unknown as Parameters<typeof firstRowPerLine>[0][number];
+  it("keeps the first row of each printed line number, and every row read without one", () => {
+    const rows = [row(3, 1), row(0, 1), row(3, 4), row(0, 2), row(5, 2)];
+    expect(firstRowPerLine(rows)).toEqual([rows[0], rows[1], rows[3], rows[4]]);
   });
 });

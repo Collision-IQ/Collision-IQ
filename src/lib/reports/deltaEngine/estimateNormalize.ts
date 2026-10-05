@@ -150,13 +150,128 @@ const OPENS_WITH_OPERATION = new RegExp(`^(?:${LENIENT_OP_TOKENS})(?=$|[^a-z])`)
 /** ALL-CAPS extractions, where the uppercase lookahead cannot discriminate. */
 const OPENS_WITH_OPERATION_CI = new RegExp(`^(?:${LENIENT_OP_TOKENS})\\b`, "i");
 
-/** Strip the CCC line number and the leading marker glyphs (hash, asterisk,
- *  angle pair, S01 supplement tag) that sit before the operation code. */
+/**
+ * THE CCC ROW PREFIX, read once.
+ *
+ * Between the line number and the description a CCC row can print, in this
+ * order: marker glyphs, a supplement tag, and the operation code —
+ * "* <> S02 Rpr LT Upper cover". The estimate's own legend says what the
+ * glyphs mean: "Asterisk (*) or Double Asterisk (**) indicates that the parts
+ * and/or labor data provided by third party sources of data may have been
+ * modified or may have come from an alternate data source" and "The symbol
+ * (<>) indicates the refinish operation WILL NOT be performed as a separate
+ * procedure from the other panels in the estimate". None of them is part of
+ * the operation's identity, and "<>" in particular is NOT a changed-line mark.
+ *
+ * Every reader that needs the description or the operation goes through
+ * this, so a supplement print and a shop print of one line agree: a reader
+ * that knew only "#"/"*" keyed "* <> S02 Rpr LT Upper cover" as
+ * SRPRUPPERCOVER, never equal to the shop's "* Rpr LT Upper cover", and
+ * serialized the carrier's operation as null.
+ *
+ * Glyphs and the tag are consumed in any order and glued or spaced
+ * ("*<>S01RprBumper cover"). The tag as printed is "S" and two digits. Its
+ * read forms — the short "S1", the spaced "S 01", the OCR "SOI"/"S0I" — are
+ * taken only where the row shows they are a tag (behind a marker glyph, in
+ * front of an operation code, or in front of the line number a Mitchell
+ * supplement summary prints; the OCR forms only before an operation code),
+ * and never
+ * where the next character continues a word. So a description opening
+ * "SOLID", "S2000", "S4 nameplate" or "SOL VALVE" keeps its head.
+ */
+export type RowPrefixGlyph = "#" | "*" | "**" | "<>";
+
+export interface RowPrefix {
+  /** Marker glyphs in print order. */
+  glyphs: RowPrefixGlyph[];
+  /** The "<>" glyph: per the CCC legend, the refinish operation will not be
+   *  performed as a separate procedure from the other panels. */
+  refinishNotSeparate: boolean;
+  /** Supplement tag as printed, whitespace removed ("S01"), or null. */
+  supplementTag: string | null;
+  /** The text after glyphs and tag: the operation code and description. */
+  afterMarkers: string;
+  /** Leading operation token as printed ("R&I", "Rpr"), or null. */
+  op: string | null;
+  /** The description: the text after glyphs, tag and operation code. */
+  body: string;
+}
+
+const ROW_PREFIX_GLYPH = /^(\*\*|\*|#|<>)\s*/;
+/** What may follow a supplement tag: nothing, a space or glyph, or a glued
+ *  operation / description ("S01RprBumper", "S01R&I", "S02O/H"). */
+const ROW_PREFIX_TAG_END = String.raw`(?=$|[\s#*<]|[A-Z][a-z]|R&[IR]|O\/H)`;
+/** The tag as a CCC supplement prints it: S and two digits ("S01", "S02"). */
+const ROW_PREFIX_SUPPLEMENT_TAG = new RegExp(`^S\\d{2}${ROW_PREFIX_TAG_END}`);
+/** Short and spaced forms of the tag ("S1", "S 01"). A description can open
+ *  this way too ("S4 nameplate", "S 63 badge"), so these are a tag only
+ *  behind a marker glyph, or in front of an operation code or a line number. */
+const ROW_PREFIX_SUPPLEMENT_TAG_SHORT = new RegExp(`^S\\s?\\d{1,2}${ROW_PREFIX_TAG_END}`);
+/** OCR reads of a zero or a one as a letter ("SO1", "S0I", "SOI"). A word
+ *  can open this way ("SOL VALVE", "Sol Panel"), so these are a tag only in
+ *  front of an operation code. */
+const ROW_PREFIX_SUPPLEMENT_TAG_OCR = new RegExp(`^S\\s?[0Oo][\\dIiLl]${ROW_PREFIX_TAG_END}`);
+const ROW_PREFIX_OPS = "R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\\/H";
+/** Spaced operation token, any case ("Rpr Bumper", "RPR BUMPER"). */
+const ROW_PREFIX_OP_SPACED = new RegExp(`^(${ROW_PREFIX_OPS})(?=$|\\s)`, "i");
+/** Glued mixed-case operation token ("RprBumper", "R&IRT"); case-sensitive,
+ *  so an ALL-CAPS word ("REPLACEMENT") is never split. */
+const ROW_PREFIX_OP_GLUED = new RegExp(`^(${ROW_PREFIX_OPS})(?=[A-Z])`);
+
+/** The supplement tag at the head of `rest`, or null. The printed form is a
+ *  tag wherever it stands; a short or OCR-read form only where the row's own
+ *  print shows it is one (see the patterns above). */
+function readSupplementTag(rest: string, afterGlyph: boolean): string | null {
+  const printed = ROW_PREFIX_SUPPLEMENT_TAG.exec(rest);
+  if (printed) return printed[0];
+  const operationFollows = (match: RegExpExecArray) => {
+    const next = rest.slice(match[0].length).trimStart();
+    return ROW_PREFIX_OP_SPACED.test(next) || ROW_PREFIX_OP_GLUED.test(next);
+  };
+  // Mitchell prints its supplement number short, in front of the line number
+  // it changed ("S3 19 Hood Latch Added").
+  const lineNumberFollows = (match: RegExpExecArray) => /^\s+\d{1,4}\s+[A-Za-z]/.test(rest.slice(match[0].length));
+  const short = ROW_PREFIX_SUPPLEMENT_TAG_SHORT.exec(rest);
+  if (short && (afterGlyph || operationFollows(short) || lineNumberFollows(short))) return short[0];
+  const ocr = ROW_PREFIX_SUPPLEMENT_TAG_OCR.exec(rest);
+  if (ocr && operationFollows(ocr)) return ocr[0];
+  return null;
+}
+
+export function readRowPrefix(text: string): RowPrefix {
+  let rest = (text ?? "").trim();
+  const glyphs: RowPrefixGlyph[] = [];
+  let supplementTag: string | null = null;
+  for (;;) {
+    const glyph = ROW_PREFIX_GLYPH.exec(rest);
+    if (glyph) {
+      glyphs.push(glyph[1] as RowPrefixGlyph);
+      rest = rest.slice(glyph[0].length);
+      continue;
+    }
+    const tag: string | null = supplementTag === null ? readSupplementTag(rest, glyphs.length > 0) : null;
+    if (tag) {
+      supplementTag = tag.replace(/\s+/g, "");
+      rest = rest.slice(tag.length).trimStart();
+      continue;
+    }
+    break;
+  }
+  const opMatch = ROW_PREFIX_OP_SPACED.exec(rest) ?? ROW_PREFIX_OP_GLUED.exec(rest);
+  return {
+    glyphs,
+    refinishNotSeparate: glyphs.includes("<>"),
+    supplementTag,
+    afterMarkers: rest,
+    op: opMatch ? opMatch[1] : null,
+    body: opMatch ? rest.slice(opMatch[1].length).trim() : rest,
+  };
+}
+
+/** Strip the CCC line number and the row prefix (marker glyphs, supplement
+ *  tag) that sit before the operation code. */
 function stripRowMarkers(text: string): string {
-  return text
-    .replace(/^[#*<>\s]*\d{1,4}\s*/, "")
-    .replace(/^(?:[#*]|<>|S\d{2})\s*/g, "")
-    .trim();
+  return readRowPrefix(text.replace(/^[#*<>\s]*\d{1,4}\s*/, "")).afterMarkers;
 }
 
 export function startsWithRepairOperation(rawText: string): boolean {
@@ -403,16 +518,18 @@ function stemMatches(words: string[], squashed: string, stem: string): boolean {
 }
 
 export function canonKey(rawDesc: string): CanonKey {
-  let s = repairTokens(rawDesc).toUpperCase();
+  // MARKER GLYPHS AND SUPPLEMENT SEQUENCE TAGS are not part of an operation's
+  // identity. A supplement-of-record prints "S01 Repl information labels"
+  // where the shop prints "Repl Info label VECI"; leaving the marker in place
+  // squashes to SREPLINFORMATIONLABELS, which blocks the op-code stripper
+  // below and makes the two rows unpairable (RO 22059: the typed engine paired
+  // 39 rows where the text lane — which strips them — paired 82). The shared
+  // row-prefix reader removes them BEFORE the op strip and leaves no leading
+  // space, so the ^-anchored op strip fires on "S01 R&I R&I bumper cover"
+  // exactly as on the shop's "R&I R&I bumper cover", and a "<>" row
+  // ("* <> S02 Rpr LT Upper cover") keys like its shop twin.
+  let s = readRowPrefix(repairTokens(rawDesc)).afterMarkers.toUpperCase();
   s = s.replace(/PT\d{8}[A-Z](\d{3})?/g, "");
-  s = s.replace(/^\s*[#*]+\s*/, "");
-  // SUPPLEMENT SEQUENCE MARKERS are not part of an operation's identity.
-  // A supplement-of-record prints "S01 Repl information labels" where the
-  // shop prints "Repl Info label VECI"; leaving the marker in place squashes
-  // to SREPLINFORMATIONLABELS, which blocks the op-code stripper below and
-  // makes the two rows unpairable. On RO 22059 this is most of why the typed
-  // engine paired 39 rows where the text lane — which strips them — paired 82.
-  s = s.replace(/^\s*S\s*0?\d{1,2}\b\s*/g, " ");
   s = s.replace(/^(R&I|RPR|REPL|BLND|REFN|SUBL|O\/H)\b/, "").trim();
   s = s.replace(/[0-9]+(\.[0-9]+)?/g, "");
   // Side + position enums from the synonym sets, on the pre-squash string

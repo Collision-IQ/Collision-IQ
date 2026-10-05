@@ -540,7 +540,12 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     "Two appraisals exist for this loss and they do not agree. This report compares them line by line, " +
       "identifies each point of difference, quantifies it in dollars, and states the technical basis for the " +
       "difference where one exists. Section 3 is the plain-language summary; the sections after it carry the " +
-      "technical detail; the appendix lists every affected line."
+      "technical detail" +
+      // The appendix holds the lines with no counterpart, one row per printed
+      // line; differences on paired lines are in the findings, not there.
+      (input.noCounterpartRows.length > 0
+        ? "; Appendix A lists, one row per printed line, every line of the higher estimate with no counterpart on the comparison estimate."
+        : ".")
   );
   writer.paragraph(
     "This is a documentation and appraisal analysis. It is not legal advice, and it does not allege intent or " +
@@ -865,6 +870,11 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
         "of this report and the vehicle was not physically inspected; hidden damage may alter both estimates."
     );
   } else {
+    // A notice about one check is not a reconciliation failure: when the
+    // totals balanced, say so before the notices.
+    if (described.balanceWarnings.length === 0) {
+      writer.paragraph("Both documents reconciled against their own printed totals.");
+    }
     for (const limitation of allLimitations) writer.bullet(limitation);
     writer.paragraph(
       "Neither appraisal was prepared by the author of this report and the vehicle was not physically inspected; " +

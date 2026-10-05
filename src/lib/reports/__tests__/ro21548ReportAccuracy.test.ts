@@ -200,7 +200,15 @@ describe("a carrier line whose own note names the work it includes", () => {
     expect(covered?.summary).toContain("states it includes pre and post and 1 Calibration and Service Mode");
     expect(covered?.summary).toContain("4.8 hr in total");
     // The dispute layer sees one pair, flagged as covered by the carrier's note.
-    expect(pairsFromDeltas(result.deltas)).toContainEqual({ kind: "reduced", shopLines: [66, 68, 71, 72, 74, 75, 77], carrierLine: 57, coveredByCarrierNote: true });
+    // Drive time (L74) and taking the vehicle out of service mode (L77) are not
+    // named by the note's words; they are carried as counted by inference.
+    expect(pairsFromDeltas(result.deltas)).toContainEqual({
+      kind: "reduced",
+      shopLines: [66, 68, 71, 72, 74, 75, 77],
+      carrierLine: 57,
+      coveredByCarrierNote: true,
+      inferredShopLines: [74, 77],
+    });
   });
 
   it("a note that EXCLUDES the work changes nothing", () => {
@@ -238,8 +246,15 @@ describe("a carrier line whose own note names the work it includes", () => {
         { kind: "matched", shopLines: [55], carrierLine: 48 },
       ],
     });
-    expect(items.map((item) => item.title)).toEqual(["Other diagnostic services-TESLA: the work its note includes"]);
-    expect(items[0].detail).toBe('Ours 2.0 hr (L66, L75), theirs 1.0 hr (L57), whose note reads "includes pre and post and 1 Calibration and Service Mode".');
+    // The title is read on its own, so it states only the comparison; the
+    // detail says which of our lines the note's words name.
+    expect(items.map((item) => item.title)).toEqual(["Other diagnostic services-TESLA and the lines compared with it"]);
+    // The note is quoted, and what it does not establish is said: it never
+    // divides its hour among our steps or states that each one is paid.
+    expect(items[0].detail).toBe(
+      'Ours 2.0 hr (L66, L75), theirs 1.0 hr (L57), whose note reads "includes pre and post and 1 Calibration and Service Mode". ' +
+        "The note's words name the work on our L66, L75. The note does not say how its 1.0 hr divides among these steps or that each step is paid."
+    );
   });
 });
 

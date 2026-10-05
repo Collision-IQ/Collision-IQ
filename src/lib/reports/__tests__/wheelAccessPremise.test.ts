@@ -23,13 +23,21 @@ import {
 } from "../annotatedCitationDensityEstimate";
 
 const HEADER = ["SYNTHETIC COLLISION", "2026 Tesla Model Y AWD", "Total Cost of Repairs $2,000.00"];
+// A wheel line the carrier prints at the same values (no line-level difference
+// covers it) is the row the detector reads. The shop's front and rear wheels
+// with no carrier counterpart each carry their own "missing" finding, which
+// the generic detectors never shadow; before the forensic merge kept front and
+// rear apart, the rear wheel rode on the front wheel's finding uncounted and
+// was the row these tests raised on.
+const WHEEL_COVER = "35 Repl LT/Front Wheel cover SYN0004 1 50.00 0.0";
 const SHOP_WHEELS = [
   "28 WHEELS",
   '30 Repl LT/Front Wheel, alloy 19" SYN0001 1 700.00 0.0',
   '32 Repl LT/Rear Wheel, alloy 19" SYN0001 1 700.00 0.0',
+  WHEEL_COVER,
   "45 Repl LT Hub assy SYN0003 1 330.00 1.6 M",
 ];
-const CARRIER_BASE = ["5 Repl Bumper cover SYN0009 1 400.00 2.5"];
+const CARRIER_BASE = ["5 Repl Bumper cover SYN0009 1 400.00 2.5", WHEEL_COVER];
 
 async function pdf(lines: string[]) {
   const doc = await PDFDocument.create();
@@ -73,7 +81,9 @@ async function wheelAccessFindings(params: {
 
 describe("wheel-access finding: the carrier's own access lines answer it", { timeout: 60_000 }, () => {
   it("shop run, carrier sheet with no wheel access line: raised", async () => {
-    expect(await wheelAccessFindings({ subjectLines: SHOP_WHEELS, subjectRole: "shop", comparisonLines: CARRIER_BASE })).toHaveLength(1);
+    const findings = await wheelAccessFindings({ subjectLines: SHOP_WHEELS, subjectRole: "shop", comparisonLines: CARRIER_BASE });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].shopEvidence?.lineNumber).toBe("35");
   });
 
   it("shop run, carrier R&I at the same wheels (glued text layer, RO 22120's shape): not raised", async () => {
@@ -101,6 +111,7 @@ describe("wheel-access finding: the carrier's own access lines answer it", { tim
       comparisonLines: [...CARRIER_BASE, "28 R&I RT/Front R&I wheel 0 0.00 0.1", "29 R&I RT/Rear R&I wheel 0 0.00 0.1"],
     });
     expect(findings).toHaveLength(1);
+    expect(findings[0].shopEvidence?.lineNumber).toBe("35");
   });
 
   it("carrier run, the carrier's own R&I line at that wheel answers it", async () => {

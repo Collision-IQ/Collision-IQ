@@ -96,8 +96,9 @@ const positionsOf = (l: EstimateLine): Array<string | null> => {
   });
 };
 /** Two lines at different printed positions (front vs rear wheel, the front
- *  and rear bumpers' primer masking) are two locations, not one written twice. */
-const separateLocations = (a: EstimateLine, b: EstimateLine) => {
+ *  and rear bumpers' primer masking) are two locations, not one written twice,
+ *  on one sheet or across the two. */
+export const separateLocations = (a: EstimateLine, b: EstimateLine) => {
   const pa = positionsOf(a);
   const pb = positionsOf(b);
   return pa.some((p, axis) => p !== null && pb[axis] !== null && p !== pb[axis]);
@@ -214,7 +215,13 @@ export function integrityChecks(
       (contradicts || !isNonOemLine(x));
     const partner = shop.lines.find((x) => x.line === matcherPartner.get(c.line));
     const s =
-      shop.lines.find((x) => !variantShopLines.has(x.line) && differs(x) && qualifierStem(x.desc) === qualifierStem(c.desc)) ??
+      shop.lines.find(
+        (x) =>
+          !variantShopLines.has(x.line) &&
+          differs(x) &&
+          qualifierStem(x.desc) === qualifierStem(c.desc) &&
+          !separateLocations(x, c)
+      ) ??
       (partner && differs(partner) && !variantShopLines.has(partner.line) && baseStem(partner.desc) === baseStem(c.desc)
         ? partner
         : undefined);
@@ -265,7 +272,7 @@ export function integrityChecks(
   for (const c of carrier.lines) {
     if (!c.partNumber || (c.hours ?? 0) > 0) continue;
     const s = shop.lines.find(
-      (x) => partKey(x.partNumber) === partKey(c.partNumber) && (x.hours ?? 0) > 0
+      (x) => partKey(x.partNumber) === partKey(c.partNumber) && (x.hours ?? 0) > 0 && !separateLocations(x, c)
     );
     if (s) {
       flags.push({
@@ -280,7 +287,9 @@ export function integrityChecks(
   // 5. The carrier replaces a part its own note says cannot be reused, where we only R&I'd it.
   for (const c of carrier.lines) {
     if (c.oper !== "Repl" || !/cannot be reused/i.test(c.note ?? "")) continue;
-    const s = shop.lines.find((x) => x.oper === "R&I" && qualifierStem(x.desc) === qualifierStem(c.desc));
+    const s = shop.lines.find(
+      (x) => x.oper === "R&I" && qualifierStem(x.desc) === qualifierStem(c.desc) && !separateLocations(x, c)
+    );
     if (s) {
       flags.push({
         kind: "reuseMismatch",
@@ -296,7 +305,9 @@ export function integrityChecks(
   // 6. Same operation, same hours, different labor category.
   for (const s of shop.lines) {
     if (!s.hours || !s.laborCat) continue;
-    const c = carrier.lines.find((x) => x.hours === s.hours && x.laborCat && stem(x.desc) === stem(s.desc));
+    const c = carrier.lines.find(
+      (x) => x.hours === s.hours && x.laborCat && stem(x.desc) === stem(s.desc) && !separateLocations(s, x)
+    );
     if (!c?.laborCat || LABOR_RANK[c.laborCat] === LABOR_RANK[s.laborCat]) continue;
     const weUnderWrite = LABOR_RANK[c.laborCat] > LABOR_RANK[s.laborCat];
     flags.push({

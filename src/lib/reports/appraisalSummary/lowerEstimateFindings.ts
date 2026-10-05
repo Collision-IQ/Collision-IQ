@@ -14,7 +14,7 @@
  * neighbour on our sheet maps to, which is where the reader looks for it.
  */
 import type { PlainSummaryModel } from "../plainLanguageSummary";
-import type { ArgueItem, MatcherPair } from "./argueItems";
+import { noteCoverScope, type ArgueItem, type MatcherPair } from "./argueItems";
 import { unreconciledShopRead } from "./gapLedger";
 import { assignUnits, type ShortPayUnit } from "./shortPayView";
 import type { EstimateLine, LaborCat } from "./types";
@@ -115,10 +115,12 @@ export function buildLowerEstimateFindings(model: PlainSummaryModel, pairs: Matc
   for (const unit of units) {
     const entry: LowerEntry = {
       kind: unit.diff > 0 ? "short" : "over",
-      text: describeUnit(unit, shopBy, carrierBy, model.items, shopReadCloses),
+      text: describeUnit(unit, shopBy, carrierBy, model.items, shopReadCloses, pairs),
       amount: unit.diff,
     };
-    const anchor = unit.carrierLines.length
+    const anchor = unit.anchorLine !== undefined
+      ? unit.anchorLine
+      : unit.carrierLines.length
       ? Math.min(...unit.carrierLines)
       : unit.shopLines.length
         ? neighbourAnchor(Math.min(...unit.shopLines))
@@ -156,16 +158,54 @@ export function buildLowerEstimateFindings(model: PlainSummaryModel, pairs: Matc
   return { findings, unanchored };
 }
 
+/**
+ * Hours summed per printed category, in the order the categories first
+ * appear: "2.0 hr M", "1.0 hr M + 0.3 hr". Several lines never print under one
+ * line's tag, and a tag shared by every line is never dropped.
+ */
+function hoursText(lines: EstimateLine[]): string {
+  const byTag = new Map<string, number>();
+  for (const l of lines) {
+    if (!l.hours) continue;
+    const tag = catTag(l);
+    byTag.set(tag, (byTag.get(tag) ?? 0) + l.hours);
+  }
+  return [...byTag]
+    .map(([tag, hours]) => [tag, round2(hours)] as const)
+    .filter(([, hours]) => hours !== 0)
+    .map(([tag, hours]) => `${hours.toFixed(1)} hr${tag}`)
+    .join(" + ");
+}
+
 function sideText(lines: EstimateLine[]): string {
   const hours = round2(lines.reduce((sum, l) => sum + (l.hours ?? 0), 0));
   const paint = round2(lines.reduce((sum, l) => sum + (l.paintHours ?? 0), 0));
   const price = round2(lines.reduce((sum, l) => sum + (l.price ?? 0), 0));
   const parts = [
-    hours ? `${hours.toFixed(1)} hr${lines.length === 1 ? catTag(lines[0]) : ""}` : "",
+    hours ? hoursText(lines) : "",
     paint ? `${paint.toFixed(1)} paint` : "",
     price ? money(price) : "",
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "no hours or price";
+}
+
+/** A printed note as quoted text: each sentence once (a note read twice from
+ *  the print is not doubled), with no punctuation the print does not have. */
+function quotedNote(note: string): string {
+  const seen = new Set<string>();
+  // Split only where a sentence ends ("removed. Time"), never inside "0.3 hr".
+  const sentences = note
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => {
+      const key = sentence.toLowerCase().replace(/\.$/, "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return sentences.join(" ");
 }
 
 function describeUnit(
@@ -174,7 +214,8 @@ function describeUnit(
   carrierBy: Map<number, EstimateLine>,
   items: ArgueItem[],
   /** Our sheet's line read reproduces its printed totals, so an absence from ours may be stated. */
-  shopReadCloses: boolean
+  shopReadCloses: boolean,
+  pairs: MatcherPair[]
 ): string {
   const ours = unit.shopLines.map((n) => shopBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
   const theirs = unit.carrierLines.map((n) => carrierBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
@@ -187,13 +228,53 @@ function describeUnit(
     return `Ours ${refs(unit.shopLines)} ${unit.label} (${sideText(ours)}): not on this estimate, ${money(unit.diff)} at our rates.${strength}`;
   }
   if (!ours.length) {
+    // A carrier line whose own note says its time is included elsewhere ("Time
+    // included with overhaul") is quoted, so "not on ours" is not read as work
+    // we left out: RO 22120's R&I upper cover sits beside our bumper overhaul.
+    const inclusion = theirs.length === 1 && /\binclud/i.test(theirs[0].note ?? "") ? quotedNote(theirs[0].note!) : "";
+    if (shopReadCloses && inclusion) {
+      // The sentence's own period goes outside the quote when the note has none.
+      const end = /[.!?]$/.test(inclusion) ? "" : ".";
+      return `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}; not a line on ours. Its note reads "${inclusion}"${end}`;
+    }
     return shopReadCloses
       ? `${unit.label} (${sideText(theirs)}): on this estimate only, ${money(-unit.diff)}. Not on ours.`
       : `${unit.label} (${sideText(theirs)}): on this estimate, ${money(-unit.diff)}; not found among the lines read from ours, which do not add up to our printed totals. Confirm on our sheet.`;
   }
   return `${unit.label}: ours ${sideText(ours)} (${refs(unit.shopLines)}) vs this estimate's ${sideText(theirs)}; ${
     unit.diff > 0 ? `short ${money(unit.diff)}` : `this estimate is higher by ${money(-unit.diff)}`
-  }.${strength}`;
+  }.${noteScope(unit, carrierBy, pairs)}${strength}`;
+}
+
+/**
+ * A unit that sits on a carrier line whose own note covers our lines: what
+ * that note says, and what it does not establish.
+ */
+function noteScope(unit: ShortPayUnit, carrierBy: Map<number, EstimateLine>, pairs: MatcherPair[]): string {
+  if (unit.anchorLine === undefined) return "";
+  const pair = pairs.find((p) => p.coveredByCarrierNote && p.carrierLine === unit.anchorLine);
+  const bundle = carrierBy.get(unit.anchorLine);
+  if (!pair || !bundle?.note) return "";
+  const hoursOf = (l: EstimateLine) => (l.hours ?? 0) + (l.paintHours ?? 0);
+  const inferred = pair.inferredShopLines ?? [];
+  const crossRefs = unit.carrierLines
+    .filter((n) => n !== bundle.line)
+    .map((n) => carrierBy.get(n))
+    .filter((l): l is EstimateLine => Boolean(l))
+    .map((l) => ({ line: l.line, hours: hoursOf(l), note: l.note?.trim() ?? "" }));
+  return (
+    ` Ln ${bundle.line} prints ${sideText([bundle])}; its note reads "${bundle.note.trim()}". ` +
+    noteCoverScope({
+      hours: hoursOf(bundle),
+      crossRefs,
+      named: unit.shopLines.filter((n) => !inferred.includes(n)),
+      inferred: unit.shopLines.filter((n) => inferred.includes(n)),
+      theirs: "This estimate's",
+      ours: "our ",
+      // This copy's legend: "Ln" is a line on this estimate, "L" one on ours.
+      theirLinePrefix: "Ln ",
+    })
+  );
 }
 
 /** Our value in each column that differs, for a one-line-to-one-line unit. */
