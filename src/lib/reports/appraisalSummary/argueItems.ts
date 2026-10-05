@@ -37,6 +37,55 @@ export interface MatcherPair {
   carrierLine?: number;
   /** The carrier line's own note says it includes the work on these shop lines. */
   coveredByCarrierNote?: boolean;
+  /** Other carrier lines whose own note says they are included in `carrierLine`. */
+  coveredCarrierLines?: number[];
+  /** Covered shop lines the note's words do not name: counted with it by inference. */
+  inferredShopLines?: number[];
+}
+
+/**
+ * What a carrier line's inclusion note establishes, and what it does not, in
+ * one wording for every report: the lines whose own notes point back to it,
+ * which of our lines the note's words name and which are counted with it by
+ * inference only, and that the note neither divides its hours among those
+ * steps nor says each one is paid.
+ */
+export function noteCoverScope(params: {
+  /** The note-bearing carrier line's hours. */
+  hours: number;
+  /** Carrier lines whose own note says they are included in it. */
+  crossRefs: Array<{ line: number; hours: number; note: string }>;
+  named: number[];
+  inferred: number[];
+  /** How their lines and ours are introduced: "Their" / "our ", "Its" / "". */
+  theirs: string;
+  ours: string;
+}): string {
+  const refs = (lines: number[]) => lines.map((line) => `L${line}`).join(", ");
+  const sentences: string[] = [];
+  const { crossRefs } = params;
+  if (crossRefs.length) {
+    const many = crossRefs.length > 1;
+    const hours = new Set(crossRefs.map((ref) => ref.hours.toFixed(1)));
+    const notes = new Set(crossRefs.map((ref) => ref.note));
+    sentences.push(
+      hours.size === 1 && notes.size === 1
+        ? `${params.theirs} ${refs(crossRefs.map((ref) => ref.line))} ${many ? "print" : "prints"} ${crossRefs[0].hours.toFixed(1)} hr, ${many ? "each " : ""}noted "${crossRefs[0].note}".`
+        : `${params.theirs} ${crossRefs.map((ref) => `L${ref.line} prints ${ref.hours.toFixed(1)} hr, noted "${ref.note}"`).join("; ")}.`
+    );
+  }
+  const inferred = params.inferred.length ? `${params.ours}${refs(params.inferred)}` : "";
+  const one = params.inferred.length === 1;
+  if (params.named.length) {
+    sentences.push(
+      `The note's words name the work on ${params.ours}${refs(params.named)}` +
+        (inferred ? `; ${inferred} ${one ? "is" : "are"} counted with it by inference only, which the note does not state.` : ".")
+    );
+  } else if (inferred) {
+    sentences.push(`The note's words do not name ${inferred}; ${one ? "it is" : "they are"} counted with it by inference only.`);
+  }
+  sentences.push(`The note does not say how its ${params.hours.toFixed(1)} hr divides among these steps or that each step is paid.`);
+  return sentences.join(" ");
 }
 
 export interface ArgueItem {
@@ -205,10 +254,19 @@ export function argueItems(params: {
     if (!lines.length || lines.some((l) => claimed.has(l.line))) continue;
     const theirs = pair.carrierLine !== undefined ? carrierLine.get(pair.carrierLine) : undefined;
     if (theirs && usedShopCarrierLine(groups, theirs.line)) continue;
+    // Their lines whose own note says they are included in this one ("Included
+    // in Tesla tool Box" on a 0.0 hr pre-repair scan) are part of the same item.
+    const crossRefs =
+      pair.coveredByCarrierNote && theirs
+        ? (pair.coveredCarrierLines ?? []).map((n) => carrierLine.get(n)).filter((l): l is EstimateLine => Boolean(l))
+        : [];
+    if (crossRefs.some((l) => usedShopCarrierLine(groups, l.line))) continue;
     const ourHours = round2(lines.reduce((sum, l) => sum + hoursOf(l), 0));
-    const hours = round2(ourHours - hoursOf(theirs));
+    const hours = round2(ourHours - hoursOf(theirs) - crossRefs.reduce((sum, l) => sum + hoursOf(l), 0));
     const partValue = theirs ? 0 : lines.reduce((sum, l) => sum + (l.price ?? 0), 0);
-    const value = round2(lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) + partValue);
+    const value = round2(
+      lines.reduce((sum, l) => sum + laborValue(l), 0) - laborValue(theirs) - crossRefs.reduce((sum, l) => sum + laborValue(l), 0) + partValue
+    );
     if (value <= 0 || hours < 0) continue;
     lines.forEach((l) => claimed.add(l.line));
     const head = lines[0];
@@ -230,14 +288,22 @@ export function argueItems(params: {
       detail: pPage
         ? `Not paid (${lineRefs}, ${ourHours.toFixed(1)} hr). Whether it is included in ${pPage.label} is a CCC/MOTOR P-page question; attach the page before arguing it.`
         : coveredNote && theirs
-          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}), whose note reads "${coveredNote}".`
+          ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}), whose note reads "${coveredNote}". ` +
+            noteCoverScope({
+              hours: hoursOf(theirs),
+              crossRefs: crossRefs.map((l) => ({ line: l.line, hours: hoursOf(l), note: l.note?.trim() ?? "" })),
+              named: lines.map((l) => l.line).filter((n) => !(pair.inferredShopLines ?? []).includes(n)),
+              inferred: lines.map((l) => l.line).filter((n) => (pair.inferredShopLines ?? []).includes(n)),
+              theirs: "Their",
+              ours: "our ",
+            })
           : theirs
           ? `Ours ${ourHours.toFixed(1)} hr (${lineRefs}), theirs ${hoursOf(theirs).toFixed(1)} hr (L${theirs.line}${theirs.oper ? ` ${theirs.oper}` : ""}).`
           : `No counterpart on their sheet (${lineRefs}, ${ourHours.toFixed(1)} hr${partValue > 0 ? `, ${money(partValue)} part` : ""}).`,
       hours,
       value,
       shopLines: lines.map((l) => l.line),
-      carrierLines: theirs ? [theirs.line] : [],
+      carrierLines: theirs ? [theirs.line, ...crossRefs.map((l) => l.line)] : [],
     });
   }
 

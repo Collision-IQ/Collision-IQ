@@ -276,6 +276,18 @@ export interface EstimateLineItemDelta {
    */
   coveredHigherLines?: number[];
   /**
+   * Other comparison lines whose OWN note says they are included in this
+   * delta's comparison line ("Included in Tesla tool Box" on a 0.0 hr
+   * pre-repair scan): they belong to the same comparison, never to another.
+   */
+  coveredLowerLines?: number[];
+  /**
+   * The covered lines of this estimate the note's words do not name (drive
+   * time for a calibration, taking the vehicle out of service mode): counted
+   * with it by inference, and worded as such.
+   */
+  coveredByInferenceLines?: number[];
+  /**
    * Set when an unmatched "Add for Clear Coat" child was folded into this
    * parent refinish delta because the parent paint-time difference equals the
    * child's hours and the lower estimate shows no separate clear-coat line.

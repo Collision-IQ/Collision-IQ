@@ -28,6 +28,8 @@ export interface ShortPayUnit {
   carrierLines: number[];
   /** Ours minus theirs, at our rates. Positive = short-paid; negative = carrier-only / carrier pays more. */
   diff: number;
+  /** The carrier line the unit is about, when it is not simply the first: the line whose note covers the rest. */
+  anchorLine?: number;
 }
 
 export interface UnitAssignment {
@@ -95,7 +97,7 @@ export function assignUnits(params: {
   const usedShop = new Set<number>();
   const usedCarrier = new Set<number>();
   const units: ShortPayUnit[] = [];
-  const add = (label: string, s: EstimateLine[], c: EstimateLine[]) => {
+  const add = (label: string, s: EstimateLine[], c: EstimateLine[], anchorLine?: number) => {
     s.forEach((l) => usedShop.add(l.line));
     c.forEach((l) => usedCarrier.add(l.line));
     // Only a one-to-one pair locates a line: a group spans many lines on both
@@ -112,6 +114,7 @@ export function assignUnits(params: {
         shopLines: s.map((l) => l.line),
         carrierLines: c.map((l) => l.line),
         diff,
+        ...(anchorLine !== undefined ? { anchorLine } : {}),
       });
     }
   };
@@ -128,8 +131,19 @@ export function assignUnits(params: {
     const s = pair.shopLines.filter((n) => !usedShop.has(n)).map((n) => shopBy.get(n)).filter((l): l is EstimateLine => Boolean(l));
     const c = carrierBy.get(pair.carrierLine);
     if (!s.length || !c) continue;
-    // Their one line whose note covers several of ours is named for itself.
-    add(pair.coveredByCarrierNote && s.length > 1 ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c]);
+    // Their lines whose own note says they are included in this one are part
+    // of the same unit. Left loose, a 0.0 hr "Pre-repair scan" would pair by
+    // its words with our "In-Proc repair scan" further down.
+    const also = pair.coveredByCarrierNote
+      ? (pair.coveredCarrierLines ?? [])
+          .filter((n) => n !== c.line && !usedCarrier.has(n))
+          .map((n) => carrierBy.get(n))
+          .filter((l): l is EstimateLine => Boolean(l))
+      : [];
+    // Their one line whose note covers several of ours is named for itself,
+    // and the unit sits on that line, where the note is printed.
+    const covering = pair.coveredByCarrierNote && (s.length > 1 || also.length > 0);
+    add(covering ? `${c.desc} (the work its note includes)` : s[0].desc, s, [c, ...also], covering ? c.line : undefined);
   }
   // What the matcher did not report as a difference pairs here by part number,
   // then by full component name and operation; the rest is one-sided.
