@@ -43,6 +43,8 @@ export function labelCat(label: string): LaborCat {
 }
 const LABOR_LABEL = /labor|repair|refinish|frame|mech|struct|alum|diag|electric|glass/i;
 const NON_LABOR_HOURS_BASIS = /suppl|material/i;
+/** A totals-block percentage adjustment: "Parts Discount", "Parts Markup", "Labor Adjustment". */
+const TOTALS_ADJUSTMENT = /\b(discount|markup|adjustments?)\b/i;
 const STANDARD_LABOR = /^(body|paint|refinish|mechanical|frame|structural|diagnostic|electrical|glass)\b/i;
 
 export type TotalsRead =
@@ -80,6 +82,13 @@ export function totalsFromReconciliation(reconciliation: ForensicReconciliation,
       // strict line guard refuse the report as $30.30 of unread lines.
       if (own !== null) {
         totals.otherMaterials = [...(totals.otherMaterials ?? []), { label: row.category, hours, rate, cost }];
+      }
+    } else if (TOTALS_ADJUSTMENT.test(row.category) && hours === null) {
+      // "Parts Discount -5.0 % -55.59" (RO 22319): a percentage taken on a
+      // basis, with no line of its own. Booked in parts or misc it made the
+      // strict line guard refuse the report as $55.59 of over-read lines.
+      if (own !== null) {
+        totals.totalsAdjustments = [...(totals.totalsAdjustments ?? []), { label: row.category, cost }];
       }
     } else if (/^parts$/i.test(row.category.trim())) {
       totals.parts = round2(totals.parts + cost);

@@ -3846,6 +3846,24 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
       });
       continue;
     }
+    // A percentage adjustment the block takes on a dollar basis ("Parts
+    // Discount $ 1,111.83 -5.0 % -55.59", "Parts Markup ... 25.0 % ...").
+    // It is a real component of the subtotal: dropping it left RO 22319's
+    // Allstate SOR $55.59 short of its own printed subtotal, the ledger did
+    // not close, and the Appraisal Dispute Report was refused. The cost is
+    // the LAST signed amount on the row, never the basis.
+    const adjustment = line.match(
+      /^((?:parts|labor|paint|body|material|sublet|misc(?:ellaneous)?)\s+(?:discount|markup|adjustments?))\b.*?(-?[\d,]+\.\d{2})$/i
+    );
+    if (adjustment) {
+      summary.categories.push({
+        category: adjustment[1].replace(/\s+/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase()),
+        hours: null,
+        rate: null,
+        cost: money(adjustment[2]),
+      });
+      continue;
+    }
     if (/^(deductible|total adjustments|net cost)/i.test(line)) break;
   }
   return summary.categories.length > 0 || summary.grandTotal !== null ? summary : null;

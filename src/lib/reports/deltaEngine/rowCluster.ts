@@ -787,6 +787,16 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
         continue;
       }
       if (amount === null && hours === null && rate === null) continue;
+      // A percentage adjustment ("Parts Discount $ 1,111.83 -5.0 % -55.59")
+      // prints a dollar BASIS and a percent, not hours @ rate: the "$" made
+      // the basis read as a rate and "-5.0" as hours, and the plausibility
+      // check then dropped the row (RO 22319). It is an amount-only row whose
+      // cost is the last signed amount.
+      if (ws.some((word) => /^-?[\d.,]*%$/.test(word.text)) && /\b(discount|markup|adjustments?)\b/i.test(category)) {
+        if (amount === null) continue;
+        out.push({ page, category, hours: null, hoursBox: null, rate: null, rateBox: null, amount, amountBox });
+        continue;
+      }
       if (!isPlausibleTotalsCategory(category, hours, rate)) continue;
       out.push({ page, category, hours, hoursBox, rate, rateBox, amount: amount ?? 0, amountBox });
     }

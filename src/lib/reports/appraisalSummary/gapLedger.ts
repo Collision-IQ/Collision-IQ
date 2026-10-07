@@ -230,6 +230,8 @@ export interface GapLedger {
   paintMaterials: number;
   /** Hours-priced supplies other than paint (Body Supplies), ours − theirs. 0 when neither prints any. */
   otherMaterials: number;
+  /** Totals-block percentage adjustments (Parts Discount, a markup), ours − theirs. 0 when neither prints any. */
+  totalsAdjustments: number;
   /** Parts + sublet + supplies, with the carrier's rate adjustment removed. */
   nonLaborNet: number;
   tax: number;
@@ -255,6 +257,10 @@ export function otherMaterialsCost(estimate: Estimate): number {
   return round2((estimate.totals.otherMaterials ?? []).reduce((sum, m) => sum + m.cost, 0));
 }
 
+export function totalsAdjustmentsCost(estimate: Estimate): number {
+  return round2((estimate.totals.totalsAdjustments ?? []).reduce((sum, a) => sum + a.cost, 0));
+}
+
 export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOptions = {}): GapLedger {
   const rate = resolveRateBasis(shop, carrier, opts);
   const hours = (e: Estimate) => round2(e.totals.labor.reduce((sum, l) => sum + l.hours, 0));
@@ -270,11 +276,12 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
   const laborRate = round2(rate.impliedAdjustment - rate.adjustmentAmount);
   const paintMaterials = round2(shop.totals.paintSupplies.cost - carrier.totals.paintSupplies.cost);
   const otherMaterials = round2(otherMaterialsCost(shop) - otherMaterialsCost(carrier));
+  const totalsAdjustments = round2(totalsAdjustmentsCost(shop) - totalsAdjustmentsCost(carrier));
   const carrierNonLabor = carrier.totals.parts + carrier.totals.misc - rate.adjustmentAmount;
   const nonLaborNet = round2(shop.totals.parts + shop.totals.misc - carrierNonLabor);
   const tax = round2(shop.totals.tax - carrier.totals.tax);
   const gap = round2(shop.totals.grandTotal - carrier.totals.grandTotal);
-  const sum = round2(laborHoursDollars + laborRate + paintMaterials + otherMaterials + nonLaborNet + tax);
+  const sum = round2(laborHoursDollars + laborRate + paintMaterials + otherMaterials + totalsAdjustments + nonLaborNet + tax);
   if (Math.abs(sum - gap) > 0.01) {
     throw new LedgerNotClosedError(
       `the ledger sums to ${sum.toFixed(2)} but the printed grand totals differ by ${gap.toFixed(2)} (${shop.fileName} vs ${carrier.fileName})`
@@ -293,6 +300,7 @@ export function buildGapLedger(shop: Estimate, carrier: Estimate, opts: LedgerOp
     laborRate,
     paintMaterials,
     otherMaterials,
+    totalsAdjustments,
     nonLaborNet,
     tax,
     closes: true,

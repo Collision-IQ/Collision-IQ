@@ -381,7 +381,7 @@ function appendIndex(
   if (L.laborRate !== 0) write(`Labor rate still open: ${money(L.laborRate)}.`);
   if (carrierPartlyUnread(L)) write(unreadCarrierNote(model));
   write(
-    `Paint materials: ${money(L.paintMaterials)}.${L.otherMaterials !== 0 ? ` Other materials: ${money(L.otherMaterials)}.` : ""} Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`
+    `Paint materials: ${money(L.paintMaterials)}.${L.otherMaterials !== 0 ? ` Other materials: ${money(L.otherMaterials)}.` : ""}${(L.totalsAdjustments ?? 0) !== 0 ? ` Totals-block adjustments: ${money(L.totalsAdjustments)}.` : ""} Parts, sublet and supplies (net): ${money(L.nonLaborNet)}. Tax: ${money(L.tax)}.`
   );
   if (model.shortPay) {
     write(

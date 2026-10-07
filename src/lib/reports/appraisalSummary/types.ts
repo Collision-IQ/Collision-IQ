@@ -65,6 +65,13 @@ export interface EstimateTotals {
    * reproduce). Absent when the document prints none.
    */
   otherMaterials?: Array<{ label: string; hours: number; rate: number; cost: number }>;
+  /**
+   * Percentage adjustments the totals block applies on a dollar basis
+   * ("Parts Discount -5.0 % -55.59", a parts markup). Signed as printed. No
+   * estimate line carries them, so like `otherMaterials` they stay out of
+   * `parts`/`misc`, whose dollars the lines must reproduce. Absent when none.
+   */
+  totalsAdjustments?: Array<{ label: string; cost: number }>;
   subtotal: number;
   tax: number;
   /** Grand Total / Total Cost of Repairs — never the net-of-deductible figure. */

@@ -483,6 +483,24 @@ function ledgerRows(model: PlainSummaryModel): ForensicTableRow[] {
       (e.totals.otherMaterials ?? []).map((m) => `${m.label} ${money(m.cost)}`).join(" + ") || money(0);
     rows.push({ cells: ["Other materials", money(L.otherMaterials), `${printed(shop)} − ${printed(carrier)}.`] });
   }
+  if ((L.totalsAdjustments ?? 0) !== 0) {
+    // Worded, never signed: "-$55.59" beside "Parts" reads as a negative
+    // parts figure, which the wording gate (rightly) refuses.
+    const described = (e: Estimate, whose: string) => {
+      const adjustments = e.totals.totalsAdjustments ?? [];
+      if (!adjustments.length) return `${whose} prints none`;
+      return adjustments
+        .map((a) => `${whose} ${a.label} ${a.cost < 0 ? "takes" : "adds"} ${money(Math.abs(a.cost))} ${a.cost < 0 ? "off" : "on"}`)
+        .join("; ");
+    };
+    rows.push({
+      cells: [
+        "Totals-block adjustments",
+        money(L.totalsAdjustments),
+        `${described(shop, "Ours")}; ${described(carrier, "their")}. Applied as a percentage in the estimate totals, not on any line.`,
+      ],
+    });
+  }
   const largest = [
     ...items.filter((i) => i.hours === 0 && i.strength === "Strong").map((i) => `${i.title.toLowerCase()} ${money(i.value)} on ours`),
     ...facts.checkFirst
