@@ -1,5 +1,7 @@
 "use client";
 
+import { currentExportRedaction } from "@/lib/privacy/exportRedactionPreference";
+import { ExportRedactionToggle } from "@/components/ExportRedactionToggle";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Dispatch, SetStateAction } from "react";
@@ -3012,7 +3014,7 @@ export default function ChatWidget({
               annotationMode: "both",
               includeLegend: true,
               includeSummaryPage: false,
-              redactSensitive: true,
+              redactSensitive: currentExportRedaction(),
             }),
           });
 
@@ -5346,6 +5348,8 @@ export default function ChatWidget({
               />
               </div>
 
+              <ExportRedactionToggle className="hidden lg:inline-flex" />
+
               <button
                 type="button"
                 onClick={handleDownloadRedactedChat}
@@ -5383,6 +5387,7 @@ export default function ChatWidget({
 
                 {(messages.length > 1 || hasAnyAttachment) && (
                   <div className="mt-2 flex justify-end gap-2 lg:hidden">
+                    <ExportRedactionToggle compact />
                     <button
                       type="button"
                       onClick={handleDownloadRedactedChat}

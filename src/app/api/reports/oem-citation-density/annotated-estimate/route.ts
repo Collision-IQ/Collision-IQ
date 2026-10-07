@@ -243,6 +243,9 @@ export async function POST(request: Request) {
         authorityTrace,
         reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
         findingGenerator: buildOemCitationDensityFindings,
+        // The user's "Redact exports" choice also governs the annotated
+        // estimate's own pages (rasterized with identifiers painted out).
+        redactSourcePages: body.redactSensitive !== false,
         request: {
           findingIds: coerceStringArray(body.findingIds),
           annotationMode: coerceAnnotationMode(body.annotationMode),

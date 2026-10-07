@@ -1,3 +1,4 @@
+import { currentExportRedaction } from "@/lib/privacy/exportRedactionPreference";
 import { cleanPresentationMarkdown } from "@/lib/ui/presentationText";
 
 export type ExportableChatMessage = {
@@ -30,6 +31,9 @@ export function buildChatExportPayload(
   return {
     messages,
     analysisText: cleanPresentationMarkdown(analysisText).trim() || undefined,
+    // The user's remembered "Redact exports" choice; the route redacts unless
+    // this is explicitly false.
+    redactSensitive: currentExportRedaction(),
   };
 }
 

@@ -27,6 +27,8 @@ type ChatExportRequestBody = {
   content?: unknown;
   analysisText?: unknown;
   messages?: unknown;
+  /** The user's "Redact exports" choice. Redacts unless explicitly false. */
+  redactSensitive?: unknown;
 };
 
 async function requireExportAccess() {
@@ -191,7 +193,7 @@ function parsePdfMessageBlocks(text: string): PdfMessageBlock[] {
   return blocks;
 }
 
-function buildChatExportPdf(text: string): ArrayBuffer {
+function buildChatExportPdf(text: string, redacted = true): ArrayBuffer {
   const BODY_FONT = 10.5;
   const HEADER_FONT = 14;
 
@@ -218,13 +220,15 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     setPdfFont("bold");
     doc.setFontSize(HEADER_FONT);
     doc.setTextColor(35, 35, 35);
-    doc.text("Redacted Chat Export", marginX, showIntro ? 18 : 14);
+    doc.text(redacted ? "Redacted Chat Export" : "Chat Export", marginX, showIntro ? 18 : 14);
 
     if (showIntro) {
       setPdfFont();
       doc.setFontSize(BODY_FONT);
       doc.text(
-        "This download preserves the chat content while removing sensitive values from the exported copy.",
+        redacted
+          ? "This download preserves the chat content while removing sensitive values from the exported copy."
+          : "This download is NOT redacted: names, claim numbers and VINs appear as written.",
         marginX,
         26,
         { maxWidth: blockWidth }
@@ -319,11 +323,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // Personal-data redaction follows the user's choice; licensed guide
+    // addresses are scrubbed either way (a licensing rule, not privacy).
+    const redactSensitive = body.redactSensitive !== false;
     const redacted = cleanProfessionalChatExportText(
-      redactExternalDocumentUrls(redactDownloadContent(exportText)),
+      redactExternalDocumentUrls(redactSensitive ? redactDownloadContent(exportText) : exportText),
     );
     const filenameDate = new Date().toISOString().slice(0, 10);
-    const pdf = buildChatExportPdf(redacted);
+    const pdf = buildChatExportPdf(redacted, redactSensitive);
 
     if (!access.isPlatformAdmin) {
       try {

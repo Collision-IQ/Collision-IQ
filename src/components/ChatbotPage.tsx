@@ -1,5 +1,7 @@
 "use client";
 
+import { currentExportRedaction } from "@/lib/privacy/exportRedactionPreference";
+import { ExportRedactionToggle } from "@/components/ExportRedactionToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -2931,7 +2933,7 @@ function RailContent({
       body: JSON.stringify({
         caseId,
         selectedSourceDocumentId: citationDensitySelectedSourceDocumentId || undefined,
-        redactSensitive: true,
+        redactSensitive: currentExportRedaction(),
       }),
     });
     const data = (await response.json().catch(() => null)) as {
@@ -3019,7 +3021,7 @@ function RailContent({
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
-        redactSensitive: true,
+        redactSensitive: currentExportRedaction(),
         // The user's answer to "which upload is the insurer's estimate?".
         comparisonDocumentId: (comparisonDocumentIdOverride ?? citationDensityInsurerEstimateId) || undefined,
       }),
@@ -3125,7 +3127,7 @@ function RailContent({
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
-        redactSensitive: true,
+        redactSensitive: currentExportRedaction(),
       }),
     });
 
@@ -4151,6 +4153,12 @@ function RailContent({
             <div className="mt-1 text-xs leading-5 text-muted-foreground">
               Carrier-ready documents, snapshots, and audit packets.
             </div>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] leading-4 text-muted-foreground">
+              Applies to every download; remembered on this device.
+            </span>
+            <ExportRedactionToggle compact />
           </div>
           <div className="grid gap-2">
             <button

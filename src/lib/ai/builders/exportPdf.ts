@@ -1,3 +1,4 @@
+import { currentExportRedaction } from "@/lib/privacy/exportRedactionPreference";
 import jsPDF from "jspdf";
 import { withWinAnsiText } from "@/lib/pdf/winAnsiText";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
@@ -46,7 +47,9 @@ const DEFAULT_TYPOGRAPHY = {
 };
 
 export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise<Blob> {
-  const redactedInput = redactCarrierReportDocument(input);
+  // The user's remembered "Redact exports" choice (default on). Unchecked,
+  // the document prints as written.
+  const redactedInput = currentExportRedaction() ? redactCarrierReportDocument(input) : input;
 
   const doc = withWinAnsiText(new jsPDF({
     unit: "mm",

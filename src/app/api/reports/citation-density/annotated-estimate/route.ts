@@ -597,6 +597,9 @@ export async function POST(request: Request) {
           mileage: formatReportMileage(activeReport.report.analysis?.estimateFacts?.mileage),
           jurisdiction,
         },
+        // The user's "Redact exports" choice also governs the annotated
+        // estimate's own pages (rasterized with identifiers painted out).
+        redactSourcePages: body.redactSensitive !== false,
         request: {
           findingIds: coerceStringArray(body.findingIds),
           annotationMode: coerceAnnotationMode(body.annotationMode),
