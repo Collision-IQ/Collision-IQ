@@ -229,21 +229,8 @@ describe("judgment calls on our own sheet go to 'Clean up our own sheet'", () =>
   const flags = integrityChecks(shop, carrier);
   const byKind = (kind: string) => flags.filter((f) => f.kind === kind);
 
-  it("every blend twice theirs is named as our blend share, with each pair", () => {
-    const [flag] = byKind("blendShareDouble");
-    expect(flag).toMatchObject({ side: "shop", lines: { shop: [15, 37, 38], carrier: [11, 32, 33] } });
-    expect(flag.text).toContain("On every panel both sheets blend, ours is exactly twice theirs: RT Fender w/wheel opening molding w/o snorkel intake 2.2 hr (L15) vs 1.1 hr (L11)");
-  });
-
-  it("one blend at a different share is not a pattern", () => {
-    const mixed = integrityChecks(
-      shop,
-      estimate("carrier", [
-        { line: 11, oper: "Blnd", desc: "RT Fender w/o wheel opening molding", paintHours: 1.1 },
-        { line: 32, oper: "Blnd", desc: "RT Hinge pillar", paintHours: 1.6 },
-      ])
-    );
-    expect(mixed.some((f) => f.kind === "blendShareDouble")).toBe(false);
+  it("a blend at twice theirs is never a clean-up item: the build follows the SCRS Blend Study", () => {
+    expect(flags.some((f) => /blend/i.test(f.text))).toBe(false);
   });
 
   it("R&I and align of one striker, and a test fit of a part nobody replaces", () => {
@@ -253,5 +240,72 @@ describe("judgment calls on our own sheet go to 'Clean up our own sheet'", () =>
     );
     const replaced = integrityChecks(shop, estimate("carrier", [{ line: 60, oper: "Repl", desc: "RT Rear door", price: 900 }]));
     expect(replaced.some((f) => f.kind === "testFitWithoutReplacement")).toBe(false);
+  });
+});
+
+describe("deploy 9845695 review: their 'Power Window Reset' is our 'Power window initialization'", () => {
+  // SOR L139 "# S03 Rpr Power Window Reset 0 0.00 0.3": Allstate pays the
+  // reset in-house at 0.3 hr. The deployed report called our $90.45 sublet
+  // STRONG with "no counterpart on their sheet".
+  it("the typed engine pairs the two wordings", () => {
+    const result = pairAndCompare(
+      [engineRow(174, "# Subl Power window initialization +34%", "VEHICLE DIAGNOSTICS", 0, 0, 90.45)],
+      [engineRow(139, "# S03 Rpr Power Window Reset", "VEHICLE DIAGNOSTICS", 0.3, 0, 0)]
+    );
+    expect(result.pairs.map((p) => [p.subject.line, p.competing.line])).toEqual([[174, 139]]);
+    expect(result.findings.some((f) => f.kind === "MISSED")).toBe(false);
+  });
+
+  const L = (line: number, oper: string, desc: string, hours = 0, price = 0, section?: string): RationaleLine => ({
+    line, oper, desc, hours, paintHours: 0, price, section,
+  });
+  const ours = L(174, "Subl", "Power window initialization +34%", 0, 90.45);
+  const theirs = L(139, "Rpr", "Power Window Reset", 0.3, 0);
+  const carrierSheet = [L(67, "R&I", "RT Door glass Toyota", 0.5, 0, "FRONT DOOR"), theirs];
+
+  it("paired or not, the case says both pay it and the dispute is how it is billed", () => {
+    for (const lower of [theirs, null]) {
+      const r = explainLaborDifference({ higher: [ours], lower, higherSheet: [ours], lowerSheet: carrierSheet, voice: "dispute", caseDocuments: [ADAS_REPORT] })!;
+      expect(r.why).toBe(
+        'Both sheets pay the window initialization, so the requirement is not in dispute. Ours bills it as a $90.45 sublet; their L139 ("Power Window Reset") bills it as 0.3 hr of in-house labor. The difference is who performs it and at what charge.'
+      );
+      expect(r.concededBy).toBeUndefined();
+    }
+  });
+
+  it("an item paired with their line is never promoted to STRONG", () => {
+    const estimate = (role: "shop" | "carrier", lines: EstimateLine[]): Estimate => ({
+      role,
+      fileName: role,
+      vehicle: "2023 TOYO Tacoma",
+      platform: "ccc",
+      totals: {
+        parts: 0,
+        misc: 0,
+        labor: [{ cat: "body", label: "Body Labor", hours: 10, rate: 75, cost: 750 }],
+        paintSupplies: { hours: 0, rate: 0, cost: 0 },
+        subtotal: 0,
+        tax: 0,
+        grandTotal: 0,
+      },
+      lines,
+    });
+    const items = argueItems({
+      shop: estimate("shop", [{ line: 174, oper: "Subl", desc: "Power window initialization +34%", price: 90.45 }]),
+      carrier: estimate("carrier", [
+        { line: 67, oper: "R&I", desc: "RT Door glass Toyota", hours: 0.5, section: "FRONT DOOR" },
+        { line: 139, oper: "Rpr", desc: "Power Window Reset", price: 0, hours: 0.3, laborCat: "body" },
+      ]),
+      groups: [],
+      usedShop: new Set(),
+      flags: [],
+      pairs: [{ kind: "reduced", shopLines: [174], carrierLine: 139 }],
+      caseDocuments: [ADAS_REPORT],
+    });
+    // Their 0.3 hr against our sublet price: not argued as work they left out,
+    // and never STRONG. (A pair where their hours exceed ours is left to the
+    // ledger, as before.)
+    expect(items.some((i) => i.strength === "Strong")).toBe(false);
+    expect(items.some((i) => /no counterpart/i.test(i.detail))).toBe(false);
   });
 });

@@ -118,12 +118,22 @@ describe("refinish: the step between body work and paint", () => {
 });
 
 describe("blend: the opinion cuts both ways", () => {
-  it("their blend at exactly half of ours is a share difference, and our full-time blend is flagged as the weak side", () => {
+  it("their blend at exactly half of ours is the removed 50% formula; full-time blend is supported (SCRS Blend Study)", () => {
     const r = explain(38, 33)!;
     expect(r.key).toBe("blend");
-    expect(r.why).toContain("Both sheets blend this panel, so there is no disagreement that it needs one.");
-    expect(r.why).toContain("exactly half of ours (1.1 hr against 2.2 hr)");
-    expect(r.why).toContain("expect that to be challenged");
+    expect(r.why).toContain("Both sheets blend this panel, so the need is agreed.");
+    expect(r.why).toContain("Theirs pays exactly half of ours (1.1 hr against 2.2 hr): the 50% formula");
+    expect(r.why).toContain("The CCC/MOTOR Guide to Estimating removed its blend formula in October 2023");
+    expect(r.why).toContain("31.59% more time on average than a full refinish");
+    expect(r.why).toContain("Blend time at the panel's full refinish time is therefore supported");
+    expect(r.why).not.toMatch(/challenged|weak/i);
+    expect(r.settledBy).toMatch(/^An on-the-spot evaluation of the panel at the vehicle/);
+  });
+
+  it("a Mitchell estimate gets Mitchell's own blend premise", () => {
+    const r = explain(38, 33, { lowerPlatform: "mitchell", higherPlatform: "mitchell" })!;
+    expect(r.why).toContain("Mitchell Cloud Estimating (from February 2024) lets the estimate profile set the blend calculation");
+    expect(r.why).not.toContain("CCC/MOTOR");
   });
 
   it("a blend with no counterpart names the panels they refinish beside it", () => {
@@ -352,7 +362,7 @@ describe("a blend of the same panel the matcher left unpaired", () => {
     const shop = [L(15, "Blnd", "RT Fender w/wheel opening molding w/o snorkel intake", 0, 2.2)];
     const carrier = [L(11, "Blnd", "RT Fender w/o wheel opening molding", 0, 1.1)];
     const r = explainLaborDifference({ higher: shop, lower: null, higherSheet: shop, lowerSheet: carrier, voice: "dispute" })!;
-    expect(r.why).toContain("Both sheets blend this panel");
-    expect(r.why).toContain("exactly half of ours (1.1 hr against 2.2 hr)");
+    expect(r.why).toContain("Both sheets blend this panel, so the need is agreed.");
+    expect(r.why).toContain("pays exactly half of ours (1.1 hr against 2.2 hr)");
   });
 });
