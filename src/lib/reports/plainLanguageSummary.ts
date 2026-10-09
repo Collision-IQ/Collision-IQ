@@ -306,6 +306,22 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       text: `${rest.length} smaller ${rest.length === 1 ? "item" : "items"} worth ${money(rest.reduce((sum, i) => sum + i.value, 0))} in total are not listed; the Forensic Estimate Analysis lists every line.`,
     });
   }
+  // The table says WHAT differs; this says WHY ours carries it and what
+  // settles it, item by item, so the estimator walks in with the argument
+  // and not only the gap (laborRationale.ts).
+  const argued = carrierPartlyUnread(model.ledger) ? [] : shown.filter((item) => item.rationale);
+  if (argued.length) {
+    itemBlocks.push({ kind: "subheading", text: "The case for each item" });
+    itemBlocks.push({
+      kind: "paragraph",
+      text: "Why ours carries each NEEDS PROOF item, and what to attach. The reasoning is the repair logic and the estimating-guide or OEM premise; the guide and OEM documents are named, not quoted, so attach the page before the argument goes to the carrier.",
+    });
+    for (const item of argued) {
+      itemBlocks.push({ kind: "subheading", text: `${item.title} (${money(item.value)})` });
+      itemBlocks.push({ kind: "paragraph", text: item.rationale!.why });
+      itemBlocks.push({ kind: "note", text: `Settled by: ${item.rationale!.settledBy}` });
+    }
+  }
   section("Items worth arguing", itemBlocks);
 
   // 5. Clean up our own sheet (and what to ask the carrier to fix on theirs).

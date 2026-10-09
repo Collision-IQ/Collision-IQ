@@ -16,6 +16,8 @@ import {
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf, resolveExportScrub, type ForensicNoCounterpartRow } from "./forensicReportRenderer";
+import { explainLaborDifference, makeFromVehicleText, type RationaleLine } from "./laborRationale";
+import { extractVehicleIdentityFromText } from "@/lib/ai/vehicleContext";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
 import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
 import type { MatcherPair } from "./appraisalSummary/argueItems";
@@ -3898,8 +3900,15 @@ function toSourcePdfPageIndex(sourcePdfPageNumber: number) {
  * totals line sat directly underneath. The gate keeps its pattern; display gets
  * one that cannot span lines.
  */
+/** A street address line: a house number before a street word ("1991 WELL SPRINGS LANE"). */
+const STREET_ADDRESS_LINE =
+  /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s+){0,4}(?:lane|ln|avenue|ave|street|st|road|rd|drive|dr|boulevard|blvd|court|ct|way|pike|circle|cir|place|pl|terrace|ter|highway|hwy|parkway|pkwy|trail|trl)\b\.?/i;
+
 function readDisplayVehicle(text: string | null | undefined): string | null {
   for (const line of String(text ?? "").split(/\r?\n/)) {
+    // RO 22319: the owner's address "1991 WELL SPRINGS LANE" printed above the
+    // vehicle line read as a 1991 vehicle and became the report's vehicle.
+    if (STREET_ADDRESS_LINE.test(line)) continue;
     const match = /\b((?:19|20)\d{2}[ \t]+[A-Z][A-Za-z]{1,}(?:[ \t]+[A-Za-z0-9/-]{1,}){0,5})/.exec(line);
     if (match) return match[1].replace(/\s+/g, " ").trim();
   }
@@ -6044,6 +6053,29 @@ function emitStructuredLineItemDeltaFindings(
     return value > 0 ? Math.round(value * 100) / 100 : row.price;
   };
 
+  // The case for each difference (laborRationale.ts) reads both sheets whole:
+  // their own repair line on a panel, their scans around a calibration.
+  const rationaleSheets = {
+    higher: deltaMatch.higherRows.map(rationaleLineOf),
+    lower: deltaMatch.lowerRows.map(rationaleLineOf),
+  };
+  const rationaleVehicle = readDisplayVehicle(context.sourceText);
+  const rationaleMake =
+    makeFromVehicleText(extractVehicleIdentityFromText(context.sourceText ?? "")?.make ?? null) ??
+    makeFromVehicleText(rationaleVehicle);
+  const rationaleFor = (delta: EstimateLineItemDelta) =>
+    explainLaborDifference({
+      higher: [rationaleLineOf(delta.higherRow)],
+      lower: delta.lowerRow ? rationaleLineOf(delta.lowerRow) : null,
+      higherSheet: rationaleSheets.higher,
+      lowerSheet: rationaleSheets.lower,
+      higherPlatform: detectEstimatePlatform(context.sourceText ?? ""),
+      lowerPlatform: detectEstimatePlatform(context.comparisonEstimateTexts?.[0]?.text ?? ""),
+      vehicle: rationaleVehicle,
+      make: rationaleMake,
+      voice: "forensic",
+    }) ?? undefined;
+
   let deltasTruncated = 0;
   for (const delta of deltaMatch.orderedDeltas) {
     if (findings.length >= MAX_DELTA_FINDINGS) {
@@ -6143,6 +6175,12 @@ function emitStructuredLineItemDeltaFindings(
         laborHoursImpact: delta.laborDelta ?? null,
       })
     );
+    // Only where the higher estimate carries more: a line the comparison
+    // allows more on is not argued for the higher side.
+    if (!isLowerAllowsMoreDelta(delta)) {
+      const rationale = rationaleFor(delta);
+      if (rationale) findings[findings.length - 1].laborRationale = rationale;
+    }
   }
 
   // A capped list reads as "this is everything". Say what was left out, on the
@@ -7792,6 +7830,21 @@ function formatDeltaHours(value: number | null) {
 /** "1.6 hours", but "not quantified", never "not quantified hours". */
 function withHoursUnit(formatted: string) {
   return /^-?\d/.test(formatted) ? `${formatted} hours` : formatted;
+}
+
+/** A delta-engine row in the shape the labor rationale reads. */
+function rationaleLineOf(row: EstimateDeltaRow): RationaleLine {
+  return {
+    line: row.lineNumber,
+    oper: row.opCode,
+    desc: row.description,
+    hours: row.labor ?? 0,
+    paintHours: row.paint ?? 0,
+    price: row.price ?? 0,
+    // CCC prints "#" after the line number on a manual line.
+    manual: /^\s*(?:S\d+\s+)?\d+\s*#/.test(row.rawText ?? ""),
+    section: row.section,
+  };
 }
 
 function describeDeltaRowLocation(row: EstimateDeltaRow | null, fileName: string) {

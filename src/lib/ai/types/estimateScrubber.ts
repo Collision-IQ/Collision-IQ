@@ -223,6 +223,14 @@ export type CitationDensityFinding = {
   missingAuthority?: string[];
   citationLabel?: string;
   currentSupportSummary: string;
+  /**
+   * Why the higher estimate carries this operation (or more time for it):
+   * the repair logic, the estimating-guide premise and what on either sheet
+   * already concedes the point, with the authority that settles it. Built by
+   * reports/laborRationale.ts from the two sheets' own lines; absent when no
+   * rule recognises the operation.
+   */
+  laborRationale?: { key: string; why: string; settledBy: string };
   missingProofSummary: string;
   recommendedNextAction: string;
   supplementReadyLanguage?: string;
