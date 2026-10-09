@@ -26,7 +26,6 @@ export type FlagKind =
   | "laborCategoryMismatch"
   | "duplicateOperation"
   | "zeroPricedCarrierLine"
-  | "blendShareDouble"
   | "removeAndAlignSamePart"
   | "testFitWithoutReplacement";
 
@@ -375,25 +374,10 @@ const isOp = (l: EstimateLine, op: string) => (l.oper ?? "").trim().toLowerCase(
  */
 function ownSheetJudgmentChecks(shop: Estimate, carrier: Estimate): Flag[] {
   const flags: Flag[] = [];
-  const paint = (l: EstimateLine) => l.paintHours ?? 0;
 
-  // 9. Every blend that meets theirs is exactly twice theirs: a blend-share
-  //    setting, not a scope difference (fender 2.2 / 1.1, hinge pillar 2.0 /
-  //    1.0, rocker 2.2 / 1.1 on RO 22319).
-  const blendPairs = shop.lines
-    .filter((l) => isOp(l, "blnd") && paint(l) > 0)
-    .map((ours) => ({ ours, theirs: carrier.lines.find((c) => isOp(c, "blnd") && paint(c) > 0 && samePart(ours.desc, c.desc)) }))
-    .filter((p): p is { ours: EstimateLine; theirs: EstimateLine } => Boolean(p.theirs));
-  if (blendPairs.length >= 2 && blendPairs.every((p) => Math.abs(paint(p.ours) / paint(p.theirs) - 2) < 0.1)) {
-    flags.push({
-      kind: "blendShareDouble",
-      side: "shop",
-      lines: { shop: blendPairs.map((p) => p.ours.line), carrier: blendPairs.map((p) => p.theirs.line) },
-      text: `On every panel both sheets blend, ours is exactly twice theirs: ${blendPairs
-        .map((p) => `${p.ours.desc} ${paint(p.ours).toFixed(1)} hr (L${p.ours.line}) vs ${paint(p.theirs).toFixed(1)} hr (L${p.theirs.line})`)
-        .join("; ")}. That is the blend share our profile applies, not a scope difference. Confirm the share before arguing blends, or argue the size of the blend area instead.`,
-    });
-  }
+  // (A blend at twice theirs is NOT a clean-up item: the build follows the
+  //  SCRS Blend Study, under which blend time is settled at the vehicle and
+  //  measured above full refinish. It is argued per item in laborRationale.)
 
   // 10. The same part written as R&I and as Align on our sheet: setting it on
   //     reinstall is hard to separate from its R&I (RO 22319: R&I and Algn RT

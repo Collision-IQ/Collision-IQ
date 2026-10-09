@@ -229,21 +229,8 @@ describe("judgment calls on our own sheet go to 'Clean up our own sheet'", () =>
   const flags = integrityChecks(shop, carrier);
   const byKind = (kind: string) => flags.filter((f) => f.kind === kind);
 
-  it("every blend twice theirs is named as our blend share, with each pair", () => {
-    const [flag] = byKind("blendShareDouble");
-    expect(flag).toMatchObject({ side: "shop", lines: { shop: [15, 37, 38], carrier: [11, 32, 33] } });
-    expect(flag.text).toContain("On every panel both sheets blend, ours is exactly twice theirs: RT Fender w/wheel opening molding w/o snorkel intake 2.2 hr (L15) vs 1.1 hr (L11)");
-  });
-
-  it("one blend at a different share is not a pattern", () => {
-    const mixed = integrityChecks(
-      shop,
-      estimate("carrier", [
-        { line: 11, oper: "Blnd", desc: "RT Fender w/o wheel opening molding", paintHours: 1.1 },
-        { line: 32, oper: "Blnd", desc: "RT Hinge pillar", paintHours: 1.6 },
-      ])
-    );
-    expect(mixed.some((f) => f.kind === "blendShareDouble")).toBe(false);
+  it("a blend at twice theirs is never a clean-up item: the build follows the SCRS Blend Study", () => {
+    expect(flags.some((f) => /blend/i.test(f.text))).toBe(false);
   });
 
   it("R&I and align of one striker, and a test fit of a part nobody replaces", () => {

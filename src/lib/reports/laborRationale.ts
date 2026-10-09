@@ -647,32 +647,75 @@ const INITIALIZATION: Build = (ctx, v) => {
   };
 };
 
+/**
+ * BLEND AUTHORITY — what the estimating systems and the industry record say
+ * about blend time, as the source documents state it. The build follows the
+ * SCRS Blend Study: blend time is settled by an on-the-spot evaluation at the
+ * vehicle, never by a fixed 50% formula. (RO 22319 review: an earlier version
+ * of this rule called a full-time blend "the weak side". It is not.)
+ *
+ *  - CCC/MOTOR Guide to Estimating, from October 2023 (Color Blend, Adjacent
+ *    Panels): "Estimated refinish times for color blending should defer to
+ *    the judgment of an estimator or appraiser following an on-the-spot
+ *    evaluation of the specific vehicle and refinish requirements in
+ *    question." The prior 50% (two-stage) and 70% (three-stage) formulas were
+ *    removed. As reported by Repairer Driven News, 2023-04-28 and 2024-01-22.
+ *  - Mitchell: from February 2024 Mitchell Cloud Estimating lets the estimate
+ *    profile set the blend calculation; Mitchell left its default unchanged.
+ *    Repairer Driven News, 2024-01-22.
+ *  - 2022 SCRS Blend Study Report (audited; AkzoNobel, Axalta, BASF, PPG,
+ *    Sherwin-Williams; 45 parts, three colors): blending took 31.59% more time
+ *    on average than a full refinish, rather than the 50% less the three
+ *    estimating systems allocated.
+ */
+export const BLEND_AUTHORITY = {
+  scrsStudy:
+    "2022 SCRS Blend Study Report measured blending at 31.59% more time on average than a full refinish of the same panel, not the 50% less the estimating systems allocated",
+  motorGte:
+    "the CCC/MOTOR Guide to Estimating removed its blend formula in October 2023, and color blend time now \"should defer to the judgment of an estimator or appraiser following an on-the-spot evaluation of the specific vehicle and refinish requirements in question\"",
+  mitchell:
+    "Mitchell Cloud Estimating (from February 2024) lets the estimate profile set the blend calculation; its 50% default is a profile setting, not a measured time",
+} as const;
+
+/** The blend premise for the platform an estimate was written on. */
+function blendPremise(platform: string | null | undefined): string {
+  const resolved = platformOf(platform);
+  const study = `The ${BLEND_AUTHORITY.scrsStudy}.`;
+  if (resolved === "ccc") return `${cap(BLEND_AUTHORITY.motorGte)}. ${study}`;
+  if (resolved === "mitchell") return `${cap(BLEND_AUTHORITY.mitchell)}. ${study}`;
+  return `On a CCC estimate, ${BLEND_AUTHORITY.motorGte}; on a Mitchell estimate, ${BLEND_AUTHORITY.mitchell}. ${study}`;
+}
+
+const BLEND_SETTLED_BY =
+  "An on-the-spot evaluation of the panel at the vehicle (reinspection with both appraisers), with the 2022 SCRS Blend Study Report and the platform's color-blend premise; photos of the blend area and the color (solid, metallic or tri-coat), and a sprayed-out test card.";
+
 const BLEND: Build = (ctx, v) => {
   const head = ctx.higher[0];
   if (op(head) !== "blnd" && !/\bblend\b/i.test(head.desc)) return null;
-  const guide = guideName(ctx.higherPlatform);
-  const premise = `Blend is not part of the refinish time of the panel being painted, and no guide publishes a separate blend time; a blend is valued as a share of the blended panel's full refinish time (see the refinish section of ${theGuide(ctx.higherPlatform)}).`;
+  // Their formula sits on their sheet: the premise is the lower estimate's
+  // platform when known.
+  const premise = blendPremise(ctx.lowerPlatform ?? ctx.higherPlatform);
   // Their blend of the same panel the matcher left unpaired ("Blnd RT Fender
   // w/wheel opening molding…" against "Blnd RT Fender w/o wheel opening
   // molding", RO 22319) is the counterpart.
   const lo =
     ctx.lower ??
     (ctx.higher.length === 1 ? ctx.lowerSheet.find((l) => op(l) === "blnd" && sharesPanel(head, l)) ?? null : null);
-  // Their sheet paints the whole panel: more than a blend, so not a gap.
+  // Their sheet paints the whole panel: the same panel at another scope.
   const theirFull = lo
     ? null
     : ctx.lowerSheet.find((l) => op(l) !== "blnd" && l.paintHours > 0 && sharesPanel({ ...head, desc: head.desc }, l));
   if (theirFull) {
     return {
       key: "blend",
-      why: `${cap(v.loRef([theirFull.line]))} (${theirFull.oper ? `${theirFull.oper} ` : ""}${theirFull.desc}, ${hr(theirFull.paintHours)} refinish) paints this panel in full, which covers more than a blend. The two lines are likely the same panel at a different scope, not a blend left out; the question is whether the panel needs full refinish (damage on it) or a blend (color match only).`,
-      settledBy: "Photos of the panel showing whether it carries damage; if it does not, a blend is the right scope and the full refinish on the other sheet is the higher allowance.",
+      why: `${cap(v.loRef([theirFull.line]))} (${theirFull.oper ? `${theirFull.oper} ` : ""}${theirFull.desc}, ${hr(theirFull.paintHours)} refinish) paints this panel in full. The two lines are likely the same panel at a different scope, not a blend left out: the question is whether the panel carries damage (full refinish) or needs color match only (blend).`,
+      settledBy: "Photos of the panel showing whether it carries damage, and an on-the-spot evaluation at the vehicle.",
     };
   }
   if (!lo) {
     return {
       key: "blend",
-      why: `Factory paint varies from panel to panel and a color mixed to formula never matches it exactly, so a refinished panel set next to an untouched one shows a color step under daylight. Blending tapers the new color into the adjacent panel so the eye finds no edge. ${premise}${(() => {
+      why: `Factory paint varies from panel to panel and a color mixed to formula never matches it exactly, so a refinished panel set next to an untouched one shows a color step under daylight. Blending tapers the new color into the adjacent panel so the eye finds no edge, and the whole panel is still cleaned, prepped, masked and clear coated. ${premise}${(() => {
         const beside = theirAdjacentRefinish(ctx);
         return beside.length
           ? ` ${cap(v.loRef(beside.slice(0, 3).map((l) => l.line)))} refinish${beside.length === 1 ? "es" : ""} ${[
@@ -680,21 +723,20 @@ const BLEND: Build = (ctx, v) => {
             ].join(", ")} beside this panel and blend${beside.length === 1 ? "s" : ""} nothing into it.`
           : "";
       })()}`,
-      settledBy:
-        "A sprayed-out color test card against this panel (photographed in daylight) shows whether a blend is needed; the paint maker's blend procedure for the color, and the maker's refinish guidance where it addresses blending, support it.",
+      settledBy: BLEND_SETTLED_BY,
     };
   }
   const ours = totalHours(head);
   const theirs = totalHours(lo);
   const ratio = ours > 0 ? theirs / ours : 0;
   const halfOfOurs = Math.abs(ratio - 0.5) < 0.06;
+  const theirsAt = v.loSheet === "their sheet" ? "Theirs" : "The comparison estimate";
   return {
     key: "blend",
     why: halfOfOurs
-      ? `Both sheets blend this panel, so there is no disagreement that it needs one. ${v.loSheet[0].toUpperCase()}${v.loSheet.slice(1)} pays exactly half of ${v.Hi === "Ours" ? "ours" : "the higher estimate's"} (${hr(theirs)} against ${hr(ours)}): the two sheets apply a different share of the panel's refinish time, not a different scope. ${premise} If ${v.hiSheet} values the blend at the panel's full refinish time, expect that to be challenged; argue it on the size of the blend area instead (on a long, contoured panel the blend can run its full length).`
-      : `Both sheets blend this panel; ${v.Hi === "Ours" ? "ours" : "the higher estimate"} carries ${hr(ours)} against ${hr(theirs)}. ${premise} The difference is the share each sheet applies or the extent of the panel blended.`,
-    settledBy:
-      "The blend share each sheet applies (it is visible on the line when compared with the panel's full refinish time), and photos of the blend area; the paint maker's blend procedure for the color.",
+      ? `Both sheets blend this panel, so the need is agreed. ${theirsAt} pays exactly half of ${v.Hi === "Ours" ? "ours" : "the higher estimate's"} (${hr(theirs)} against ${hr(ours)}): the 50% formula, against the panel's full refinish time on ${v.hiSheet}. ${premise} Blend time at the panel's full refinish time is therefore supported, and it is settled at the vehicle, not by a percentage.`
+      : `Both sheets blend this panel; ${v.Hi === "Ours" ? "ours" : "the higher estimate"} carries ${hr(ours)} against ${hr(theirs)}. ${premise}`,
+    settledBy: BLEND_SETTLED_BY,
   };
 };
 
