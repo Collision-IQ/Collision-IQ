@@ -430,11 +430,10 @@ export function buildDeltaForensicReportModel(
     );
   }
 
-  addSection(
-    "What the vehicle owner should know",
-    buildOwnerSection(records, comparisonLabel)
-  );
-  addSection("Recommended path to resolution", buildResolutionSection(records, comparisonLabel));
+  // Shared with the vehicle owner's insurer: these two sections document and
+  // reconcile; they do not advocate (no appraisal clause, no "disputed").
+  addSection("Notes for the vehicle owner", buildOwnerSection(records, comparisonLabel));
+  addSection("Path to reconciliation", buildResolutionSection(records, comparisonLabel));
   addSection("Authorities relied upon", buildAuthoritiesSection(records, input));
   addSection("Limitations", buildLimitationsSection(records, input, comparisonLabel, scrub));
 
@@ -468,7 +467,7 @@ export function buildDeltaForensicReportModel(
         tone: "caution",
         paragraphs: [
           `This report was prepared from the documents identified in Section 2 and from the authorities listed above. Every dollar figure in it appears on one of those documents; none is inferred. It is offered as an appraisal and documentation analysis to assist the parties in resolving a difference in the amount of loss. It is not legal advice, not a coverage determination, and not an allegation of misconduct by any party.`,
-          `Where an authority is shown as requiring verification, it has not been retrieved and must be obtained before the finding it supports is relied upon in a formal proceeding.`,
+          `Where an authority is shown as requiring verification, it has not been retrieved and must be obtained before the finding it supports is relied upon.`,
         ],
       },
     ],
@@ -681,7 +680,7 @@ function buildPlainSummarySection(
       ),
     ].slice(0, 4);
     paragraphs.push(
-      `The safety items. ${safety.length} of these ${plural(safety.length, "difference")} ${safety.length === 1 ? "is" : "are"} not cosmetic — ${sentenceList(named)}${safety.length > named.length ? `, and ${safety.length - named.length} more listed below` : ""}. Scanning, calibration and structural repair method are the items where an unfunded operation is not merely a cost compromise; a system can appear to work while being aimed incorrectly.`
+      `The safety items. ${safety.length} of these ${plural(safety.length, "difference")} ${safety.length === 1 ? "is" : "are"} not cosmetic — ${sentenceList(named)}${safety.length > named.length ? `, and ${safety.length - named.length} more listed below` : ""}. Scanning, calibration and structural repair method concern how the vehicle's systems function as well as what they cost; a system can appear to work while being aimed incorrectly.`
     );
   }
 
@@ -756,7 +755,7 @@ function buildReconciliationSection(
       columns: [
         { header: "Subject of the difference", weight: 62 },
         { header: "Lines", weight: 12, align: "right" },
-        { header: "Amount in dispute", weight: 26, align: "right" },
+        { header: "Amount of difference", weight: 26, align: "right" },
       ],
       rows,
     },
@@ -893,18 +892,17 @@ function buildOwnerSection(
   comparisonLabel: string
 ): ForensicBlock[] {
   const paragraphs: string[] = [
-    "A supplement is a stage in a claim, not a verdict. Additional damage found during repair is normally handled by a further supplement, and the documents themselves generally say so. Much of what is disputed here becomes visible only once panels are removed.",
-    "If the two sides cannot agree on the amount, most policies contain an appraisal clause. It applies to disputes about the amount of loss, not about whether something is covered. Read the policy for the exact procedure and any time limits before invoking it.",
+    "A supplement is a normal stage in a claim. Additional damage found during repair is normally handled by a further supplement, and the documents themselves generally say so. Much of the difference between these estimates becomes clear only once panels are removed.",
   ];
 
   if (records.some((record) => isSafetyRelevant(record.finding))) {
     paragraphs.push(
-      "Whatever is agreed on dollars, ask in writing that the electronic systems named in these findings be scanned and calibrated after repair, and that you receive the post-repair scan report. These are the items where an unfunded operation is not merely a cost compromise."
+      "The electronic systems named in these findings are documented by the post-repair scan report and the calibration reports; keep a copy of each. These items concern system function as well as cost."
     );
   }
 
   paragraphs.push(
-    `Keep every document: both estimates, all supplements, the pre- and post-repair scan reports, and any parts invoices. If you later need to demonstrate what was and was not done, these are the record. Nothing in this report requires or recommends litigation, and nothing in it asserts that ${comparisonLabel} was prepared improperly.`
+    `Keep every document: both estimates, all supplements, the pre- and post-repair scan reports, and any parts invoices. They are the record of what was done. Nothing in this report asserts that either estimate was prepared improperly.`
   );
 
   return [{ kind: "callout", tone: "owner", paragraphs }];
@@ -920,14 +918,14 @@ function buildResolutionSection(
   const structural = records.filter((record) => themeOf(record.finding) === "structural");
   if (structural.length) {
     steps.push(
-      "Reinspect the vehicle with both appraisers present and the affected panels removed. Structural findings are best settled at the vehicle rather than on paper."
+      "Reinspect the vehicle with both appraisers present and the affected panels removed. Structural findings are most efficiently reconciled at the vehicle rather than on paper."
     );
   }
 
   const adas = records.filter((record) => themeOf(record.finding) === "adas");
   if (adas.length) {
     steps.push(
-      "Attach the model-specific calibration and scan requirements for this vehicle to support the diagnostic and calibration findings, and confirm which operations the repair facility will perform in house."
+      "Attach the model-specific calibration and scan requirements for this vehicle to document the diagnostic and calibration findings, and confirm which operations the repair facility will perform in house."
     );
   }
 
@@ -935,22 +933,19 @@ function buildResolutionSection(
   const labor = records.filter((record) => themeOf(record.finding) === "labor");
   if (parts.length && labor.length) {
     steps.push(
-      "Address parts type separately from labor. The two turn on different evidence — a parts-type question turns on the position statement and the applicable disclosure rule, a labor question on documented procedure — and bundling them tends to stall both."
+      "Address parts type separately from labor. The two turn on different evidence — a parts-type question turns on the position statement and the applicable disclosure rule, a labor question on documented procedure — and reviewing them together tends to slow both."
     );
   }
 
   const unretrieved = records.filter((record) => !retrievedAuthority(record.finding));
   if (unretrieved.length) {
     steps.push(
-      `Obtain the supporting authority for the ${unretrieved.length} ${plural(unretrieved.length, "finding")} marked "verification required" before relying on ${unretrieved.length === 1 ? "it" : "them"} in a formal proceeding. Those findings state a documented difference between the two estimates; they do not yet carry a retrieved procedure or position statement.`
+      `Obtain the supporting authority for the ${unretrieved.length} ${plural(unretrieved.length, "finding")} marked "verification required" before relying on ${unretrieved.length === 1 ? "it" : "them"}. Those findings state a documented difference between the two estimates; they do not yet carry a retrieved procedure or position statement.`
     );
   }
 
   steps.push(
-    `Exchange the line list in the appendices with ${comparisonLabel}'s author and resolve the items that are not disputed in substance before the harder ones are reached. Correcting the mechanical items first narrows the dispute.`
-  );
-  steps.push(
-    "If agreement is not reached, the appraisal clause in the policy is the contractual mechanism for resolving a difference in the amount of loss."
+    `Share the line list in the appendices with ${comparisonLabel}'s author and reconcile the straightforward items first; resolving the mechanical items first narrows the remaining differences.`
   );
 
   return [{ kind: "steps", items: steps }];
@@ -1009,7 +1004,7 @@ function buildAuthoritiesSection(
   }
   blocks.push({
     kind: "note",
-    text: "Statutory and regulatory text should be verified as current before being relied upon in any formal proceeding.",
+    text: "Statutory and regulatory text should be verified as current before being relied upon.",
   });
   return blocks;
 }

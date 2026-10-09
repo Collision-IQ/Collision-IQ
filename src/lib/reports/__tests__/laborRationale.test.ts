@@ -366,3 +366,60 @@ describe("a blend of the same panel the matcher left unpaired", () => {
     expect(r.why).toContain("pays exactly half of ours (1.1 hr against 2.2 hr)");
   });
 });
+
+/**
+ * The forensic voice is shared with the vehicle owner's insurer (Forensic
+ * Estimate Analysis and the citation density pack), so it documents rather
+ * than argues. The dispute voice (appraisal dispute and customer reports)
+ * keeps its opinion. Owner's direction, 2026-10-09.
+ */
+describe("forensic voice is neutral; dispute voice keeps its opinion", () => {
+  const ADVOCACY = /\b(dispute|argue|therefore supported|ask the carrier|pays|leaves out|theirs|ours|their|our)\b/i;
+  const neutral = (ours: number, theirs: number | null, overrides: Partial<RationaleContext> = {}) =>
+    explain(ours, theirs, { voice: "forensic", ...overrides })!;
+
+  const cases: Array<[string, number, number | null]> = [
+    ["sublet markup", 172, 137],
+    ["in-process scan", 170, null],
+    ["window initialization", 174, null],
+    ["blend at half", 38, 33],
+    ["blend with no counterpart", 135, null],
+    ["masking per panel", 182, 145],
+    ["access R&I", 44, null],
+    ["feather/prime/block", 155, null],
+  ];
+  for (const [name, ours, theirs] of cases) {
+    it(`${name}: no advocacy wording in the forensic voice`, () => {
+      const r = neutral(ours, theirs);
+      expect(r.why).not.toMatch(ADVOCACY);
+      expect(r.settledBy).not.toMatch(ADVOCACY);
+    });
+  }
+
+  it("the sublet markup is a difference, and the carrier is not asked to justify anything", () => {
+    const r = neutral(172, 137);
+    expect(r.why).toContain("the difference is the markup alone.");
+    expect(r.settledBy).toContain("Each estimate's markup is its sublet handling allowance");
+  });
+
+  it("the blend states the references and where blend time is determined, without a verdict", () => {
+    const r = neutral(38, 33);
+    expect(r.why).toContain("Both estimates blend this panel.");
+    expect(r.why).toContain("The comparison estimate includes exactly half of the higher estimate's time (1.1 hr against 2.2 hr), consistent with a 50% formula");
+    expect(r.why).toContain("31.59% more time on average than a full refinish");
+    expect(r.why).toContain("blend time is determined by an evaluation at the vehicle rather than by a fixed percentage");
+  });
+
+  it("the window initialization on both estimates is described as agreed scope", () => {
+    const carrier = [...CARRIER, L(139, "Rpr", "Power Window Reset", 0.3)];
+    const r = explain(174, null, { voice: "forensic", lowerSheet: carrier })!;
+    expect(r.why).toContain("Both estimates include the window initialization, so both treat the procedure as required.");
+    expect(r.why).not.toMatch(/dispute/i);
+  });
+
+  it("the dispute voice is unchanged", () => {
+    expect(explain(172, 137)!.why).toContain("the dispute is the markup alone.");
+    expect(explain(38, 33)!.why).toContain("Blend time at the panel's full refinish time is therefore supported");
+    expect(explain(170, null)!.why).toContain("this scan exists to prepare for");
+  });
+});

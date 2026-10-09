@@ -364,7 +364,7 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
     grossMovement > 0 && grossMovement >= Math.max(netGap * 3, 500)
       ? `The two totals are close, but they are not built the same way. ` +
         `${money(grossMovement)} of category-level movement nets to a ${money(netGap)} difference in the total: ` +
-        `amounts were shifted between categories rather than simply removed. The category table and the findings ` +
+        `the same total is distributed differently across categories. The category table and the findings ` +
         `below show where. A comparison of the two bottom lines alone would miss this.`
       : null;
 
@@ -377,9 +377,11 @@ export function describeReconciliation(reconciliation: ForensicReconciliation): 
     .map((row) => {
       const delta = (row.lowerRate ?? 0) - (row.higherRate ?? 0);
       return (
+        // Neutral: the report is shared with the insurer, so a rate difference
+        // is stated as a difference, never as a "reduction" one side applied.
         `${row.category}: ${money(row.higherRate!)}/hr on the higher estimate against ` +
-        `${money(row.lowerRate!)}/hr on the comparison — a ${money(delta)}/hr ` +
-        `${delta > 0 ? "increase" : "reduction"} applied across every hour in the category.`
+        `${money(row.lowerRate!)}/hr on the comparison — a ${money(Math.abs(delta))}/hr ` +
+        `difference that applies across every hour in the category.`
       );
     });
 

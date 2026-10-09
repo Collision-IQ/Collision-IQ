@@ -131,6 +131,15 @@ interface Voice {
   /** "our L12" / "L12 on the higher estimate" */
   hiRef: (lines: Array<number | null>) => string;
   loRef: (lines: Array<number | null>) => string;
+  /**
+   * The forensic voice is shared with the vehicle owner's insurer, so it
+   * documents rather than argues: "includes" not "pays", "the difference" not
+   * "the dispute", and no conclusion about which figure is right. The
+   * dispute voice (internal and customer reports) keeps its opinion.
+   */
+  neutral: boolean;
+  /** "pays" / "includes" */
+  pays: string;
 }
 
 const refs = (lines: Array<number | null>) =>
@@ -148,6 +157,8 @@ function voiceFor(voice: RationaleVoice): Voice {
       lo: "theirs",
       hiRef: (lines) => (refs(lines) ? `our ${refs(lines)}` : "our line"),
       loRef: (lines) => (refs(lines) ? `their ${refs(lines)}` : "their line"),
+      neutral: false,
+      pays: "pays",
     };
   }
   return {
@@ -157,6 +168,8 @@ function voiceFor(voice: RationaleVoice): Voice {
     lo: "the comparison estimate",
     hiRef: (lines) => (refs(lines) ? `${refs(lines)} on the higher estimate` : "the higher estimate's line"),
     loRef: (lines) => (refs(lines) ? `${refs(lines)} on the comparison estimate` : "the comparison estimate's line"),
+    neutral: true,
+    pays: "includes",
   };
 }
 
@@ -476,13 +489,14 @@ const SUBLET_PRICE: Build = (ctx, v) => {
     Math.abs(bh - bl) < 0.01
       ? `and the base charge is the same (${money(bh)}), so the markup is the entire difference.`
       : bh < bl
-        ? `and before markup ${v.hiSheet === "our sheet" ? "ours" : "the higher estimate's"} is ${money(bh)}, below ${ctx.voice === "dispute" ? "their" : "the comparison estimate's"} ${money(bl)}: the dispute is the markup alone.`
+        ? `and before markup ${v.hiSheet === "our sheet" ? "ours" : "the higher estimate's"} is ${money(bh)}, below ${ctx.voice === "dispute" ? "their" : "the comparison estimate's"} ${money(bl)}: ${v.neutral ? "the difference is" : "the dispute is"} the markup alone.`
         : `and the base charge differs too: ${money(bh)} against ${money(bl)} before markup.`;
   return {
     key: "sublet_price",
     why: `The same sublet, priced differently: ${money(head.price)} against ${money(lo.price)} for "${withoutMarkup(head.desc)}". ${markupClause}, ${baseClause} Neither difference is a disagreement about whether the work is done.`,
-    settledBy:
-      "The vendor's invoice settles the base charge. The markup is the shop's posted sublet handling charge (sourcing, scheduling, transport and responsibility for the vendor's work); ask the carrier for the basis of the markup it applies if it is lower.",
+    settledBy: v.neutral
+      ? "The vendor's invoice documents the base charge. Each estimate's markup is its sublet handling allowance (sourcing, scheduling, transport and responsibility for the vendor's work); the basis each estimate uses for its markup documents the rest."
+      : "The vendor's invoice settles the base charge. The markup is the shop's posted sublet handling charge (sourcing, scheduling, transport and responsibility for the vendor's work); ask the carrier for the basis of the markup it applies if it is lower.",
   };
 };
 
@@ -498,7 +512,7 @@ const SCAN: Build = (ctx, v) => {
     what =
       "The in-process scan runs after the repairs and before calibration: a calibration will not run, or will not hold, with active codes, and codes set while modules were unplugged during the repair have to be read, cleared and confirmed first.";
     if (theirCalibrations.length) {
-      what += ` ${v.loSheet[0].toUpperCase()}${v.loSheet.slice(1)} pays the calibrations (${refs(theirCalibrations.map((l) => l.line))}) this scan exists to prepare for${
+      what += ` ${v.loSheet[0].toUpperCase()}${v.loSheet.slice(1)} ${v.pays} the calibrations (${refs(theirCalibrations.map((l) => l.line))}) ${v.neutral ? "that this scan precedes" : "this scan exists to prepare for"}${
         theirScans.length ? `, and its own pre- and post-repair scans (${refs(theirScans.map((l) => l.line))}) bracket the repair but not the calibration step` : ""
       }.`;
     }
@@ -608,7 +622,7 @@ const INITIALIZATION: Build = (ctx, v) => {
           : `${hr(totalHours(l))} of in-house labor`;
     return {
       key: "initialization",
-      why: `Both sheets pay the window initialization, so the requirement is not in dispute. ${v.Hi} bills it as ${how(head)}; ${v.loRef([theirs.line])} ("${withoutMarkup(theirs.desc)}") bills it as ${how(theirs)}. The difference is who performs it and at what charge.`,
+      why: `${v.neutral ? "Both estimates include the window initialization, so both treat the procedure as required." : "Both sheets pay the window initialization, so the requirement is not in dispute."} ${v.Hi} bills it as ${how(head)}; ${v.loRef([theirs.line])} ("${withoutMarkup(theirs.desc)}") bills it as ${how(theirs)}. The difference is who performs it and at what charge.`,
       settledBy:
         "The vendor's invoice if it is sublet, or the time the procedure takes in-house; the initialization procedure in the OEM repair manual says what is performed (each window, by its own switch).",
     };
@@ -631,7 +645,7 @@ const INITIALIZATION: Build = (ctx, v) => {
     ? ` ${cap(v.loSheet)} writes the same trigger (${refs(theirTriggers.slice(0, 3).map((l) => l.line))}: ${theirTriggers
         .slice(0, 3)
         .map((l) => `${l.oper ? `${l.oper} ` : ""}${withoutMarkup(l.desc)}`)
-        .join("; ")}) without the step that follows it.`
+        .join("; ")}) ${v.neutral ? "and does not write the initialization that follows it" : "without the step that follows it"}.`
     : "";
   // Their own glass, run-channel or regulator R&I triggers the requirement;
   // a battery disconnect alone is a weaker, maker-specific trigger.
@@ -720,7 +734,7 @@ const BLEND: Build = (ctx, v) => {
         return beside.length
           ? ` ${cap(v.loRef(beside.slice(0, 3).map((l) => l.line)))} refinish${beside.length === 1 ? "es" : ""} ${[
               ...new Set(beside.slice(0, 3).map((l) => `${withoutMarkup(l.desc)}${l.section ? ` (${l.section.toLowerCase()})` : ""}`)),
-            ].join(", ")} beside this panel and blend${beside.length === 1 ? "s" : ""} nothing into it.`
+            ].join(", ")} beside this panel and blend${beside.length === 1 ? "s" : ""} ${v.neutral ? "no adjacent panel into it" : "nothing into it"}.`
           : "";
       })()}`,
       settledBy: BLEND_SETTLED_BY,
@@ -734,7 +748,9 @@ const BLEND: Build = (ctx, v) => {
   return {
     key: "blend",
     why: halfOfOurs
-      ? `Both sheets blend this panel, so the need is agreed. ${theirsAt} pays exactly half of ${v.Hi === "Ours" ? "ours" : "the higher estimate's"} (${hr(theirs)} against ${hr(ours)}): the 50% formula, against the panel's full refinish time on ${v.hiSheet}. ${premise} Blend time at the panel's full refinish time is therefore supported, and it is settled at the vehicle, not by a percentage.`
+      ? v.neutral
+        ? `Both estimates blend this panel. ${theirsAt} includes exactly half of the higher estimate's time (${hr(theirs)} against ${hr(ours)}), consistent with a 50% formula, where the higher estimate carries the panel's full refinish time. ${premise} Under these references, blend time is determined by an evaluation at the vehicle rather than by a fixed percentage.`
+        : `Both sheets blend this panel, so the need is agreed. ${theirsAt} pays exactly half of ${v.Hi === "Ours" ? "ours" : "the higher estimate's"} (${hr(theirs)} against ${hr(ours)}): the 50% formula, against the panel's full refinish time on ${v.hiSheet}. ${premise} Blend time at the panel's full refinish time is therefore supported, and it is settled at the vehicle, not by a percentage.`
       : `Both sheets blend this panel; ${v.Hi === "Ours" ? "ours" : "the higher estimate"} carries ${hr(ours)} against ${hr(theirs)}. ${premise}`,
     settledBy: BLEND_SETTLED_BY,
   };
@@ -749,7 +765,7 @@ const FEATHER_PRIME_BLOCK: Build = (ctx, v) => {
   const tie = repair
     ? ` It follows from ${v.hiRef([repair.line])} (${repair.oper ? `${repair.oper} ` : ""}${repair.desc}, ${hr(repair.hours)}).${
         theirRepair
-          ? ` ${v.loRef([theirRepair.line])} repairs the same panel (${hr(theirRepair.hours)}), so the two sheets agree the panel takes body work; what ${v.loSheet} leaves out is the step between that body work and paint.`
+          ? ` ${v.loRef([theirRepair.line])} repairs the same panel (${hr(theirRepair.hours)}), so the two sheets agree the panel takes body work; ${v.neutral ? `the step between that body work and paint is not written on ${v.loSheet}` : `what ${v.loSheet} leaves out is the step between that body work and paint`}.`
           : ""
       }`
     : "";
@@ -767,7 +783,7 @@ const MASKING: Build = (ctx, v) => {
   const panels = perPanel && perPanel > 0 ? Math.round(totalHours(head) / perPanel) : null;
   const countClause =
     ctx.lower && perPanel && panels && panels > 1
-      ? ` ${v.Hi} is ${hr(perPanel)} per panel across ${panels} panels (${hr(totalHours(head))}); ${v.lo} pays ${hr(totalHours(ctx.lower))}, which covers ${
+      ? ` ${v.Hi} is ${hr(perPanel)} per panel across ${panels} panels (${hr(totalHours(head))}); ${v.lo} ${v.pays} ${hr(totalHours(ctx.lower))}, which covers ${
           Math.max(1, Math.round(totalHours(ctx.lower) / perPanel))
         } at that rate. Count the refinished panels that have an opening or jamb on both sheets.`
       : "";
@@ -914,7 +930,7 @@ const TEST_FIT: Build = (ctx, v) => {
       const part = { ...head, desc: head.desc.replace(RE.testFit, "").replace(/^[\s-]+/, "") };
       const replaced = ctx.lowerSheet.find((l) => op(l) === "repl" && sharesPanel(part, l));
       return replaced && !ctx.lower
-        ? ` ${cap(v.loRef([replaced.line]))} replaces the ${withoutMarkup(replaced.desc)} without it.`
+        ? ` ${cap(v.loRef([replaced.line]))} replaces the ${withoutMarkup(replaced.desc)}${v.neutral ? " and does not write a test fit" : " without it"}.`
         : "";
     })()}`,
     settledBy: `${guideName(ctx.higherPlatform)} (what a replacement time includes); photos of the part test-fitted.`,
@@ -994,7 +1010,7 @@ const ACCESS: Build = (ctx, v) => {
   if (!access) return null;
   const panel = theirPanelWork(ctx, access.panel);
   const concession = panel
-    ? ` ${cap(v.loRef([panel.line]))} (${panel.oper ? `${panel.oper} ` : ""}${panel.desc}${totalHours(panel) > 0 ? `, ${hr(totalHours(panel))}` : ""}) pays the work this R&I gives access to.${
+    ? ` ${cap(v.loRef([panel.line]))} (${panel.oper ? `${panel.oper} ` : ""}${panel.desc}${totalHours(panel) > 0 ? `, ${hr(totalHours(panel))}` : ""}) ${v.pays} the work this R&I gives access to.${
         op(panel) === "repl"
           ? ` Whether that replacement time already includes this R&I is a question for the included-operations list in ${theGuide(ctx.higherPlatform)}; check it before arguing.`
           : ` ${rule}`
@@ -1066,9 +1082,9 @@ const DAMAGE_SCOPE: Build = (ctx, v) => {
         key: "damage_scope",
         why: `This line is not missing from ${v.loSheet}. ${cap(v.loRef([twin.line]))} (${twin.oper} ${twin.desc}) is the only ${twin.oper} line on that side under ${head.section}: the same panel written in other words ("${head.desc}" against "${twin.desc}"). ${
           same
-            ? `Both sheets write ${ours}; there is no difference to argue on this panel.`
+            ? `Both sheets write ${ours}; ${v.neutral ? "the two estimates agree on this panel" : "there is no difference to argue on this panel"}.`
             : twin.hours + twin.paintHours > head.hours + head.paintHours
-              ? `${cap(v.lo)} writes more (${theirs} against ${ours}); this panel is not one to argue.`
+              ? `${cap(v.lo)} writes more (${theirs} against ${ours})${v.neutral ? "." : "; this panel is not one to argue."}`
               : `${v.Hi} writes ${ours} against ${theirs}; the difference is repair time on one panel, not a missing repair.`
         }`,
         settledBy: `Read the two lines side by side under ${head.section}; if the time differs, photos of the panel's damage with its size and depth marked.`,
@@ -1078,7 +1094,7 @@ const DAMAGE_SCOPE: Build = (ctx, v) => {
   if (op(head) === "rpr" ? totalHours(head) < 1 : totalHours(head) < 1 && head.price < 100) return null;
   return {
     key: "damage_scope",
-    why: `This is not a time disagreement: no line on ${v.loSheet} ${op(head) === "rpr" ? "repairs" : "replaces"} the ${head.desc} under that name${(() => {
+    why: `${v.neutral ? "This is not a difference in time" : "This is not a time disagreement"}: no line on ${v.loSheet} ${op(head) === "rpr" ? "repairs" : "replaces"} the ${head.desc} under that name${(() => {
       const near = ctx.lowerSheet.filter((l) => ["rpr", "repl"].includes(op(l)) && sharesPanel(head, l));
       return near.length
         ? `, unless ${near
@@ -1111,7 +1127,9 @@ const PAIRED_TIME: Build = (ctx, v) => {
       why: `Same operation, more time on ${v.hiSheet}: ${hr(ours)} against ${hr(theirs)}. ${
         op(head) === "rpr" || op(lo) === "rpr"
           ? "Repair time is not a database time; it is each appraiser's judgment of how long the damage takes to fix, so the difference is a difference in what each one saw."
-          : "A manual line is estimator judgment, not a database time, so each side has to show the basis for its number."
+          : v.neutral
+            ? "A manual line is estimator judgment, not a database time, so the basis for each figure is documented by the estimate that writes it."
+            : "A manual line is estimator judgment, not a database time, so each side has to show the basis for its number."
       }`,
       settledBy:
         "Photos of the damage with its size and depth marked, the repair method (pull, heat, fill), and a reinspection with the panel exposed; a documented time study if it remains open.",

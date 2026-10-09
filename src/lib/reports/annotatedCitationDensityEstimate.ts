@@ -4650,7 +4650,7 @@ export function buildRequiredEstimatorDeltaFindings(
         safetyImpact: "low",
         priority: "medium",
         currentSupportSummary: `Refinish correction row found: ${rowText}.`,
-        missingProofSummary: "Finish sand and polish, denib and polish, color sand and buff, sand and polish, or post-refinish correction is a refinish-related operation that needs CCC/MOTOR/P-page/database support when capped, limited, or disputed.",
+        missingProofSummary: "Finish sand and polish, denib and polish, color sand and buff, sand and polish, or post-refinish correction is a refinish-related operation that needs CCC/MOTOR/P-page/database support when it is capped, limited or questioned.",
         recommendedNextAction: "Attach CCC/MOTOR/P-page/database support or label the item NEEDS P-PAGE / NEEDS DATABASE SUPPORT before treating it as supplement-ready.",
         missingAuthorityTypes: ["CCC/MOTOR/P-page support", "database support"],
         amountImpact: anchor.price ?? null,
@@ -6425,7 +6425,7 @@ function emitTotalsDeltaFindings(
             : "medium",
         currentSupportSummary:
           delta.kind === "category_only_on_lower"
-            ? `${delta.summary} (compared against ${deltaMatch.comparisonName}). This estimate has no row for that category, so this note is anchored to the totals block for placement only — no amount on this estimate is being disputed by this finding.`
+            ? `${delta.summary} (compared against ${deltaMatch.comparisonName}). This estimate has no row for that category, so this note is anchored to the totals block for placement only — this finding does not question any amount on this estimate.`
             : `${delta.summary} (compared against ${deltaMatch.comparisonName}).`,
         missingProofSummary:
           "This difference comes from the two estimates' ESTIMATE TOTALS blocks — it is estimate-difference evidence, not proof of the correct rate or hours. Rates and category subtotals are typically the largest drivers of the total cost gap.",

@@ -115,6 +115,43 @@ describe("delta forensic report model", () => {
     expect(text).toMatch(/initial shop estimate/i);
   });
 
+  it("is shared with the insurer, so it documents and reconciles without advocacy", () => {
+    // Owner's direction, 2026-10-09: the citation density pack goes to the
+    // vehicle owner's insurer. The appraisal clause and dispute language
+    // belong to the appraisal dispute report, not here.
+    const model = buildDeltaForensicReportModel(
+      baseInput({
+        anchored: [
+          {
+            markerNumber: 1,
+            finding: makeFinding({
+              operationLabel: "Missing from comparison estimate: Calibrate front radar sensor",
+              category: "adas_calibration",
+              deltaClass: "PRESENT_ONLY_IN_SOURCE",
+              impact: { dollarImpact: 390, safetyImpact: "high", supplementPriority: "high" },
+            }),
+          },
+          {
+            markerNumber: 2,
+            finding: makeFinding({
+              id: "citation-density-2",
+              operationLabel: "Missing from comparison estimate: RT Rocker rail section",
+              category: "structural_repair",
+              deltaClass: "PRESENT_ONLY_IN_SOURCE",
+              impact: { dollarImpact: 600, safetyImpact: "high", supplementPriority: "high" },
+            }),
+          },
+        ],
+      })
+    );
+    const text = readableText(model.sections);
+    expect(text).not.toMatch(/appraisal clause/i);
+    expect(text).not.toMatch(/\b(disputed?|litigation|unfunded|formal proceeding)\b/i);
+    expect(model.sections.map((section) => section.title)).toEqual(
+      expect.arrayContaining(["Notes for the vehicle owner", "Path to reconciliation"])
+    );
+  });
+
   it("emits none of the release gate's banned phrases", () => {
     const model = buildDeltaForensicReportModel(
       baseInput({

@@ -759,40 +759,36 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     }
   }
 
-  // Owner guidance
-  writer.heading("What the vehicle owner should know");
-  writer.bullet("You choose the repair facility. Neither carrier nor shop can require you to use a particular one.");
+  // Owner notes and the path to reconciliation.
+  //
+  // This report is shared with the vehicle owner's insurer, so it documents
+  // rather than advocates: no rights language aimed at the carrier, no
+  // appraisal clause, no "disputed" or "denied". The appraisal dispute report
+  // and the customer report carry the opinion and the owner's options.
+  writer.heading("Notes for the vehicle owner");
   writer.bullet(
-    "A supplement is a stage in a claim, not a verdict. Much of what is disputed here becomes visible once the " +
-      "damaged panels come off."
+    "A supplement is a normal stage in a claim. Much of the difference between these estimates is the kind that " +
+      "becomes clear once the damaged panels come off."
   );
   writer.bullet(
-    // No policy is among the documents compared, so whether it has an
-    // appraisal clause is not known here (RO 22120 review).
-    "If the two sides cannot agree on the amount, check whether your policy has an appraisal clause. Where it " +
-      "does, it applies to disputes about the amount of loss, not about whether something is covered. Read your " +
-      "policy for the exact procedure and any time limits before invoking it."
-  );
-  writer.bullet(
-    "Ask in writing that any electronic safety systems disturbed by the repair be calibrated afterwards, and that " +
-      "you receive the post-repair scan report."
+    "The post-repair scan report and any calibration reports document that the vehicle's electronic safety systems " +
+      "were checked after the repair; keep a copy."
   );
   writer.bullet("Keep every document: both estimates, all supplements, scan reports and parts invoices.");
 
-  writer.heading("Recommended path to resolution");
+  writer.heading("Path to reconciliation");
   writer.bullet(
-    "Reinspection with both appraisers present, with the damaged assemblies removed. The largest items are best " +
-      "settled at the vehicle rather than on paper."
+    "Reinspection with both appraisers present, with the damaged assemblies removed. The largest differences are " +
+      "most efficiently reconciled at the vehicle rather than on paper."
   );
   writer.bullet(
-    "Correct any internal inconsistencies on either document first — a part purchased with no labour to install " +
-      "it, or an operation denied alongside another that requires it. These narrow the dispute before the harder " +
-      "items are reached."
+    "Reconcile any internal inconsistencies on either document first — a part priced with no labor to install it, " +
+      "or an operation not written alongside another that requires it. This narrows the remaining differences."
   );
-  writer.bullet("Attach the OEM repair procedure for the disputed operations to support labour class and hours.");
+  writer.bullet("Attach the OEM repair procedure for the operations that differ, to document labor class and hours.");
   writer.bullet(
-    "Address parts type separately from labour. Bundling a small parts-type question with a large labour question " +
-      "tends to stall both."
+    "Address parts type separately from labor. The two turn on different evidence, and reviewing them together " +
+      "tends to slow both."
   );
 
   // Authorities
@@ -800,8 +796,8 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   if (input.authorities.length === 0) {
     writer.paragraph(
       "No retrieved authority is attached to a specific finding above. Every finding therefore rests on the two " +
-        "estimates themselves. Where a finding needs external support to be relied upon in a formal proceeding, " +
-        "that support must be obtained and attached before it is used.",
+        "estimates themselves. Where a finding needs external support (an OEM procedure, position statement " +
+        "or guide reference), that support is attached before the finding is relied upon.",
       { color: MUTED }
     );
   } else {
@@ -870,8 +866,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
   }
   writer.paragraph(
     "The two estimates themselves are the source of every dollar figure, part number, hour and printed note in " +
-      "this report. Statutory and regulatory text should be verified as current before being relied upon in any " +
-      "formal proceeding.",
+      "this report. Statutory and regulatory text should be verified as current before being relied upon.",
     { size: 8.4, color: MUTED }
   );
 
