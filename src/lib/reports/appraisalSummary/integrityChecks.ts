@@ -13,6 +13,7 @@ import { shopRateFor } from "./gapLedger";
 import { classifyNonLabor, type LineReconciliation } from "./nonLaborBuckets";
 import { isNonOemLine } from "./partTypeEvidence";
 import { round2, type Estimate, type EstimateLine, type LaborCat } from "./types";
+import { samePart } from "../laborRationale";
 
 export type FlagKind =
   | "carrierOnlyHighDollar"
@@ -24,7 +25,10 @@ export type FlagKind =
   | "reuseMismatch"
   | "laborCategoryMismatch"
   | "duplicateOperation"
-  | "zeroPricedCarrierLine";
+  | "zeroPricedCarrierLine"
+  | "blendShareDouble"
+  | "removeAndAlignSamePart"
+  | "testFitWithoutReplacement";
 
 export interface Flag {
   kind: FlagKind;
@@ -357,6 +361,66 @@ export function integrityChecks(
           : `The carrier wrote "${c.desc}" (L${c.line}) with no price; ours is ${money(s.price!)} (L${s.line}). Ask them to price it.`,
       });
     }
+  }
+  flags.push(...ownSheetJudgmentChecks(shop, carrier));
+  return flags;
+}
+
+const isOp = (l: EstimateLine, op: string) => (l.oper ?? "").trim().toLowerCase() === op;
+
+/**
+ * Judgment calls on our own sheet the carrier will challenge first, found by
+ * reading both sheets (RO 22319 opinion review). Each is a prompt to confirm,
+ * never a finding that our line is wrong.
+ */
+function ownSheetJudgmentChecks(shop: Estimate, carrier: Estimate): Flag[] {
+  const flags: Flag[] = [];
+  const paint = (l: EstimateLine) => l.paintHours ?? 0;
+
+  // 9. Every blend that meets theirs is exactly twice theirs: a blend-share
+  //    setting, not a scope difference (fender 2.2 / 1.1, hinge pillar 2.0 /
+  //    1.0, rocker 2.2 / 1.1 on RO 22319).
+  const blendPairs = shop.lines
+    .filter((l) => isOp(l, "blnd") && paint(l) > 0)
+    .map((ours) => ({ ours, theirs: carrier.lines.find((c) => isOp(c, "blnd") && paint(c) > 0 && samePart(ours.desc, c.desc)) }))
+    .filter((p): p is { ours: EstimateLine; theirs: EstimateLine } => Boolean(p.theirs));
+  if (blendPairs.length >= 2 && blendPairs.every((p) => Math.abs(paint(p.ours) / paint(p.theirs) - 2) < 0.1)) {
+    flags.push({
+      kind: "blendShareDouble",
+      side: "shop",
+      lines: { shop: blendPairs.map((p) => p.ours.line), carrier: blendPairs.map((p) => p.theirs.line) },
+      text: `On every panel both sheets blend, ours is exactly twice theirs: ${blendPairs
+        .map((p) => `${p.ours.desc} ${paint(p.ours).toFixed(1)} hr (L${p.ours.line}) vs ${paint(p.theirs).toFixed(1)} hr (L${p.theirs.line})`)
+        .join("; ")}. That is the blend share our profile applies, not a scope difference. Confirm the share before arguing blends, or argue the size of the blend area instead.`,
+    });
+  }
+
+  // 10. The same part written as R&I and as Align on our sheet: setting it on
+  //     reinstall is hard to separate from its R&I (RO 22319: R&I and Algn RT
+  //     Striker on each door).
+  for (const align of shop.lines.filter((l) => isOp(l, "algn") && (l.hours ?? 0) > 0)) {
+    const rAndI = shop.lines.find((l) => isOp(l, "r&i") && samePart(l.desc, align.desc) && Math.abs(l.line - align.line) <= 3);
+    if (!rAndI) continue;
+    flags.push({
+      kind: "removeAndAlignSamePart",
+      side: "shop",
+      lines: { shop: [rAndI.line, align.line] },
+      text: `Our L${rAndI.line} (R&I ${rAndI.desc}) and L${align.line} (Algn ${align.desc}) are written on the same part. Keep one, or note on the align line why it is more than setting the part on reinstall.`,
+    });
+  }
+
+  // 11. A test fit of a part neither sheet replaces.
+  for (const fit of shop.lines.filter((l) => /\btest\s+fit|\btrial\s+fit/i.test(l.desc))) {
+    const part = fit.desc.replace(/^.*?\b(?:test|trial)\s+fit\s*[-:]?\s*/i, "");
+    if (!part) continue;
+    const replaced = [...shop.lines, ...carrier.lines].some((l) => isOp(l, "repl") && samePart(part, l.desc));
+    if (replaced) continue;
+    flags.push({
+      kind: "testFitWithoutReplacement",
+      side: "shop",
+      lines: { shop: [fit.line] },
+      text: `Our L${fit.line} "${fit.desc}" test-fits a part neither sheet replaces. Name what is actually fitted, or remove the line.`,
+    });
   }
   return flags;
 }

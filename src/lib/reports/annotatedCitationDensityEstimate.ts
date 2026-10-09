@@ -16,7 +16,7 @@ import {
   type ForensicReconciliation,
 } from "./forensicEstimateAnalysis";
 import { buildForensicReportPdf, resolveExportScrub, type ForensicNoCounterpartRow } from "./forensicReportRenderer";
-import { explainLaborDifference, makeFromVehicleText, type RationaleLine } from "./laborRationale";
+import { explainLaborDifference, makeFromVehicleText, type CaseDocument, type RationaleLine } from "./laborRationale";
 import { extractVehicleIdentityFromText } from "@/lib/ai/vehicleContext";
 import { buildPlainSummaryModel, renderPlainSummaryPdf, SummaryLintError } from "./plainLanguageSummary";
 import { LedgerNotClosedError, carrierPartlyUnread } from "./appraisalSummary/gapLedger";
@@ -1043,6 +1043,8 @@ export type AnnotatedEstimateFindingGeneratorContext = {
      * must never be described to the reader as a scanned document. */
     textLayerReliable?: boolean;
   }>;
+  /** The case file's non-estimate documents; requirements they print are quoted (laborRationale.ts). */
+  caseDocuments?: CaseDocument[];
   /** Authorities already resolved by the report's research pass (RIR
    * snapshot) — attached to matching delta findings by type so a scan-hour
    * reduction carries the retrieved scan position statement instead of
@@ -2059,6 +2061,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   canonicalDeltaSet?: CanonicalDeltaSet;
   /** RIR-resolved research authorities, attached to matching delta findings by type (O-5). */
   resolvedAuthorities?: AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"];
+  /**
+   * The case file's non-estimate documents (ADAS report, OEM procedures, scan
+   * reports). A requirement they print is quoted as the authority that
+   * settles a difference (laborRationale.ts); nothing else reads them here.
+   */
+  caseDocuments?: CaseDocument[];
   /** Decoded make + jurisdiction gating the authority attach (D-4). */
   vehicleMake?: string | null;
   jurisdiction?: string | null;
@@ -2552,6 +2560,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       jurisdiction: params.jurisdiction,
       authorityTrace: params.authorityTrace,
       canonicalDeltaSet: params.canonicalDeltaSet,
+      caseDocuments: params.caseDocuments,
     });
     // The structured delta path may append measured engine-row anchors for
     // rows the visual-line layer failed to anchor; index them so the renderer
@@ -3596,6 +3605,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           identity: identity.filter((row) => /^(Vehicle|RO number|Claim number|Insurer)$/i.test(row.label)),
           generatedAt: new Date().toISOString(),
           scrub: resolveExportScrub(request.redactSensitive !== false, redactionScope),
+          caseDocuments: params.caseDocuments,
         });
         if (adapted.ok) {
           const appraisalModel = buildPlainSummaryModel(adapted.input);
@@ -6074,6 +6084,7 @@ function emitStructuredLineItemDeltaFindings(
       vehicle: rationaleVehicle,
       make: rationaleMake,
       voice: "forensic",
+      caseDocuments: context.caseDocuments,
     }) ?? undefined;
 
   let deltasTruncated = 0;

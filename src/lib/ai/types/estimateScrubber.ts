@@ -230,7 +230,7 @@ export type CitationDensityFinding = {
    * reports/laborRationale.ts from the two sheets' own lines; absent when no
    * rule recognises the operation.
    */
-  laborRationale?: { key: string; why: string; settledBy: string };
+  laborRationale?: { key: string; why: string; settledBy: string; caseEvidence?: { document: string; quote: string }; concededBy?: number[] };
   missingProofSummary: string;
   recommendedNextAction: string;
   supplementReadyLanguage?: string;

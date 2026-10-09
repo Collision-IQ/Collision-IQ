@@ -62,6 +62,19 @@ export interface RationaleContext {
   make?: string | null;
   /** "dispute": ours / theirs. "forensic": the higher / comparison estimate. */
   voice: RationaleVoice;
+  /**
+   * The case file's other documents (an ADAS report, OEM procedures, scan
+   * reports), never the two estimates. A requirement printed in one of them
+   * is quoted verbatim as the authority that settles the item: uploaded case
+   * evidence is tier 1 on the evidence ladder.
+   */
+  caseDocuments?: CaseDocument[];
+}
+
+/** One uploaded case document, by the name the reader knows it by. */
+export interface CaseDocument {
+  name: string;
+  text: string;
 }
 
 export type RationaleKey =
@@ -96,6 +109,10 @@ export interface LaborRationale {
   why: string;
   /** What settles it: the authority to attach, and the completion proof. */
   settledBy: string;
+  /** The requirement as a case document prints it, quoted verbatim. */
+  caseEvidence?: { document: string; quote: string };
+  /** Lines on the lower estimate that trigger the requirement or concede the point. */
+  concededBy?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -562,13 +579,14 @@ const CALIBRATION: Build = (ctx, v) => {
     : "";
   return {
     key: "calibration",
+    concededBy: twin && twin.line !== null ? [twin.line] : undefined,
     why: `${subject.what}${twinClause}`,
     settledBy: `The calibration requirement in ${OEM_MANUAL}, tied to the repair line that triggers it, and the calibration report (pre- and post-aim values) as completion proof.`,
   };
 };
 
 /** Work that unplugs or removes the window motor: the door itself, its glass, regulator, motor or trim panel. */
-const WINDOW_TRIGGER = /\bdoor\s+(assy|assembly|glass|trim|panel)\b|\b(window\s+)?(regulator|motor)\b|\br&i\s+door\b|\bdoor\s*$/i;
+const WINDOW_TRIGGER = /\bdoor\s+(assy|assembly|glass|trim|panel)\b|\b(window\s+)?(regulator|motor)\b|\brun\s+channel\b|\bglass\s+run\b|\br&i\s+door\b|\bdoor\s*$/i;
 
 const INITIALIZATION: Build = (ctx, v) => {
   const head = ctx.higher[0];
@@ -593,8 +611,15 @@ const INITIALIZATION: Build = (ctx, v) => {
         .map((l) => `${l.oper ? `${l.oper} ` : ""}${withoutMarkup(l.desc)}`)
         .join("; ")}) without the step that follows it.`
     : "";
+  // Their own glass, run-channel or regulator R&I triggers the requirement;
+  // a battery disconnect alone is a weaker, maker-specific trigger.
+  // Door work only: a sliding back glass has its own regulator and its own procedure.
+  const theirWindowWork = theirTriggers.filter(
+    (l) => WINDOW_TRIGGER.test(l.desc) && !RE.battery.test(l.desc) && /\bdoor\b|\brun\s+channel\b|\bglass\s+run\b/i.test(`${l.section ?? ""} ${l.desc}`)
+  );
   return {
     key: "initialization",
+    concededBy: isWindow ? theirWindowWork.map((l) => l.line).filter((n): n is number => n !== null) : undefined,
     why: `${what}${tie}${theirTie}`,
     settledBy: `The initialization procedure in ${OEM_MANUAL} (it states when initialization is required), and a note on the repair order that it was performed and tested.`,
   };
@@ -1075,6 +1100,93 @@ const RULES: Build[] = [
  * prints the sheets' figures alone rather than a generic sentence.
  */
 export function explainLaborDifference(ctx: RationaleContext): LaborRationale | null {
+  const result = explainFromSheets(ctx);
+  // A price-only difference is not a question of whether the work is required.
+  if (!result || !ctx.caseDocuments?.length || result.key === "sublet_price") return result;
+  const evidence = findCaseRequirement(ctx.higher[0], result.key, ctx.caseDocuments);
+  if (!evidence) return result;
+  return {
+    ...result,
+    caseEvidence: evidence,
+    settledBy: `In the case file, ${evidence.document}: "${evidence.quote}" ${result.settledBy}`,
+  };
+}
+
+/**
+ * The requirement sentences a case document can print for an operation, by
+ * what the line is. Each pattern finds the sentence that STATES the
+ * requirement (a "must", a "necessitates", a "perform … if"), never a mention.
+ */
+const CASE_REQUIREMENTS: Array<{ applies: (head: RationaleLine, key: RationaleKey) => boolean; pattern: RegExp | RegExp[] }> = [
+  {
+    applies: (head, key) => key === "initialization" && /\bwindow\b/i.test(head.desc),
+    pattern: /power window control system must be initiali[sz]ed|window[^.]{0,120}must be initiali[sz]ed/i,
+  },
+  {
+    applies: (head) => RE.radar.test(head.desc),
+    pattern: /(millimeter wave radar|front radar)[^.]{0,160}necessitates[^.]{0,200}|(millimeter wave radar|front radar)[^.]{0,160}must be (adjusted|calibrated|aimed)/i,
+  },
+  {
+    applies: (head) => RE.sas.test(head.desc),
+    pattern: /steering angle sensor[^.]{0,160}(necessitates|must be (initiali[sz]ed|calibrated))[^.]{0,200}/i,
+  },
+  {
+    applies: (head) => RE.occupant.test(head.desc),
+    pattern: /perform the zero point calibration[^.]{0,120}if any of the following[^.]{0,400}|seat weight sensor[^.]{0,160}necessitates[^.]{0,200}/i,
+  },
+  {
+    applies: (head, key) => key === "scan",
+    pattern: /electrical and electronic systems? necessitates[^.]{0,300}collision damage|pre[- ]?(and|&) post[- ]?(repair )?scans?[^.]{0,120}(required|must|necessitates)/i,
+  },
+  {
+    applies: (head) => RE.cleanAdhesive.test(head.desc),
+    // Most specific first: tape residue on the body is what a "clean adhesive" line pays.
+    pattern: [/wipe off any tape adhesive residue with cleaner/i, /remove any remaining butyl tape[^.]{0,80}/i],
+  },
+];
+
+/** The first case document that prints the requirement, with the sentence quoted as printed (whitespace collapsed). */
+function findCaseRequirement(
+  head: RationaleLine,
+  key: RationaleKey,
+  documents: CaseDocument[]
+): { document: string; quote: string } | null {
+  const rules = CASE_REQUIREMENTS.filter((rule) => rule.applies(head, key));
+  const patterns = rules.flatMap((rule) => (Array.isArray(rule.pattern) ? rule.pattern : [rule.pattern]));
+  for (const pattern of patterns) {
+    for (const doc of documents) {
+      const text = doc.text.replace(/\s+/g, " ");
+      const match = pattern.exec(text);
+      if (!match) continue;
+      // Widen to the sentence the match sits in; a sentence that starts more
+      // than 200 characters back is quoted from the match, never mid-word.
+      const sentenceStart = text.lastIndexOf(". ", match.index) + 2;
+      const start = sentenceStart >= 2 && match.index - sentenceStart <= 200 ? sentenceStart : match.index;
+      // To the end of the sentence when it closes soon; a print that runs on
+      // without a full stop (a report's next heading) is cut at the match.
+      const matchEnd = match.index + match[0].length;
+      const endDot = text.indexOf(". ", matchEnd);
+      const end = endDot >= 0 && endDot - matchEnd <= 80 ? endDot + 1 : matchEnd;
+      let quote = text.slice(start, end).trim();
+      if (quote.length > 360) quote = `${quote.slice(0, 357).trim()}...`;
+      return { document: doc.name, quote };
+    }
+  }
+  return null;
+}
+
+/** The part a line names is a body panel, by its last name word. */
+export function isPanelDescription(desc: string): boolean {
+  return isPanel({ line: null, oper: null, desc, hours: 0, paintHours: 0, price: 0 });
+}
+
+/** Two descriptions name the same part on the same side (see sharesPanel). */
+export function samePart(aDesc: string, bDesc: string): boolean {
+  const line = (desc: string): RationaleLine => ({ line: null, oper: null, desc, hours: 0, paintHours: 0, price: 0 });
+  return sharesPanel(line(aDesc), line(bDesc));
+}
+
+function explainFromSheets(ctx: RationaleContext): LaborRationale | null {
   if (!ctx.higher.length) return null;
   const v = voiceFor(ctx.voice);
   for (const rule of RULES) {
@@ -1103,4 +1215,4 @@ export function explainLaborDifference(ctx: RationaleContext): LaborRationale | 
 }
 
 /** Exported for tests. */
-export const __test = { perPanelHours, markupOf, repairAbove, sharesPanel, partName };
+export const __test = { perPanelHours, markupOf, repairAbove, sharesPanel, partName, findCaseRequirement };

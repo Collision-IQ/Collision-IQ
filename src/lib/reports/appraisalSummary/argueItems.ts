@@ -6,7 +6,9 @@
  *   Strong      — the carrier's own document supports our side: an exclusion
  *                 note on its line, a part it pays with no labor to install it,
  *                 or a parent part it pays whose child it left off (wheels
- *                 paid, tires not).
+ *                 paid, tires not); or its own line triggers a requirement an
+ *                 uploaded OEM document states (their door-glass R&I and the
+ *                 maker's "must be initialized", RO 22319).
  *   Needs proof — an operation with no counterpart, or fewer hours (or a
  *                 lower price) on the paired line; it needs a P-page, an
  *                 invoice or an OEM procedure before it is argued.
@@ -26,7 +28,7 @@ import { shopLineRate, shopRateFor } from "./gapLedger";
 import type { Flag } from "./integrityChecks";
 import type { GroupDelta } from "./operationEquivalence";
 import { round2, type Estimate, type EstimateLine } from "./types";
-import { explainLaborDifference, type LaborRationale, type RationaleLine } from "../laborRationale";
+import { explainLaborDifference, type CaseDocument, type LaborRationale, type RationaleLine } from "../laborRationale";
 
 export type Strength = "Strong" | "Needs proof" | "Weak";
 
@@ -151,6 +153,8 @@ export function argueItems(params: {
   pairs: MatcherPair[];
   /** Some of the carrier's printed dollars sit on lines whose price was not read. */
   carrierLinesIncomplete?: boolean;
+  /** The case file's non-estimate documents (ADAS report, OEM procedures), for quoted requirements. */
+  caseDocuments?: CaseDocument[];
 }): ArgueItem[] {
   const { shop, carrier, groups, usedShop, flags, pairs } = params;
   // Part of their sheet unread — a price cell not read, or a whole row not
@@ -337,7 +341,16 @@ export function argueItems(params: {
     });
   }
 
-  attachRationales(items, shop, carrier, shopLine, carrierLine, groups);
+  attachRationales(items, shop, carrier, shopLine, carrierLine, groups, params.caseDocuments);
+  // Their own line triggers the requirement and an uploaded OEM document
+  // states it: the proof is already on the two documents and in the file.
+  for (const item of items) {
+    const r = item.rationale;
+    if (item.strength !== "Needs proof" || !r?.caseEvidence || !r.concededBy?.length) continue;
+    item.strength = "Strong";
+    const theirs = r.concededBy.map((n) => `L${n}`).join(", ");
+    item.detail = `${item.detail} Their ${theirs} ${r.concededBy.length === 1 ? "triggers" : "trigger"} it, and ${r.caseEvidence.document} in the case file requires it.`;
+  }
   return items.sort((a, b) => STRENGTH_ORDER[a.strength] - STRENGTH_ORDER[b.strength] || b.value - a.value);
 }
 
@@ -366,7 +379,8 @@ function attachRationales(
   carrier: Estimate,
   shopLine: Map<number, EstimateLine>,
   carrierLine: Map<number, EstimateLine>,
-  groups: GroupDelta[]
+  groups: GroupDelta[],
+  caseDocuments?: CaseDocument[]
 ): void {
   const higherSheet = shop.lines.map(rationaleLine);
   const lowerSheet = carrier.lines.map(rationaleLine);
@@ -396,6 +410,7 @@ function attachRationales(
       lowerPlatform: carrier.platform ?? null,
       vehicle: shop.vehicle || carrier.vehicle,
       voice: "dispute",
+      caseDocuments,
     });
     if (!rationale) continue;
     // A group is argued on one of its lines: say which, so the case is not

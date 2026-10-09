@@ -580,6 +580,16 @@ export async function POST(request: Request) {
         deltaDiagnostics: model.citationDensityDiagnostics,
         canonicalDeltaSet: canonicalDeltaSet ?? undefined,
         resolvedAuthorities,
+        // The case file's other documents (ADAS report, OEM procedures):
+        // a requirement they print is quoted in both reports (RO 22319).
+        caseDocuments: sourceDocuments
+          .filter(
+            (document) =>
+              document.id !== selection.selectedSourceDocumentId &&
+              !isAnnotatableEstimatePdf(document) &&
+              Boolean(document.text?.trim())
+          )
+          .map((document) => ({ name: document.filename || "Case document", text: document.text ?? "" })),
         authorityTrace: authorityTrace ?? undefined,
         vehicleMake,
         jurisdiction,
