@@ -141,6 +141,10 @@ const WMI_MAP: Record<string, { make?: string; manufacturer: string; ambiguousMa
   "3FA": { make: "Ford", manufacturer: "Ford Motor Company Mexico" },
   "3GN": { make: "Chevrolet", manufacturer: "General Motors de Mexico" },
   "3VW": { make: "Volkswagen", manufacturer: "Volkswagen de Mexico" },
+  // Toyota Tacoma, Mexico (Baja California and Guanajuato): RO 22319's
+  // 3TMCZ5AN2… decoded no make without these.
+  "3TM": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing de Baja California" },
+  "3TY": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing de Guanajuato" },
   "4S3": { make: "Subaru", manufacturer: "Subaru of America, Inc." },
   "4T1": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing Kentucky, Inc." },
   "5FN": { make: "Honda", manufacturer: "Honda Manufacturing of Alabama, LLC" },

@@ -35,6 +35,7 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { DeltaForensicReportModel, ForensicBlock, ForensicSection, ForensicTableRow } from "./deltaForensicReport";
 import { loadCollisionIqLogo, renderDeltaForensicReport } from "./deltaForensicReportRenderer";
 import { argueItems, type ArgueItem, type MatcherPair } from "./appraisalSummary/argueItems";
+import type { CaseDocument } from "./laborRationale";
 import { buildGapLedger, carrierPartlyUnread, type GapLedger } from "./appraisalSummary/gapLedger";
 import { HIGH_DOLLAR, integrityChecks, type Flag } from "./appraisalSummary/integrityChecks";
 import { classifyNonLabor } from "./appraisalSummary/nonLaborBuckets";
@@ -60,6 +61,8 @@ export interface PlainSummaryInput {
   pairs: MatcherPair[];
   /** Line prices must reproduce the printed non-labor totals. Default on; off only for partial fixtures. */
   strictLines?: boolean;
+  /** The case file's non-estimate documents (ADAS report, OEM procedures): requirements they print are quoted. */
+  caseDocuments?: CaseDocument[];
 }
 
 export interface PlainSummaryModel {
@@ -101,7 +104,16 @@ export function buildPlainSummaryModel(input: PlainSummaryInput): PlainSummaryMo
   const carrierLinesIncomplete = carrierPartlyUnread(ledger);
   const flags = integrityChecks(shop, carrier, { pairs: input.pairs, carrierLinesIncomplete, shopLineRead: ledger.shopLineRead });
   const facts = buildSummaryFacts(ledger, partType, groups, flags);
-  const items = argueItems({ shop, carrier, groups, usedShop, flags, pairs: input.pairs, carrierLinesIncomplete });
+  const items = argueItems({
+    shop,
+    carrier,
+    groups,
+    usedShop,
+    flags,
+    pairs: input.pairs,
+    carrierLinesIncomplete,
+    caseDocuments: input.caseDocuments,
+  });
   const hasDealerCalibrationSublet = [...shop.lines, ...carrier.lines].some(
     (l) => classifyNonLabor(l) === "sublet" && /calibrat|adas/i.test(l.desc)
   );
@@ -274,7 +286,7 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
   const itemBlocks: ForensicBlock[] = carrierPartlyUnread(model.ledger) ? [] : [
     {
       kind: "paragraph",
-      text: `Largest first within each strength, valued at our rates. STRONG: their own document supports us. NEEDS PROOF: attach the P-page, invoice or OEM procedure first.${
+      text: `Largest first within each strength, valued at our rates. STRONG: their own document supports us, or their own line triggers a requirement an OEM document in the case file states. NEEDS PROOF: attach the P-page, invoice or OEM procedure first.${
         model.items.some((i) => i.strength === "Weak") ? " WEAK: a retrieved P-page shows it is included in an operation they already pay." : ""
       }`,
     },
@@ -305,6 +317,22 @@ export function buildPlainSummaryDocument(model: PlainSummaryModel): DeltaForens
       kind: "note",
       text: `${rest.length} smaller ${rest.length === 1 ? "item" : "items"} worth ${money(rest.reduce((sum, i) => sum + i.value, 0))} in total are not listed; the Forensic Estimate Analysis lists every line.`,
     });
+  }
+  // The table says WHAT differs; this says WHY ours carries it and what
+  // settles it, item by item, so the estimator walks in with the argument
+  // and not only the gap (laborRationale.ts).
+  const argued = carrierPartlyUnread(model.ledger) ? [] : shown.filter((item) => item.rationale);
+  if (argued.length) {
+    itemBlocks.push({ kind: "subheading", text: "The case for each item" });
+    itemBlocks.push({
+      kind: "paragraph",
+      text: "Why ours carries each item, and what settles it. The reasoning is the repair logic and the estimating-guide or OEM premise. A requirement printed in a case document is quoted from it; a guide or OEM document not in the case file is named, not quoted, so attach the page before the argument goes to the carrier.",
+    });
+    for (const item of argued) {
+      itemBlocks.push({ kind: "subheading", text: `${item.title} (${money(item.value)})` });
+      itemBlocks.push({ kind: "paragraph", text: item.rationale!.why });
+      itemBlocks.push({ kind: "note", text: `Settled by: ${item.rationale!.settledBy}` });
+    }
   }
   section("Items worth arguing", itemBlocks);
 

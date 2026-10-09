@@ -15,6 +15,17 @@
  *   5. NEAR-VARIANT       — a minor description variant with comparable values.
  *   6. BUMPER OVERHAUL    — an O/H bumper against the same end's R&I (or
  *                           differently named O/H) bumper: one operation scope.
+ *   7. SECTION PANEL      — a repaired or blended body panel against the other
+ *                           sheet's ONLY repair (or blend) of that side in the
+ *                           same printed section: "Rpr RT Door shell" and "Rpr
+ *                           RT Outer panel", both under FRONT DOOR (RO 22319).
+ *   8. OPERATION ALIAS    — what is still unpaired on both sides and shares a
+ *                           canonical operation in data/operationAliases.json
+ *                           ("Millimeter Wave Radar static calibration" /
+ *                           "Calibrate front radar sensor", RO 22319). Until
+ *                           this pass the alias table reached only the text
+ *                           lane, and the typed engine reported the pair as
+ *                           one missing line plus one comparison-only line.
  * Comparison is typed-cell-only: price<->price, labor<->labor, paint<->paint.
  * A finding's category text derives FROM the cell type — a paint delta can never
  * be reported as "less body labor".
@@ -22,6 +33,8 @@
 import { endOfLine, isBumperScopePair } from "../appraisalSummary/bumperOverhaul";
 import { separateLocations } from "../appraisalSummary/integrityChecks";
 import { readRowPrefix } from "./estimateNormalize";
+import { isPanelDescription } from "../laborRationale";
+import { canonicalOperationKey } from "../operationAliases";
 import type { EstimateRow } from "./rowCluster";
 
 export type CellField = "price" | "labor" | "paint";
@@ -54,6 +67,9 @@ export interface Finding {
    *  operation scope, O/H on one and R&I on the other. The printed codes, in
    *  subject / competing order ("O/H", "R&I"). */
   operationScope?: { subject: string; competing: string };
+  /** Pass 7 (section panel): one panel repaired on both sheets under two
+   *  names, paired by its printed section and side. */
+  sectionPanel?: boolean;
 }
 
 /**
@@ -360,6 +376,47 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
     }
   }
 
+  // pass 7 — section panel: a repaired body panel still unpaired on both
+  // sides, against the other sheet's only repair of the same side under the
+  // same printed section. Unique on BOTH sheets, or nothing pairs: two
+  // repairs under one section are told apart by their words, not their place.
+  const sectionPanels = new Set<EstimateRow>();
+  const panelRepair = (row: EstimateRow) =>
+    (operationOf(row) === "rpr" || operationOf(row) === "blnd") &&
+    !isDeduction(row) &&
+    Boolean(row.section) &&
+    (row.labor ?? 0) + (row.paint ?? 0) >= 1 &&
+    isPanelDescription(readRowPrefix(row.rawDesc).body);
+  const sameSlot = (a: EstimateRow, b: EstimateRow) =>
+    a.section === b.section && (a.side ?? null) === (b.side ?? null) && operationOf(a) === operationOf(b);
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s)) || !panelRepair(s)) continue;
+    const ours = subject.filter((t) => !paired.has(t) && panelRepair(t) && sameSlot(t, s));
+    const theirs = competing
+      .map((row, index) => ({ row, index }))
+      .filter(({ row, index }) => usable(s, index) && panelRepair(row) && sameSlot(row, s));
+    if (ours.length !== 1 || theirs.length !== 1) continue;
+    used.add(theirs[0].index);
+    paired.set(s, theirs[0].index);
+    sectionPanels.add(s);
+  }
+
+  // pass 8 — operation alias: one canonical operation, unpaired on both
+  // sides, same side of the vehicle (or none named).
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(aggKeyOf(s)) || isDeduction(s)) continue;
+    const key = canonicalOperationKey(readRowPrefix(s.rawDesc).body);
+    if (!key) continue;
+    for (let index = 0; index < competing.length; index += 1) {
+      if (!usable(s, index) || isDeduction(competing[index])) continue;
+      if (s.side && competing[index].side && s.side !== competing[index].side) continue;
+      if (canonicalOperationKey(readRowPrefix(competing[index].rawDesc).body) !== key) continue;
+      used.add(index);
+      paired.set(s, index);
+      break;
+    }
+  }
+
   // emit — 1:1 deltas, MISSED, then aggregated qty shortfalls
   const findings: Finding[] = [];
   const aggSubjects = new Map<string, EstimateRow[]>();
@@ -409,6 +466,7 @@ export function pairAndCompare(subjectInput: EstimateRow[], competingInput: Esti
             ? "part number change"
             : `reduced ${laborCategory(s, deltas[0].field as CellField)}`,
         ...(nearVariants.has(s) ? { nearVariant: true } : {}),
+        ...(sectionPanels.has(s) ? { sectionPanel: true } : {}),
         ...(scopePairs.has(s)
           ? {
               operationScope: {

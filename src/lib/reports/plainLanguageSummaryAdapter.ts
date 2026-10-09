@@ -14,6 +14,7 @@ import type { ForensicReconciliation } from "./forensicEstimateAnalysis";
 import type { PlainSummaryInput } from "./plainLanguageSummary";
 import { estimateFromDeltaRows, pairsFromDeltas, totalsFromReconciliation } from "./appraisalSummary/estimateFromDeltaRows";
 import { lineHoursRead, unreadCarrierHours } from "./appraisalSummary/gapLedger";
+import type { CaseDocument } from "./laborRationale";
 
 export type PlainSummaryAdapterInput = {
   reconciliation: ForensicReconciliation;
@@ -37,6 +38,8 @@ export type PlainSummaryAdapterInput = {
   generatedAt: string;
   /** The run's export redaction policy; applied to document names. */
   scrub?: (value: string) => string;
+  /** The case file's non-estimate documents, passed to the summary as-is. */
+  caseDocuments?: CaseDocument[];
 };
 
 export type PlainSummaryAdapterResult = { ok: true; input: PlainSummaryInput } | { ok: false; reason: string };
@@ -122,6 +125,7 @@ export function adaptForensicToPlainSummary(input: PlainSummaryAdapterInput): Pl
       shop: redact(shop),
       carrier: redact(carrier),
       pairs: pairsFromDeltas(input.rows.deltas, input.rows.equalPairs),
+      caseDocuments: input.caseDocuments,
     },
   };
 }

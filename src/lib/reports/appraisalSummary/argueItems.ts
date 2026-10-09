@@ -6,7 +6,9 @@
  *   Strong      — the carrier's own document supports our side: an exclusion
  *                 note on its line, a part it pays with no labor to install it,
  *                 or a parent part it pays whose child it left off (wheels
- *                 paid, tires not).
+ *                 paid, tires not); or its own line triggers a requirement an
+ *                 uploaded OEM document states (their door-glass R&I and the
+ *                 maker's "must be initialized", RO 22319).
  *   Needs proof — an operation with no counterpart, or fewer hours (or a
  *                 lower price) on the paired line; it needs a P-page, an
  *                 invoice or an OEM procedure before it is argued.
@@ -26,6 +28,7 @@ import { shopLineRate, shopRateFor } from "./gapLedger";
 import type { Flag } from "./integrityChecks";
 import type { GroupDelta } from "./operationEquivalence";
 import { round2, type Estimate, type EstimateLine } from "./types";
+import { explainLaborDifference, type CaseDocument, type LaborRationale, type RationaleLine } from "../laborRationale";
 
 export type Strength = "Strong" | "Needs proof" | "Weak";
 
@@ -104,6 +107,13 @@ export interface ArgueItem {
   value: number;
   shopLines: number[];
   carrierLines: number[];
+  /**
+   * Why ours carries it: the repair logic, the estimating-guide premise and
+   * what their own sheet concedes, with the authority that settles it
+   * (laborRationale.ts). Absent on items whose detail is already the argument
+   * (their own note, a part paid with no labor) and where no rule applies.
+   */
+  rationale?: LaborRationale;
 }
 
 /** A child part the carrier leaves off while paying its parent. */
@@ -143,6 +153,8 @@ export function argueItems(params: {
   pairs: MatcherPair[];
   /** Some of the carrier's printed dollars sit on lines whose price was not read. */
   carrierLinesIncomplete?: boolean;
+  /** The case file's non-estimate documents (ADAS report, OEM procedures), for quoted requirements. */
+  caseDocuments?: CaseDocument[];
 }): ArgueItem[] {
   const { shop, carrier, groups, usedShop, flags, pairs } = params;
   // Part of their sheet unread — a price cell not read, or a whole row not
@@ -329,7 +341,84 @@ export function argueItems(params: {
     });
   }
 
+  attachRationales(items, shop, carrier, shopLine, carrierLine, groups, params.caseDocuments);
+  // Their own line triggers the requirement and an uploaded OEM document
+  // states it: the proof is already on the two documents and in the file.
+  for (const item of items) {
+    const r = item.rationale;
+    if (item.strength !== "Needs proof" || !r?.caseEvidence || !r.concededBy?.length) continue;
+    item.strength = "Strong";
+    const theirs = r.concededBy.map((n) => `L${n}`).join(", ");
+    item.detail = `${item.detail} Their ${theirs} ${r.concededBy.length === 1 ? "triggers" : "trigger"} it, and ${r.caseEvidence.document} in the case file requires it.`;
+  }
   return items.sort((a, b) => STRENGTH_ORDER[a.strength] - STRENGTH_ORDER[b.strength] || b.value - a.value);
+}
+
+const rationaleLine = (l: EstimateLine): RationaleLine => ({
+  line: l.line,
+  oper: l.oper ?? null,
+  desc: l.desc,
+  hours: l.hours ?? 0,
+  paintHours: l.paintHours ?? 0,
+  price: l.price ?? 0,
+  manual: l.manual,
+  section: l.section ?? null,
+  note: l.note ?? null,
+});
+
+/**
+ * The case for each Needs-proof item. A STRONG item already carries its
+ * argument (their own note, their part with no labor, their wheel with no
+ * tire). An equivalence group is argued on the line of ours that carries the
+ * most of its difference: the 0.5 hr ADAS research line in a group of
+ * calibrations priced alike.
+ */
+function attachRationales(
+  items: ArgueItem[],
+  shop: Estimate,
+  carrier: Estimate,
+  shopLine: Map<number, EstimateLine>,
+  carrierLine: Map<number, EstimateLine>,
+  groups: GroupDelta[],
+  caseDocuments?: CaseDocument[]
+): void {
+  const higherSheet = shop.lines.map(rationaleLine);
+  const lowerSheet = carrier.lines.map(rationaleLine);
+  for (const item of items) {
+    if (item.strength !== "Needs proof") continue;
+    const ours = item.shopLines.map((n) => shopLine.get(n)).filter((l): l is EstimateLine => Boolean(l));
+    if (!ours.length) continue;
+    const group = groups.find((g) => g.shopLines === item.shopLines);
+    const isGroup = Boolean(group);
+    // A group whose detail states its premise (O/H against R&I) already
+    // carries its argument; a group the sheets price alike at equal hours is
+    // an invoice question, not one of necessity.
+    if (group && (group.premise || group.shopHours <= group.carrierHours)) continue;
+    const theirs = item.carrierLines.length === 1 || !isGroup ? carrierLine.get(item.carrierLines[0] ?? -1) : undefined;
+    const lead = isGroup
+      ? [...ours].sort(
+          (a, b) =>
+            (b.hours ?? 0) + (b.paintHours ?? 0) - ((a.hours ?? 0) + (a.paintHours ?? 0)) || (b.price ?? 0) - (a.price ?? 0)
+        )[0]
+      : ours[0];
+    const rationale = explainLaborDifference({
+      higher: isGroup ? [rationaleLine(lead)] : ours.map(rationaleLine),
+      lower: !isGroup && theirs ? rationaleLine(theirs) : null,
+      higherSheet,
+      lowerSheet,
+      higherPlatform: shop.platform ?? null,
+      lowerPlatform: carrier.platform ?? null,
+      vehicle: shop.vehicle || carrier.vehicle,
+      voice: "dispute",
+      caseDocuments,
+    });
+    if (!rationale) continue;
+    // A group is argued on one of its lines: say which, so the case is not
+    // read as covering every line the group holds.
+    item.rationale = isGroup
+      ? { ...rationale, why: `The difference sits on our L${lead.line} (${lead.oper ? `${lead.oper} ` : ""}${lead.desc}). ${rationale.why}` }
+      : rationale;
+  }
 }
 
 function usedShopCarrierLine(groups: GroupDelta[], carrierLine: number): boolean {

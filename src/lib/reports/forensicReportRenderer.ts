@@ -378,6 +378,18 @@ const DOMAINS: Array<{ title: string; key: ForensicDomain; match: (finding: Cita
 
 /** The findings section a finding is filed under — first matching domain, as
  *  the report itself files it; "other" when none matches. */
+/**
+ * The case for the difference (laborRationale.ts): the repair logic and the
+ * estimating-guide or OEM premise behind the higher estimate's line, then what
+ * settles it. The line figures above state WHAT differs; this states WHY.
+ */
+function writeRationale(writer: Writer, finding: CitationDensityFinding): void {
+  const rationale = finding.laborRationale;
+  if (!rationale) return;
+  writer.paragraph(`Why the estimates differ: ${rationale.why}`, { size: 8.8 });
+  writer.paragraph(`What settles it: ${rationale.settledBy}`, { size: 8.8 });
+}
+
 export function forensicDomainOf(finding: CitationDensityFinding): ForensicDomain {
   for (const domain of DOMAINS) {
     if (domain.match(finding)) return domain.key;
@@ -717,6 +729,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     for (const finding of group) {
       writer.subheading(cardTitle(finding));
       if (finding.currentSupportSummary) writer.paragraph(finding.currentSupportSummary);
+      writeRationale(writer, finding);
       if (finding.missingProofSummary) {
         writer.paragraph(`What would prove it: ${finding.missingProofSummary}`, { size: 8.8 });
       }
@@ -739,6 +752,7 @@ export async function buildForensicReportPdf(input: ForensicReportInput): Promis
     for (const finding of remaining) {
       writer.subheading(cardTitle(finding));
       if (finding.currentSupportSummary) writer.paragraph(finding.currentSupportSummary);
+      writeRationale(writer, finding);
       if (finding.recommendedNextAction) {
         writer.paragraph(`Next step: ${finding.recommendedNextAction}`, { size: 8.8, color: MUTED });
       }
