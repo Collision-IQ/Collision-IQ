@@ -215,8 +215,8 @@ function buildTour() {
     },
     {
       id: "researched-toggle",
-      title: "Quick vs. Researched Answers",
-      text: "By default the bot answers quickly and conversationally. Flip on Researched (paid plans) when you want the full retrieval pipeline — OEM procedures, position statements, and web-backed citations — behind a more formal, structured answer.",
+      title: "Quick Answers vs. iQ Mode",
+      text: "By default the bot answers quickly and conversationally. Flip on iQ mode (paid plans) when you want the full retrieval pipeline — OEM procedures, position statements, and web-backed citations — behind a more formal, structured answer.",
       selectors: ['[data-tour="researched-answer-toggle"]'],
       desktopPlacement: "top",
       mobilePlacement: "top",
@@ -255,8 +255,8 @@ function buildTour() {
     },
     {
       id: "end",
-      title: "End the Session",
-      text: "Use End when the current review is complete and you are ready to start fresh.",
+      title: "Start a New Chat",
+      text: "Use New chat when the current review is complete and you are ready to start fresh.",
       selectors: ['[data-tour="end-button"]'],
       desktopPlacement: "top",
       mobilePlacement: "top",

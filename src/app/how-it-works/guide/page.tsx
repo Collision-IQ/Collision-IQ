@@ -30,7 +30,7 @@ const GUIDE_BLOCKS: GuideBlock[] = [
   {
     icon: Sparkles,
     title: "Researched Answer (paid)",
-    body: "Flip the Researched toggle in the composer to bring in verified sources — OEM procedures, position statements, and industry references — with full-depth reasoning.",
+    body: "Flip the iQ mode toggle in the composer to bring in verified sources — OEM procedures, position statements, and industry references — with full-depth reasoning.",
     tryThis: 'Toggle on, then ask "What OEM support exists for replacing this quarter panel?"',
     proTip: "The toggle is sticky — set it once and it stays until you switch back.",
     mistake: "Leaving it on for casual questions. Researched answers take longer because they actually go check sources.",
@@ -47,7 +47,7 @@ const GUIDE_BLOCKS: GuideBlock[] = [
     icon: FileText,
     title: "Full case analysis",
     body: "With Researched Answer on, uploading files runs the complete case pipeline: vision review, damage detectors, evidence indexing, and the report set in the right rail.",
-    tryThis: "Researched on → upload the estimate plus photos → “Review this estimate.”",
+    tryThis: "iQ mode on → upload the estimate plus photos → “Review this estimate.”",
     proTip: "Add scan reports, invoices, and teardown photos — every document raises the citation density of your reports.",
     mistake: "Expecting an appraisal-grade determination from a single photo. Visible damage is a starting point, not the amount of loss.",
   },

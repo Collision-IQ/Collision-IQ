@@ -22,6 +22,7 @@ import {
   StopCircle,
   FileText,
   Image as ImageIcon,
+  Download,
 } from "lucide-react";
 import { diffTypoSpans, requestTypoFix, type TypoSpan } from "@/lib/ai/typeHelper";
 import ComposerTypoUnderline from "@/components/ComposerTypoUnderline";
@@ -4804,7 +4805,7 @@ export default function ChatWidget({
                 className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h3 className="text-base font-semibold text-foreground">End this chat?</h3>
+                <h3 className="text-base font-semibold text-foreground">Start a new chat?</h3>
                 <p className="mt-1.5 text-sm text-muted-foreground">
                   This will clear the current conversation. This can&apos;t be undone.
                 </p>
@@ -4821,7 +4822,7 @@ export default function ChatWidget({
                     onClick={confirmEndChat}
                     className="min-h-9 rounded-md bg-red-500 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-red-600"
                   >
-                    End chat
+                    New chat
                   </button>
                 </div>
               </div>
@@ -5162,7 +5163,7 @@ export default function ChatWidget({
                 <div
                   className={[
                     "flex items-center",
-                    shouldCompactMobileChat ? "flex-nowrap gap-1.5 lg:flex-wrap lg:gap-2" : "flex-wrap gap-2",
+                    shouldCompactMobileChat ? "flex-nowrap gap-1.5 lg:flex-wrap lg:gap-2 xl:flex-nowrap xl:gap-1.5 2xl:gap-2" : "flex-wrap gap-2 xl:flex-nowrap xl:gap-1.5 2xl:gap-2",
                   ].join(" ")}
                 >
               <input
@@ -5244,11 +5245,11 @@ export default function ChatWidget({
                 aria-pressed={researchModeEffective}
                 title={
                   researchAllowed
-                    ? "Researched Answer: verified-source research, full effort, and full case analysis on uploads. Off = fast conversational answers."
-                    : "Researched Answers are part of the paid plans — Quick answers stay free."
+                    ? "iQ mode (Researched Answer): verified-source research, full effort, and full case analysis on uploads. Off = fast conversational answers."
+                    : "iQ mode (Researched Answers) is part of the paid plans — Quick answers stay free."
                 }
                 className={[
-                  "order-2 inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-semibold transition lg:order-none",
+                  "order-2 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-2.5 text-[11px] font-semibold transition lg:order-none",
                   shouldCompactMobileChat ? "min-h-9 py-1.5 lg:min-h-10" : "min-h-10 py-2",
                   researchModeEffective
                     ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]"
@@ -5271,7 +5272,7 @@ export default function ChatWidget({
                     ].join(" ")}
                   />
                 </span>
-                Researched
+                iQ mode
                 {!researchAllowed ? (
                   <span className="rounded bg-[var(--accent)]/20 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--accent)]">
                     Paid
@@ -5281,7 +5282,7 @@ export default function ChatWidget({
 
               <div
                 className={[
-                  "relative min-w-0 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  "relative min-w-0 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px] xl:min-w-[120px] xl:flex-[1_1_0%]",
                   shouldCompactMobileChat ? "order-2 flex-1" : "order-1 flex-[1_1_100%]",
                 ].join(" ")}
               >
@@ -5316,7 +5317,7 @@ export default function ChatWidget({
                     ? shouldCompactMobileChat
                       ? "Ask about files..."
                       : "Ask about the attached case file or add context..."
-                    : "Enter a repair analysis command or upload documentation..."
+                    : "Enter a command or upload files..."
                 }
                 className={[
                   "chat-composer-textarea w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-input/70 bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25 disabled:cursor-not-allowed disabled:opacity-50",
@@ -5348,16 +5349,19 @@ export default function ChatWidget({
               />
               </div>
 
-              <ExportRedactionToggle className="hidden lg:inline-flex" />
+              <ExportRedactionToggle className="hidden shrink-0 whitespace-nowrap lg:inline-flex" />
 
               <button
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isExportingChat}
-                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
+                className="hidden min-h-10 min-w-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-card px-2.5 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex 2xl:px-3"
+                aria-label="Download chat"
+                title="Download chat"
                 data-tour="download-button"
               >
-                {isExportingChat ? "Preparing..." : "Download Chat"}
+                <Download size={16} aria-hidden className="2xl:hidden" />
+                <span className="hidden 2xl:inline">{isExportingChat ? "Preparing..." : "Download Chat"}</span>
               </button>
 
               <button
@@ -5375,13 +5379,13 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChatRequest}
-                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 lg:inline-flex dark:text-red-300/75 dark:hover:text-red-200"
+                className="hidden min-h-10 shrink-0 items-center whitespace-nowrap rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:opacity-50 lg:inline-flex"
                 disabled={disabled || (loading && messages.length <= 1)}
-                aria-label="End chat"
-                title="End chat"
+                aria-label="New chat"
+                title="Start a new chat"
                 data-tour="end-button"
               >
-                End
+                New chat
               </button>
                 </div>
 
@@ -5401,12 +5405,12 @@ export default function ChatWidget({
                       type="button"
                       onClick={handleEndChatRequest}
                       disabled={disabled || (loading && messages.length <= 1)}
-                      className="min-h-9 rounded-md border border-red-500/30 bg-card px-3 py-1.5 text-[11px] font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300/75 dark:hover:text-red-200"
-                      aria-label="End chat"
-                      title="End chat"
+                      className="min-h-9 whitespace-nowrap rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="New chat"
+                      title="Start a new chat"
                       data-tour="end-button"
                     >
-                      End
+                      New chat
                     </button>
                   </div>
                 )}
