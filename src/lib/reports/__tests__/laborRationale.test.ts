@@ -346,3 +346,13 @@ describe("RO 22319 on its own prints: names differ, sections decide", () => {
     expect(run(109).why).toMatch(/^Check first: their L90 \(R&I RT Striker\) names the same part under a different operation/);
   });
 });
+
+describe("a blend of the same panel the matcher left unpaired", () => {
+  it("is read as their blend at half, not as a blend they left out (RO 22319 fender)", () => {
+    const shop = [L(15, "Blnd", "RT Fender w/wheel opening molding w/o snorkel intake", 0, 2.2)];
+    const carrier = [L(11, "Blnd", "RT Fender w/o wheel opening molding", 0, 1.1)];
+    const r = explainLaborDifference({ higher: shop, lower: null, higherSheet: shop, lowerSheet: carrier, voice: "dispute" })!;
+    expect(r.why).toContain("Both sheets blend this panel");
+    expect(r.why).toContain("exactly half of ours (1.1 hr against 2.2 hr)");
+  });
+});

@@ -605,7 +605,12 @@ const BLEND: Build = (ctx, v) => {
   if (op(head) !== "blnd" && !/\bblend\b/i.test(head.desc)) return null;
   const guide = guideName(ctx.higherPlatform);
   const premise = `Blend is not part of the refinish time of the panel being painted, and no guide publishes a separate blend time; a blend is valued as a share of the blended panel's full refinish time (see the refinish section of ${theGuide(ctx.higherPlatform)}).`;
-  const lo = ctx.lower;
+  // Their blend of the same panel the matcher left unpaired ("Blnd RT Fender
+  // w/wheel opening molding…" against "Blnd RT Fender w/o wheel opening
+  // molding", RO 22319) is the counterpart.
+  const lo =
+    ctx.lower ??
+    (ctx.higher.length === 1 ? ctx.lowerSheet.find((l) => op(l) === "blnd" && sharesPanel(head, l)) ?? null : null);
   // Their sheet paints the whole panel: more than a blend, so not a gap.
   const theirFull = lo
     ? null
@@ -1080,7 +1085,8 @@ export function explainLaborDifference(ctx: RationaleContext): LaborRationale | 
     // under another operation ("Algn RT Striker" against "R&I RT Striker") or
     // fewer times. Say so before the argument, so it is checked first.
     const head = ctx.higher[0];
-    const kin = ctx.lowerSheet.filter((l) => sharesPanel(head, l) && op(l) !== "blnd" && !(op(head) === "blnd" && op(l) === "blnd"));
+    // A blend's twin is already read by the blend rule itself.
+    const kin = ctx.lowerSheet.filter((l) => sharesPanel(head, l) && !(op(head) === "blnd" && op(l) === "blnd"));
     if (!kin.length) return result;
     const listed = kin
       .slice(0, 2)
