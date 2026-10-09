@@ -12,6 +12,7 @@ import { parseCarrierValuation } from "@/lib/dv/carrierValuation";
 import {
   buildTotalLossGap,
   computeTotalLossAcv,
+  renderEstimateBasedTotalLossLetterParagraphs,
   renderTotalLossLetterParagraphs,
 } from "@/lib/dv/totalLoss";
 import {
@@ -62,6 +63,14 @@ function buildOpenItems(params: {
 }
 
 function buildTotalLossOpenItems(totalLoss: DvResult["totalLoss"]): string[] {
+  if (totalLoss?.basis === "estimate") {
+    return [
+      "This appraisal was built from the repair estimate, not the carrier's Market Valuation Report. Request the carrier's CCC ONE or Mitchell valuation report and re-run with it to add the line-by-line audit of the carrier's comparables and adjustments.",
+      "Save each comparable listing to PDF now (links and inventory die fast) — they are Exhibits A1–A3 to this appraisal.",
+      "Confirm the date of loss, odometer and vehicle options against the title and the carrier's paperwork — an estimate may not carry the odometer reading or full option list the carrier valued.",
+      "Sales tax, title and registration are excluded from this demand by design — they are added by the carrier on its settlement worksheet.",
+    ];
+  }
   const items = [
     "Save each comparable listing to PDF now (links and inventory die fast) — they are Exhibits A1–A3 to this appraisal.",
     "Enclose the carrier's own Market Valuation Report as an exhibit; the audit page cites it directly.",
@@ -186,39 +195,62 @@ export async function POST(
     // ── Total-loss (value dispute) mode ──────────────────────────────────
     let totalLoss: DvResult["totalLoss"];
     if (mode === "total_loss") {
-      const [carrierAttachment] = await getUploadedAttachments(
-        [request.intake.carrierAttachmentId ?? request.attachmentId ?? ""],
-        { ownerUserId: request.userId }
-      );
-      const carrier = parseCarrierValuation(carrierAttachment?.text ?? "");
-      if (carrier.adjustedVehicleValue === null) {
-        const message =
-          "The carrier's valuation report could not be read well enough to reconcile against. Re-upload the CCC ONE or Mitchell Market Valuation Report the offer was based on.";
-        await markDvRequestFailed({ id, message });
-        return NextResponse.json({ error: message }, { status: 422 });
-      }
-
       const acv = computeTotalLossAcv({
         subjectOdometer: mileage,
         comps: compResearch.clean,
         taxRatePct: request.intake.taxRatePct,
         appraisalFee: request.intake.appraisalFee,
       });
-      const gap = buildTotalLossGap({ acv, carrier, subjectOdometer: mileage });
-      totalLoss = {
-        acv,
-        carrier,
-        gap,
-        letterParagraphs: renderTotalLossLetterParagraphs({
+      const vehicleLabel =
+        vehicle.label ?? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
+
+      if (request.extraction?.sourceDocument === "estimate") {
+        // No carrier valuation was uploaded: the ACV stands on its own. The
+        // carrier shell is the parser's empty result, so every carrier figure
+        // in the gap is null rather than read off an estimate by accident.
+        const carrier = parseCarrierValuation("");
+        totalLoss = {
+          basis: "estimate",
+          acv,
+          carrier,
+          gap: buildTotalLossGap({ acv, carrier, subjectOdometer: mileage }),
+          letterParagraphs: renderEstimateBasedTotalLossLetterParagraphs({
+            acv,
+            vehicleLabel,
+            lossDate: request.intake.lossDate,
+            carrierName: request.intake.insurer ?? request.extraction?.insurer ?? "the carrier",
+          }),
+        };
+      } else {
+        const [carrierAttachment] = await getUploadedAttachments(
+          [request.intake.carrierAttachmentId ?? request.attachmentId ?? ""],
+          { ownerUserId: request.userId }
+        );
+        const carrier = parseCarrierValuation(carrierAttachment?.text ?? "");
+        if (carrier.adjustedVehicleValue === null) {
+          const message =
+            "The carrier's valuation report could not be read well enough to reconcile against. Re-upload the CCC ONE or Mitchell Market Valuation Report the offer was based on.";
+          await markDvRequestFailed({ id, message });
+          return NextResponse.json({ error: message }, { status: 422 });
+        }
+
+        const gap = buildTotalLossGap({ acv, carrier, subjectOdometer: mileage });
+        totalLoss = {
+          basis: "carrier_valuation",
           acv,
           carrier,
           gap,
-          vehicleLabel: vehicle.label ?? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
-          lossDate: request.intake.lossDate,
-          carrierName:
-            request.intake.insurer ?? carrier.carrier ?? request.extraction?.insurer ?? "the carrier",
-        }),
-      };
+          letterParagraphs: renderTotalLossLetterParagraphs({
+            acv,
+            carrier,
+            gap,
+            vehicleLabel,
+            lossDate: request.intake.lossDate,
+            carrierName:
+              request.intake.insurer ?? carrier.carrier ?? request.extraction?.insurer ?? "the carrier",
+          }),
+        };
+      }
     }
 
     const result: DvResult = {

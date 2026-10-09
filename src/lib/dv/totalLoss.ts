@@ -313,3 +313,38 @@ export function renderTotalLossLetterParagraphs(params: {
 
   return paragraphs;
 }
+
+/**
+ * The value-dispute letter when the owner supplied a repair estimate instead
+ * of the carrier's Market Valuation Report. There is no carrier figure to
+ * rebut, so the letter states that plainly, establishes the ACV from the
+ * market, and asks for the carrier's valuation report. It never invents the
+ * carrier's number or its method.
+ */
+export function renderEstimateBasedTotalLossLetterParagraphs(params: {
+  acv: TotalLossAcv;
+  vehicleLabel: string;
+  lossDate: string;
+  carrierName: string;
+  perMileRate?: number;
+}): string[] {
+  const { acv } = params;
+  const rate = params.perMileRate ?? PER_MILE_RATE;
+  return [
+    `My ${params.vehicleLabel} was declared a total loss following the ${params.lossDate} collision. ` +
+      `The enclosed independent appraisal places the vehicle's pre-loss actual cash value at ` +
+      `${usd(acv.preTaxAcv)} before tax. It was prepared from the repair estimate and the current retail ` +
+      `market; the valuation report ${params.carrierName} relied on was not part of this appraisal, so this ` +
+      `letter establishes the value independently rather than answering that report line by line.`,
+    `The appraisal uses ${acv.adjustments.length} retail listings of the same year, model and trim, each ` +
+      `saved on the date it was pulled, mileage-adjusted to the loss vehicle at $${rate.toFixed(2)} per mile ` +
+      `and averaged: ${usd(acv.preTaxAcv)} before tax. No condition premium is claimed.`,
+    `Please provide a complete copy of the valuation report your settlement figure is based on, including ` +
+      `its comparable vehicles and every adjustment applied to them.`,
+    `I ask for a settlement based on the appraised pre-tax value of ${usd(acv.preTaxAcv)} plus the ` +
+      `${usd(acv.appraisalFee)} appraisal fee — ${usd(acv.demand)} — with sales tax, title and registration ` +
+      `added per your settlement worksheet. Please remit, or respond with the specific figure you contend is ` +
+      `wrong and the basis for it, within 15 days of receipt. Absent agreement, I will invoke the appraisal ` +
+      `clause and this report will serve as my appraiser's submission.`,
+  ];
+}

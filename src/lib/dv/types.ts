@@ -63,7 +63,14 @@ export type DvExtraction = {
   state?: string;
   severity: DvSeveritySignals;
   attachmentFilename?: string;
+  /** Total-loss mode: which document the appraisal is built from. The
+   *  carrier's Market Valuation Report is preferred (it allows the
+   *  line-by-line audit); a repair estimate still yields an independent ACV.
+   *  Absent on older requests → the carrier valuation report. */
+  sourceDocument?: DvTotalLossBasis;
 };
+
+export type DvTotalLossBasis = "carrier_valuation" | "estimate";
 
 export type DvClaimPosture = "third_party" | "first_party" | "unsure";
 
@@ -214,6 +221,10 @@ export type DvCalculation = {
 /** Total-loss mode payload: our appraisal, the parsed carrier valuation, the
  *  gap analysis, and the letter body. Absent in diminished-value mode. */
 export type DvTotalLossResult = {
+  /** "estimate" = no carrier valuation was provided: the ACV stands alone,
+   *  `carrier` is an empty shell and `gap` carries no carrier figures.
+   *  Absent on older results → built against the carrier's valuation. */
+  basis?: DvTotalLossBasis;
   acv: import("./totalLoss").TotalLossAcv;
   carrier: import("./carrierValuation").CarrierValuation;
   gap: import("./totalLoss").TotalLossGap;
