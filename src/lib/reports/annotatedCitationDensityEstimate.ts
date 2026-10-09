@@ -4785,7 +4785,7 @@ export function buildRequiredEstimatorDeltaFindings(
       // wording such as "w/o Performance" makes many of them wrong), and not
       // the target/source note, whose net total differs from the
       // reconciliation table's grand total.
-      checkNotes: (deltaMatch?.contradictionNotes ?? []).filter(
+      checkNotes: [...(deltaMatch?.truncationNote ? [deltaMatch.truncationNote] : []), ...(deltaMatch?.contradictionNotes ?? [])].filter(
         (note) =>
           !/closely resembles/i.test(note) &&
           !/^Target \(annotated document\)/.test(note) &&
@@ -5166,6 +5166,8 @@ export function describeLineItemDelta(delta: EstimateLineItemDelta): {
 
 type StructuredLineItemDeltaMatch = {
   orderedDeltas: EstimateLineItemDelta[];
+  /** Set by the finding emitter when the itemized list was capped: printed in the forensic report's limitations. */
+  truncationNote?: string;
   anchorById: Map<string, EstimateRowAnchor>;
   primaryAnchors: EstimateRowAnchor[];
   comparisonName: string;
@@ -6197,11 +6199,13 @@ function emitStructuredLineItemDeltaFindings(
   // A capped list reads as "this is everything". Say what was left out, on the
   // last finding that made the cut, so the reader knows to ask for the rest.
   if (deltasTruncated > 0 && findings.length > 0) {
+    const note = `${deltasTruncated} further line-item difference${deltasTruncated === 1 ? "" : "s"} were detected beyond this pack's per-report limit of ${MAX_DELTA_FINDINGS} and are not itemized here. They are the lowest-ranked by dollar and scope impact; request the full list if the itemized total must reconcile.`;
     const last = findings[findings.length - 1];
-    last.limitations = [
-      ...(last.limitations ?? []),
-      `${deltasTruncated} further line-item difference${deltasTruncated === 1 ? "" : "s"} were detected beyond this pack's per-report limit of ${MAX_DELTA_FINDINGS} and are not itemized here. They are the lowest-ranked by dollar and scope impact; request the full list if the itemized total must reconcile.`,
-    ].slice(0, 12);
+    last.limitations = [...(last.limitations ?? []), note].slice(0, 12);
+    // A finding's own limitations are not printed in the Forensic Estimate
+    // Analysis: the note rides to the report's Limitations, or the cap is
+    // silent there (RO 22319 review: 31 differences dropped unannounced).
+    deltaMatch.truncationNote = note;
   }
 
   // P0-1: a withdrawn contradiction must be VISIBLE. Silently dropping both

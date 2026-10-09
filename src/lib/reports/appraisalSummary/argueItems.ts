@@ -346,7 +346,8 @@ export function argueItems(params: {
   // states it: the proof is already on the two documents and in the file.
   for (const item of items) {
     const r = item.rationale;
-    if (item.strength !== "Needs proof" || !r?.caseEvidence || !r.concededBy?.length) continue;
+    // Only an operation they do NOT pay: a paired line is a billing difference.
+    if (item.strength !== "Needs proof" || item.carrierLines.length > 0 || !r?.caseEvidence || !r.concededBy?.length) continue;
     item.strength = "Strong";
     const theirs = r.concededBy.map((n) => `L${n}`).join(", ");
     item.detail = `${item.detail} Their ${theirs} ${r.concededBy.length === 1 ? "triggers" : "trigger"} it, and ${r.caseEvidence.document} in the case file requires it.`;

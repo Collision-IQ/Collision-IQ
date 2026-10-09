@@ -588,9 +588,31 @@ const CALIBRATION: Build = (ctx, v) => {
 /** Work that unplugs or removes the window motor: the door itself, its glass, regulator, motor or trim panel. */
 const WINDOW_TRIGGER = /\bdoor\s+(assy|assembly|glass|trim|panel)\b|\b(window\s+)?(regulator|motor)\b|\brun\s+channel\b|\bglass\s+run\b|\br&i\s+door\b|\bdoor\s*$/i;
 
+/** A line that IS a window initialization, however it is worded ("Power Window Reset", RO 22319 SOR L139). */
+const WINDOW_INIT_LINE = /\bwindow\b.*\b(reset|initiali[sz]\w*|relearn)\b|\b(reset|initiali[sz]\w*|relearn)\b.*\bwindow\b/i;
+
 const INITIALIZATION: Build = (ctx, v) => {
   const head = ctx.higher[0];
   if (!RE.windowInit.test(head.desc) && !(RE.initialize.test(head.desc) && !RE.calibrate.test(head.desc))) return null;
+  // They pay it too, under their own wording or method: the requirement is
+  // agreed and the difference is how it is billed. RO 22319 shipped this as
+  // STRONG "no counterpart" while their L139 paid "Rpr Power Window Reset"
+  // at 0.3 hr in-house against our $90.45 sublet.
+  const theirs = ctx.lower && WINDOW_INIT_LINE.test(ctx.lower.desc) ? ctx.lower : ctx.lowerSheet.find((l) => WINDOW_INIT_LINE.test(l.desc));
+  if (theirs && WINDOW_INIT_LINE.test(head.desc)) {
+    const how = (l: RationaleLine) =>
+      l.price > 0 && totalHours(l) === 0
+        ? `a ${money(l.price)} sublet`
+        : l.price > 0
+          ? `${money(l.price)} plus ${hr(totalHours(l))}`
+          : `${hr(totalHours(l))} of in-house labor`;
+    return {
+      key: "initialization",
+      why: `Both sheets pay the window initialization, so the requirement is not in dispute. ${v.Hi} bills it as ${how(head)}; ${v.loRef([theirs.line])} ("${withoutMarkup(theirs.desc)}") bills it as ${how(theirs)}. The difference is who performs it and at what charge.`,
+      settledBy:
+        "The vendor's invoice if it is sublet, or the time the procedure takes in-house; the initialization procedure in the OEM repair manual says what is performed (each window, by its own switch).",
+    };
+  }
   const triggers = ctx.higherSheet.filter(
     (l) => RE.battery.test(l.desc) || (WINDOW_TRIGGER.test(l.desc) && ["r&i", "repl"].includes(op(l)))
   );
