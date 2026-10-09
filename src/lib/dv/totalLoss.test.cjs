@@ -35,6 +35,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 const {
   buildTotalLossGap,
   computeTotalLossAcv,
+  renderEstimateBasedTotalLossLetterParagraphs,
   renderTotalLossLetterParagraphs,
 } = require("./totalLoss.ts");
 const { parseCarrierValuation, compsReadjustedAtRate } = require("./carrierValuation.ts");
@@ -196,6 +197,53 @@ run("CCC parser reads a real Market Valuation Report", () => {
   assert.equal(cv.comps[0].adjustedValue, 78827);
   assert.equal(cv.comps[0].odometer, 6677);
   assert.equal(cv.comps[0].vin.length, 17);
+});
+
+// Total-loss mode accepts a repair estimate when the carrier's valuation
+// report is not available. The upload route routes a file to the estimate
+// basis when the parser finds no Adjusted Vehicle Value; a CCC ONE estimate
+// must land there (it says "CCC ONE" but is not a valuation report).
+run("a CCC ONE repair estimate does not parse as a carrier valuation", () => {
+  const fixture = path.join(__dirname, "../../../tests/fixtures/ccc-1259209948-text.txt");
+  if (!fs.existsSync(fixture)) {
+    console.log("  (fixture absent — skipped)");
+    return;
+  }
+  const cv = parseCarrierValuation(fs.readFileSync(fixture, "utf8"));
+  assert.equal(cv.adjustedVehicleValue, null);
+});
+
+run("estimate-based total loss: ACV stands alone, no carrier figure invented", () => {
+  const acv = computeTotalLossAcv({
+    subjectOdometer: 50000,
+    comps: [comp("A", 20000, 60000), comp("B", 21000, 40000), comp("C", 22000, 50000)],
+    taxRatePct: 6,
+    appraisalFee: 350,
+  });
+  // 20000+700, 21000-700, 22000 → avg 21000
+  assert.equal(acv.preTaxAcv, 21000);
+  assert.equal(acv.demand, 21350);
+
+  const blank = parseCarrierValuation("");
+  const gap = buildTotalLossGap({ acv, carrier: blank, subjectOdometer: 50000 });
+  assert.equal(gap.shortfall, null);
+  assert.equal(gap.shortfallPct, null);
+  assert.ok(gap.rows.every((row) => row.carrier === null && row.difference === null));
+  assert.equal(gap.carrierReadjusted.length, 0);
+
+  const paragraphs = renderEstimateBasedTotalLossLetterParagraphs({
+    acv,
+    vehicleLabel: "2020 Honda Accord EX",
+    lossDate: "2026-09-01",
+    carrierName: "Example Mutual",
+  });
+  const body = paragraphs.join("\n");
+  assert.ok(body.includes("$21,000.00"), "appraised ACV stated");
+  assert.ok(body.includes("$21,350.00"), "demand stated");
+  assert.ok(!body.includes("$0.00"), "no zero carrier value");
+  assert.ok(!/rejected|shortfall|above the offer/i.test(body), "no rebuttal of a figure we never saw");
+  assert.ok(/valuation report/i.test(body), "asks for the carrier's valuation report");
+  assert.ok(/\bI ask for\b/.test(body), "owner voice");
 });
 
 if (failures > 0) {

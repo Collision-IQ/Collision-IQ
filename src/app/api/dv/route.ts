@@ -54,25 +54,29 @@ export async function POST(req: Request) {
     );
   }
 
-  if (mode === "total_loss") {
-    // The disputed document IS the upload. Refuse anything that is not a
-    // carrier valuation report rather than silently appraising an estimate.
-    const carrier = parseCarrierValuation(attachment.text);
-    if (carrier.vendor === "unknown" || carrier.adjustedVehicleValue === null) {
-      return NextResponse.json(
-        {
-          error:
-            "This does not read as a carrier Market Valuation Report. For a total-loss dispute, upload the CCC ONE or Mitchell valuation report the carrier based its offer on.",
-        },
-        { status: 422 }
-      );
-    }
-  }
+  // Total-loss mode prefers the carrier's Market Valuation Report (it is the
+  // document being disputed, and it allows the line-by-line audit). A repair
+  // estimate is still accepted: the ACV is built from live comps either way,
+  // and the client warns the owner that the carrier audit will be absent.
+  const carrierReadable =
+    mode === "total_loss" &&
+    (() => {
+      const carrier = parseCarrierValuation(attachment.text);
+      return carrier.vendor !== "unknown" && carrier.adjustedVehicleValue !== null;
+    })();
 
   const extraction =
-    mode === "total_loss"
-      ? buildTotalLossExtraction({ text: attachment.text, filename: attachment.filename })
-      : buildDvExtraction({ text: attachment.text, filename: attachment.filename });
+    mode !== "total_loss"
+      ? buildDvExtraction({ text: attachment.text, filename: attachment.filename })
+      : carrierReadable
+        ? {
+            ...buildTotalLossExtraction({ text: attachment.text, filename: attachment.filename }),
+            sourceDocument: "carrier_valuation" as const,
+          }
+        : {
+            ...buildDvExtraction({ text: attachment.text, filename: attachment.filename }),
+            sourceDocument: "estimate" as const,
+          };
 
   const request = await createDvRequest({
     userId: viewer.user.id,

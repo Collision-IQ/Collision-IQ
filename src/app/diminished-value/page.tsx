@@ -155,6 +155,34 @@ function EligibilityNotice({ mode }: { mode: DvReportMode }) {
   );
 }
 
+/** Total-loss mode: the carrier's valuation report is the preferred upload,
+ *  but an estimate still produces an independent ACV. Shown on the upload
+ *  step, and again at intake when the file read as an estimate. */
+function TotalLossSourceNotice({ readAsEstimate }: { readAsEstimate: boolean }) {
+  return (
+    <div className="mb-5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-500">
+      {readAsEstimate ? (
+        <>
+          <span className="font-semibold">
+            This file reads as a repair estimate, not a carrier valuation report.
+          </span>{" "}
+          You can continue — an independent Actual Cash Value is built from live dealer comparables. Without the
+          carrier&apos;s CCC ONE or Mitchell Market Valuation Report, the report cannot audit the carrier&apos;s
+          value, comparables and adjustments line by line or state the shortfall. If you have the valuation
+          report, start a new report and upload it instead.
+        </>
+      ) : (
+        <>
+          <span className="font-semibold">A carrier valuation report is recommended over an estimate.</span>{" "}
+          The CCC ONE or Mitchell Market Valuation Report lets us audit the carrier&apos;s value line by line and
+          show the shortfall. If you only have the repair estimate, upload it — an Actual Cash Value can still be
+          generated from live comparables, without the carrier audit.
+        </>
+      )}
+    </div>
+  );
+}
+
 const STEPS: Array<{ key: WizardStep; label: string }> = [
   { key: "consult-choice", label: "Choose your approach" },
   { key: "upload", label: "Upload estimate" },
@@ -389,7 +417,7 @@ function DiminishedValueFlow() {
       }
 
       setBusyLabel(
-        mode === "total_loss" ? "Reading the carrier's valuation…" : "Reading the estimate…"
+        mode === "total_loss" ? "Reading the uploaded document…" : "Reading the estimate…"
       );
       const dvRes = await fetch("/api/dv", {
         method: "POST",
@@ -689,7 +717,9 @@ function DiminishedValueFlow() {
           <div className="mb-4 flex items-center gap-3">
             <Upload className="h-5 w-5 text-[var(--accent)]" />
             <h2 className="text-lg font-semibold">
-              {mode === "total_loss" ? "Upload the carrier's valuation report" : "Upload your repair estimate"}
+              {mode === "total_loss"
+                ? "Upload the carrier's valuation report (or your estimate)"
+                : "Upload your repair estimate"}
             </h2>
           </div>
 
@@ -731,9 +761,12 @@ function DiminishedValueFlow() {
               ? "Upload the Market Valuation Report the carrier based its total-loss offer on (CCC ONE or Mitchell). We read its comparables, adjustments and value, then build an independent appraisal against it — including re-running the carrier's own comps at the industry mileage rate."
               : "Upload the estimate PDF from your repair shop or insurer (CCC ONE and similar formats supported). The vehicle, VIN, mileage, insurer, claim number, and repair total are read automatically — you confirm everything before anything is charged."}
           </p>
+          {mode === "total_loss" && <TotalLossSourceNotice readAsEstimate={false} />}
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border px-6 py-12 text-center transition hover:border-[var(--accent)]">
             <FileText className="mb-3 h-8 w-8 text-muted-foreground" />
-            <span className="text-sm font-medium">Choose the estimate PDF</span>
+            <span className="text-sm font-medium">
+              {mode === "total_loss" ? "Choose the valuation report or estimate PDF" : "Choose the estimate PDF"}
+            </span>
             <span className="mt-1 text-xs text-muted-foreground">PDF preferred — photos of paper estimates often cannot be read reliably</span>
             <input
               type="file"
@@ -756,6 +789,9 @@ function DiminishedValueFlow() {
               ? `${extraction.vehicle.label}${extraction.vehicle.vin ? ` · VIN ${extraction.vehicle.vin}` : ""}`
               : "Vehicle details could not be fully read — fill them in below."}
           </p>
+          {mode === "total_loss" && extraction?.sourceDocument === "estimate" && (
+            <TotalLossSourceNotice readAsEstimate />
+          )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="text-sm">
               <span className="mb-1 block font-medium">Date of loss *</span>
@@ -1023,7 +1059,36 @@ function DiminishedValueFlow() {
                   : "Your diminished value package is ready"}
               </h2>
             </div>
-            {result.totalLoss ? (
+            {result.totalLoss?.basis === "estimate" ? (
+              <>
+                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Appraised ACV (pre-tax)</dt>
+                    <dd className="text-lg font-semibold">{usd(result.totalLoss.acv.preTaxAcv)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      ACV with {result.totalLoss.acv.taxRatePct}% tax
+                    </dt>
+                    <dd className="text-lg font-semibold">{usd(result.totalLoss.acv.acvWithTax)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Comparables used</dt>
+                    <dd className="text-lg font-semibold">{result.totalLoss.acv.adjustments.length}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Total demand</dt>
+                    <dd className="text-lg font-semibold text-[var(--accent)]">
+                      {usd(result.totalLoss.acv.demand)}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-4 text-xs text-muted-foreground">
+                  Built from your repair estimate. The carrier&apos;s valuation report was not provided, so its value
+                  and the shortfall are not stated — upload it on a new report to add the line-by-line audit.
+                </p>
+              </>
+            ) : result.totalLoss ? (
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <div>
                   <dt className="text-xs text-muted-foreground">Carrier&apos;s value (pre-tax)</dt>
