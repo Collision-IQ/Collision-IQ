@@ -191,9 +191,12 @@ describe("rate differences and credits are surfaced, not buried", () => {
     expect(rateDifferences.join(" ")).toMatch(
       /Mechanical Labor: \$175\.00\/hr on the higher estimate against \$110\.00\/hr on the comparison/
     );
-    // money() prints the magnitude; the word "reduction" carries the direction.
-    expect(rateDifferences.join(" ")).toMatch(/\$65\.00\/hr reduction/);
-    expect(rateDifferences.join(" ")).toMatch(/Body Labor.*\$5\.00\/hr increase/);
+    // The report is shared with the insurer: a rate gap is a "difference",
+    // never a "reduction" or "increase" one side applied. Both rates are
+    // printed, so the direction is still on the page.
+    expect(rateDifferences.join(" ")).toMatch(/\$65\.00\/hr difference/);
+    expect(rateDifferences.join(" ")).toMatch(/Body Labor.*\$5\.00\/hr difference/);
+    expect(rateDifferences.join(" ")).not.toMatch(/\b(reduction|increase)\b/);
   });
 
   it("states where the COMPARISON allows more — a report that only ever finds one way is advocacy", () => {

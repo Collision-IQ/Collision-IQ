@@ -61,7 +61,7 @@ describe("findings are filed under the section that names their component", () =
 });
 
 describe("the forensic report states only what its documents show", () => {
-  it("does not assert an appraisal clause, and Appendix A shows hours beside a price that excludes labor", async () => {
+  it("does not raise an appraisal clause or dispute language, and Appendix A shows hours beside a price that excludes labor", async () => {
     const result = await buildForensicReportPdf({
       reconciliation: buildForensicReconciliation({
         higherTotals: {
@@ -86,8 +86,12 @@ describe("the forensic report states only what its documents show", () => {
       generatedAt: "2026-10-04T00:00:00.000Z",
     });
     const text = await pdfText(result.bytes);
-    expect(text).not.toMatch(/your policy contains an appraisal clause/i);
-    expect(text).toMatch(/check whether your policy has an appraisal clause/i);
+    // The forensic report is shared with the insurer (2026-10-09): it neither
+    // asserts nor suggests an appraisal clause; the dispute report carries that.
+    expect(text).not.toMatch(/appraisal clause/i);
+    expect(text).not.toMatch(/\b(disputed?|denied|Neither carrier)\b/i);
+    expect(text).toMatch(/Notes for the vehicle owner/);
+    expect(text).toMatch(/Path to reconciliation/);
     expect(text).toMatch(/Price \(no labor\)/);
     expect(text).toMatch(/does not include labor/);
     expect(text).toMatch(/40 Repl LT Hub assy 150mm 1\.6 M — \$330\.00/);
